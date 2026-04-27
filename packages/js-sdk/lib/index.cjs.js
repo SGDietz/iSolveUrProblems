@@ -978,6 +978,7 @@ class LiveAvatarSession extends events.EventEmitter {
         // AVATAR_SPEAK_AUDIO is a LITE/custom-audio command and only travels over WebSocket.
         if (commandEvent.event_type === exports.CommandEventsEnum.AVATAR_SPEAK_AUDIO) {
             if (hasOpenWebSocket) {
+                console.info("[liveavatar-sdk] route=audio-ws", commandEvent.event_type);
                 this.sendCommandEventToWebSocket(commandEvent);
             }
             else {
@@ -990,6 +991,7 @@ class LiveAvatarSession extends events.EventEmitter {
         // Routing them through WebSocket silently drops them because the WS handler
         // does not implement those event types.
         if (hasLiveKitRoom) {
+            console.info("[liveavatar-sdk] route=full-livekit", commandEvent.event_type, { hasOpenWebSocket, topic: LIVEKIT_COMMAND_CHANNEL_TOPIC });
             const data = new TextEncoder().encode(JSON.stringify(commandEvent));
             this.room.localParticipant.publishData(data, {
                 reliable: true,
@@ -999,10 +1001,11 @@ class LiveAvatarSession extends events.EventEmitter {
         }
         // LITE-only fallback: no LiveKit room, fall back to WebSocket if it can carry the event.
         if (hasOpenWebSocket) {
+            console.info("[liveavatar-sdk] route=lite-fallback-ws", commandEvent.event_type);
             this.sendCommandEventToWebSocket(commandEvent);
             return;
         }
-        console.warn("No active connection to send command event");
+        console.warn("[liveavatar-sdk] route=NO-CONNECTION", commandEvent.event_type);
     }
     generateEventId() {
         // Use native browser crypto API
