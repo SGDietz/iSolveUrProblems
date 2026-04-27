@@ -466,21 +466,43 @@ export class LiveAvatarSession extends (EventEmitter as new () => TypedEmitter<
   }
 
   private sendCommandEvent(commandEvent: CommandEvent): void {
-    // Use WebSocket if available, otherwise use LiveKit data channel
-    if (
-      this._sessionEventSocket &&
-      this._sessionEventSocket.readyState === WebSocket.OPEN
-    ) {
-      this.sendCommandEventToWebSocket(commandEvent);
-    } else if (this.room.state === "connected") {
+    const hasOpenWebSocket =
+      this._sessionEventSocket !== null &&
+      this._sessionEventSocket.readyState === WebSocket.OPEN;
+    const hasLiveKitRoom = this.room.state === "connected";
+
+    // AVATAR_SPEAK_AUDIO is a LITE/custom-audio command and only travels over WebSocket.
+    if (commandEvent.event_type === CommandEventsEnum.AVATAR_SPEAK_AUDIO) {
+      if (hasOpenWebSocket) {
+        this.sendCommandEventToWebSocket(commandEvent);
+      } else {
+        console.warn(
+          "AVATAR_SPEAK_AUDIO requires an open WebSocket (LITE/custom-audio mode)",
+        );
+      }
+      return;
+    }
+
+    // FULL-mode commands (speak_text, speak_response, interrupt, listening lifecycle,
+    // session.update/stop) must go on the LiveKit data channel topic `agent-control`.
+    // Routing them through WebSocket silently drops them because the WS handler
+    // does not implement those event types.
+    if (hasLiveKitRoom) {
       const data = new TextEncoder().encode(JSON.stringify(commandEvent));
       this.room.localParticipant.publishData(data, {
         reliable: true,
         topic: LIVEKIT_COMMAND_CHANNEL_TOPIC,
       });
-    } else {
-      console.warn("No active connection to send command event");
+      return;
     }
+
+    // LITE-only fallback: no LiveKit room, fall back to WebSocket if it can carry the event.
+    if (hasOpenWebSocket) {
+      this.sendCommandEventToWebSocket(commandEvent);
+      return;
+    }
+
+    console.warn("No active connection to send command event");
   }
 
   private generateEventId(): string {
