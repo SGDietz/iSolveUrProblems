@@ -489,15 +489,22 @@ export class LiveAvatarSession extends (EventEmitter as new () => TypedEmitter<
 
     // FULL-mode commands (speak_text, speak_response, interrupt, listening lifecycle,
     // session.update/stop) must go on the LiveKit data channel topic `agent-control`.
-    // Routing them through WebSocket silently drops them because the WS handler
-    // does not implement those event types.
+    // Per LiveAvatar docs, the server requires event_id, session_id, and
+    // source_event_id on every command — without them the payload is silently
+    // rejected and the avatar never speaks.
     if (hasLiveKitRoom) {
+      const enriched = {
+        ...commandEvent,
+        event_id: this.generateEventId(),
+        session_id: this._sessionInfo?.session_id ?? null,
+        source_event_id: null,
+      };
       console.info(
         "[liveavatar-sdk] route=full-livekit",
         commandEvent.event_type,
         { hasOpenWebSocket, topic: LIVEKIT_COMMAND_CHANNEL_TOPIC },
       );
-      const data = new TextEncoder().encode(JSON.stringify(commandEvent));
+      const data = new TextEncoder().encode(JSON.stringify(enriched));
       this.room.localParticipant.publishData(data, {
         reliable: true,
         topic: LIVEKIT_COMMAND_CHANNEL_TOPIC,

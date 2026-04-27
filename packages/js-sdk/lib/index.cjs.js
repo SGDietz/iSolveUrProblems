@@ -972,6 +972,7 @@ class LiveAvatarSession extends events.EventEmitter {
         this.postStop(exports.SessionDisconnectReason.UNKNOWN_REASON);
     }
     sendCommandEvent(commandEvent) {
+        var _a, _b;
         const hasOpenWebSocket = this._sessionEventSocket !== null &&
             this._sessionEventSocket.readyState === WebSocket.OPEN;
         const hasLiveKitRoom = this.room.state === "connected";
@@ -988,11 +989,13 @@ class LiveAvatarSession extends events.EventEmitter {
         }
         // FULL-mode commands (speak_text, speak_response, interrupt, listening lifecycle,
         // session.update/stop) must go on the LiveKit data channel topic `agent-control`.
-        // Routing them through WebSocket silently drops them because the WS handler
-        // does not implement those event types.
+        // Per LiveAvatar docs, the server requires event_id, session_id, and
+        // source_event_id on every command — without them the payload is silently
+        // rejected and the avatar never speaks.
         if (hasLiveKitRoom) {
+            const enriched = Object.assign(Object.assign({}, commandEvent), { event_id: this.generateEventId(), session_id: (_b = (_a = this._sessionInfo) === null || _a === void 0 ? void 0 : _a.session_id) !== null && _b !== void 0 ? _b : null, source_event_id: null });
             console.info("[liveavatar-sdk] route=full-livekit", commandEvent.event_type, { hasOpenWebSocket, topic: LIVEKIT_COMMAND_CHANNEL_TOPIC });
-            const data = new TextEncoder().encode(JSON.stringify(commandEvent));
+            const data = new TextEncoder().encode(JSON.stringify(enriched));
             this.room.localParticipant.publishData(data, {
                 reliable: true,
                 topic: LIVEKIT_COMMAND_CHANNEL_TOPIC,
