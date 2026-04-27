@@ -1479,12 +1479,6 @@ const LiveAvatarSessionComponent: React.FC<{
         return;
       }
 
-      // Only process in streaming mode (Go Live)
-      if (visionMode !== "streaming") {
-        console.log("Not in streaming mode, skipping transcription processing");
-        return;
-      }
-
       // Cooldown: do nothing if we just spoke a vision response (avatar still speaking)
       // Must be before interrupt() so we don't cut off our own analysis on duplicate transcriptions
       const VISION_RESPONSE_COOLDOWN_MS = 10000;
@@ -1570,6 +1564,7 @@ const LiveAvatarSessionComponent: React.FC<{
 
       // Persist transcript and drive contact info collection prompts (email/phone/name)
       const captureSessionId = dbSessionIdRef.current;
+      let captureAnswered = false;
       try {
         const captureResponse =
           captureSessionId != null
@@ -1594,6 +1589,7 @@ const LiveAvatarSessionComponent: React.FC<{
             await repeat(captureData.assistantPrompt);
             lastAvatarResponseRef.current = captureData.assistantPrompt;
             lastVisionResponseTimeRef.current = Date.now();
+            captureAnswered = true;
           }
 
           if (captureData?.shouldSkipVision) {
@@ -1612,8 +1608,37 @@ const LiveAvatarSessionComponent: React.FC<{
       // overwhelming the TALK brain. Follow-up questions about the video are now
       // handled by the normal streaming flow via processCameraQuestion below.
 
-      // Process the question using the reusable function (only in streaming mode)
-      await processCameraQuestion(userText, false);
+      if (visionMode === "streaming") {
+        // Streaming (Go Live) — visual question/answer path
+        await processCameraQuestion(userText, false);
+      } else if (!captureAnswered) {
+        // Non-streaming conversation — without this branch, user speech in normal
+        // chat mode gets transcribed but the avatar never responds (the prior
+        // implementation early-returned here). Route to /api/openai-chat-complete
+        // and have the avatar speak the response so 6 actually answers.
+        try {
+          const chatResponse = await fetch("/api/openai-chat-complete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userText }),
+          });
+          if (chatResponse.ok) {
+            const { response: spoken } = await chatResponse.json();
+            if (typeof spoken === "string" && spoken.trim()) {
+              await repeat(spoken);
+              lastAvatarResponseRef.current = spoken;
+              lastVisionResponseTimeRef.current = Date.now();
+            }
+          } else {
+            console.error(
+              "openai-chat-complete failed:",
+              await chatResponse.text(),
+            );
+          }
+        } catch (chatErr) {
+          console.error("Error calling openai-chat-complete:", chatErr);
+        }
+      }
     };
 
     console.log(
