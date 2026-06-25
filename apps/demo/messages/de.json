@@ -389,6 +389,78 @@
       }
     }
   },
+  "forContractors": {
+    "kicker": "iSolveUrProblems · Für Auftragnehmer",
+    "hero": {
+      "title": "Führe dein Geschäft mit 6 an deiner Seite.",
+      "blurb": "Gefilterte Leads, fertige Verträge, schnelle Auszahlungen. 6 erledigt den Papierkram — du machst die Arbeit."
+    },
+    "benefit": {
+      "leads": "Leads von Hausbesitzern — zahlst nur, wenn du den Job gewinnst",
+      "contracts": "Verträge in Minuten entworfen und unterschrieben",
+      "payouts": "Stripe-Auszahlungen netto, schnell auf dem Konto",
+      "recurring": "Wiederkehrende Jobs im Autopilot — wöchentliches Mähen, Dachrinnen im Herbst",
+      "crew": "Finde Subunternehmer bei Doppelbuchungen"
+    },
+    "cta": {
+      "signIn": "Anmelden oder Konto erstellen",
+      "signInBlurb": "Magic-Link-Login. Wir senden einen Einmal-Link per E-Mail — kein Passwort."
+    },
+    "already": {
+      "title": "Willkommen zurück",
+      "blurb": "Dein Auftragnehmer-Konto ist aktiv. Zurück zum Dashboard.",
+      "goCta": "Dashboard öffnen"
+    },
+    "claim": {
+      "title": "Profil beanspruchen",
+      "blurb": "Gib deine Lizenznummer ein. Wir prüfen sie bei der Behörde und verknüpfen dein Konto.",
+      "privacyFootnote": "Deine Lizenznummer wird nicht veröffentlicht. Nur für die einmalige Verifizierung + das Lizenz-Verifiziert-Abzeichen.",
+      "stateLabel": "Bundesstaat",
+      "licenseLabel": "Lizenznummer",
+      "licensePlaceholder": "z.B. 1234567",
+      "licenseHelper": "California CSLB-Nummer. Weitere Staaten in Kürze.",
+      "submitCta": "Prüfen und beanspruchen",
+      "submitting": "Prüfen…",
+      "errorGeneric": "Verifizierung fehlgeschlagen. Nummer prüfen und erneut versuchen.",
+      "pending": {
+        "title": "Fast geschafft — Prüfung ausstehend",
+        "blurb": "Profil gefunden, menschliche Bestätigung nötig. Wir melden uns innerhalb 1 Werktags.",
+        "reasonsLabel": "Signale"
+      }
+    }
+  },
+  "contractor": {
+    "dashboard": {
+      "kicker": "Auftragnehmer-Dashboard",
+      "backHome": "← Zurück zu 6",
+      "badge": {
+        "licenseVerified": "Lizenziert · {state} {license}",
+        "payoutReady": "Auszahlung bereit",
+        "payoutPending": "Auszahlung ausstehend — Stripe abschließen"
+      },
+      "onboardingBanner": {
+        "title": "Zahlungs-Setup abschließen",
+        "blurb": "Beende Stripe, bevor Hausbesitzer dich bezahlen können. Wir senden den Link."
+      },
+      "pending": {
+        "title": "Offene Einladungen",
+        "blurb": "Hausbesitzer, die dich gewählt haben — annehmen oder ablehnen",
+        "empty": "Keine offenen Einladungen."
+      },
+      "active": {
+        "title": "Aktive Jobs",
+        "blurb": "Bezahlt und anstehend",
+        "empty": "Keine aktiven Jobs."
+      },
+      "completed": {
+        "title": "Abgeschlossen",
+        "blurb": "Frühere Jobs",
+        "empty": "Noch keine abgeschlossenen Jobs."
+      },
+      "nextAt": "Nächster: {when}",
+      "esignLabel": "Vertrag"
+    }
+  },
   "errors": {
     "general": {
       "title": "Etwas ist schiefgegangen.",

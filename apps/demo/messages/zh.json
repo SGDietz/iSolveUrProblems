@@ -390,6 +390,78 @@
       }
     }
   },
+  "forContractors": {
+    "kicker": "iSolveUrProblems · 承包商专区",
+    "hero": {
+      "title": "让 6 帮你打理生意。",
+      "blurb": "精筛客户线索、合同自动起草、收款迅速。6 处理琐事，你专心干活。"
+    },
+    "benefit": {
+      "leads": "屋主线索 — 中标才付费",
+      "contracts": "合同分钟内起草、电子签署",
+      "payouts": "Stripe 扣除平台费后即时到账",
+      "recurring": "周期性工作自动运行 — 每周修剪、每秋清沟",
+      "crew": "排不开时一键找帮手"
+    },
+    "cta": {
+      "signIn": "登录或注册",
+      "signInBlurb": "魔法链接登录，无需密码。"
+    },
+    "already": {
+      "title": "欢迎回来",
+      "blurb": "你的承包商账户已激活,返回控制台。",
+      "goCta": "打开控制台"
+    },
+    "claim": {
+      "title": "认领你的店铺资料",
+      "blurb": "输入你的州执照号。我们会向发证机构核验后绑定你的账户。",
+      "privacyFootnote": "你的执照号不会公开,仅用于一次性核验和「执照已验证」徽章。",
+      "stateLabel": "州",
+      "licenseLabel": "执照号",
+      "licensePlaceholder": "如 1234567",
+      "licenseHelper": "加州 CSLB 执照号。其他州即将上线。",
+      "submitCta": "核验并认领",
+      "submitting": "核验中…",
+      "errorGeneric": "核验失败,请检查后重试。",
+      "pending": {
+        "title": "差一步 — 等待审核",
+        "blurb": "找到了你的资料,但需人工确认。1 个工作日内回复。",
+        "reasonsLabel": "信号"
+      }
+    }
+  },
+  "contractor": {
+    "dashboard": {
+      "kicker": "承包商控制台",
+      "backHome": "← 返回 6",
+      "badge": {
+        "licenseVerified": "持照 · {state} {license}",
+        "payoutReady": "可收款",
+        "payoutPending": "收款待开通 — 请完成 Stripe"
+      },
+      "onboardingBanner": {
+        "title": "完成收款设置",
+        "blurb": "请先完成 Stripe,屋主才能向你付款。我们会发链接给你。"
+      },
+      "pending": {
+        "title": "待处理邀请",
+        "blurb": "选中你的屋主 — 接受或拒绝",
+        "empty": "暂无邀请。"
+      },
+      "active": {
+        "title": "进行中工作",
+        "blurb": "已付款且即将开始",
+        "empty": "暂无进行中工作。"
+      },
+      "completed": {
+        "title": "已完成",
+        "blurb": "过往工作",
+        "empty": "暂无已完成工作。"
+      },
+      "nextAt": "下次:{when}",
+      "esignLabel": "合同"
+    }
+  },
   "errors": {
     "general": {
       "title": "出了点问题。",

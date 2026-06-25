@@ -389,6 +389,78 @@
       }
     }
   },
+  "forContractors": {
+    "kicker": "iSolveUrProblems · Para Prestadores",
+    "hero": {
+      "title": "Gerencie seu negócio com o 6 ao seu lado.",
+      "blurb": "Leads filtrados, contratos prontos e pagamentos rápidos. O 6 cuida do administrativo — você cuida do trabalho."
+    },
+    "benefit": {
+      "leads": "Leads de proprietários — paga só quando ganha o trabalho",
+      "contracts": "Contratos elaborados e assinados em minutos",
+      "payouts": "Pagamentos Stripe líquidos da taxa, rápidos",
+      "recurring": "Trabalhos recorrentes no piloto automático",
+      "crew": "Encontre subcontratados quando estiver lotado"
+    },
+    "cta": {
+      "signIn": "Entrar ou criar conta",
+      "signInBlurb": "Login por link mágico. Enviamos um link único por e-mail — sem senha."
+    },
+    "already": {
+      "title": "Bem-vindo de volta",
+      "blurb": "Sua conta de prestador está ativa. Volte ao painel.",
+      "goCta": "Abrir painel"
+    },
+    "claim": {
+      "title": "Reivindique seu perfil",
+      "blurb": "Digite seu número de licença estadual. Verificamos junto ao órgão emissor e vinculamos sua conta.",
+      "privacyFootnote": "Seu número de licença nunca é publicado. Usado só para verificação + selo Licença Verificada.",
+      "stateLabel": "Estado",
+      "licenseLabel": "Número da licença",
+      "licensePlaceholder": "ex. 1234567",
+      "licenseHelper": "CSLB Califórnia. Outros estados em breve.",
+      "submitCta": "Verificar e reivindicar",
+      "submitting": "Verificando…",
+      "errorGeneric": "Não foi possível verificar. Confira o número e tente novamente.",
+      "pending": {
+        "title": "Quase lá — revisão pendente",
+        "blurb": "Encontramos seu perfil mas precisamos de confirmação humana. Respondemos em 1 dia útil.",
+        "reasonsLabel": "Sinais"
+      }
+    }
+  },
+  "contractor": {
+    "dashboard": {
+      "kicker": "Painel do prestador",
+      "backHome": "← Voltar ao 6",
+      "badge": {
+        "licenseVerified": "Licenciado · {state} {license}",
+        "payoutReady": "Pagamentos prontos",
+        "payoutPending": "Pagamentos pendentes — finalize o Stripe"
+      },
+      "onboardingBanner": {
+        "title": "Finalize a configuração de pagamento",
+        "blurb": "Finalize o Stripe antes que os proprietários possam pagar. Enviaremos o link."
+      },
+      "pending": {
+        "title": "Convites pendentes",
+        "blurb": "Proprietários que escolheram você — aceitar ou recusar",
+        "empty": "Nenhum convite no momento."
+      },
+      "active": {
+        "title": "Trabalhos ativos",
+        "blurb": "Pagos e próximos",
+        "empty": "Nenhum trabalho ativo."
+      },
+      "completed": {
+        "title": "Concluídos",
+        "blurb": "Trabalhos passados",
+        "empty": "Nenhum trabalho concluído ainda."
+      },
+      "nextAt": "Próximo: {when}",
+      "esignLabel": "Contrato"
+    }
+  },
   "errors": {
     "general": {
       "title": "Algo deu errado.",

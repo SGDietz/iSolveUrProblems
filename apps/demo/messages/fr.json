@@ -389,6 +389,78 @@
       }
     }
   },
+  "forContractors": {
+    "kicker": "iSolveUrProblems · Pour les Prestataires",
+    "hero": {
+      "title": "Gérez votre activité avec 6 à vos côtés.",
+      "blurb": "Leads filtrés, contrats rédigés, paiements rapides. 6 gère l'administratif — vous faites le travail."
+    },
+    "benefit": {
+      "leads": "Leads de propriétaires — vous ne payez que pour les jobs gagnés",
+      "contracts": "Contrats rédigés et signés en quelques minutes",
+      "payouts": "Paiements Stripe net de commission, rapidement crédités",
+      "recurring": "Travaux récurrents en pilote automatique — tonte hebdo, gouttières en automne",
+      "crew": "Trouvez des sous-traitants quand vous êtes débordé"
+    },
+    "cta": {
+      "signIn": "Se connecter ou créer un compte",
+      "signInBlurb": "Connexion par lien magique. Un lien unique par email — sans mot de passe."
+    },
+    "already": {
+      "title": "Bon retour",
+      "blurb": "Votre compte prestataire est actif. Retour au tableau de bord.",
+      "goCta": "Ouvrir le tableau de bord"
+    },
+    "claim": {
+      "title": "Revendiquez votre profil",
+      "blurb": "Entrez votre numéro de licence. Nous vérifions auprès de l'organisme émetteur et lions votre compte.",
+      "privacyFootnote": "Votre numéro de licence n'est jamais publié. Utilisé uniquement pour la vérification + le badge Licence Vérifiée.",
+      "stateLabel": "État",
+      "licenseLabel": "Numéro de licence",
+      "licensePlaceholder": "ex. 1234567",
+      "licenseHelper": "CSLB Californie. Autres états bientôt.",
+      "submitCta": "Vérifier et revendiquer",
+      "submitting": "Vérification…",
+      "errorGeneric": "Vérification impossible. Vérifiez le numéro et réessayez.",
+      "pending": {
+        "title": "Presque — examen en attente",
+        "blurb": "Profil trouvé mais nous avons besoin d'une confirmation humaine. Réponse sous 1 jour ouvré.",
+        "reasonsLabel": "Signaux"
+      }
+    }
+  },
+  "contractor": {
+    "dashboard": {
+      "kicker": "Tableau de bord prestataire",
+      "backHome": "← Retour à 6",
+      "badge": {
+        "licenseVerified": "Licencié · {state} {license}",
+        "payoutReady": "Paiements prêts",
+        "payoutPending": "Paiements en attente — terminez Stripe"
+      },
+      "onboardingBanner": {
+        "title": "Terminez la configuration",
+        "blurb": "Vous devez finaliser Stripe avant que les propriétaires puissent payer. Nous enverrons le lien."
+      },
+      "pending": {
+        "title": "Invitations en attente",
+        "blurb": "Propriétaires qui vous ont choisi — accepter ou refuser",
+        "empty": "Pas d'invitation pour le moment."
+      },
+      "active": {
+        "title": "Travaux actifs",
+        "blurb": "Payés et à venir",
+        "empty": "Aucun travail actif."
+      },
+      "completed": {
+        "title": "Terminés",
+        "blurb": "Travaux passés",
+        "empty": "Aucun travail terminé pour le moment."
+      },
+      "nextAt": "Prochain : {when}",
+      "esignLabel": "Contrat"
+    }
+  },
   "errors": {
     "general": {
       "title": "Une erreur s'est produite.",

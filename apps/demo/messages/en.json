@@ -389,6 +389,78 @@
       }
     }
   },
+  "forContractors": {
+    "kicker": "iSolveUrProblems · For Contractors",
+    "hero": {
+      "title": "Run your business with 6 in your corner.",
+      "blurb": "Get vetted leads, draft contracts, paid out same-week. No more chasing — 6 handles the busywork so you focus on the job."
+    },
+    "benefit": {
+      "leads": "Homeowner leads ranked + delivered — pay only when you win the job",
+      "contracts": "Work agreements drafted + e-signed in minutes",
+      "payouts": "Stripe payouts net of platform fee, hits your account fast",
+      "recurring": "Recurring jobs put on autopilot — mow every Tuesday, gutters every fall",
+      "crew": "Find sub-contractors when you're double-booked"
+    },
+    "cta": {
+      "signIn": "Sign in or create an account",
+      "signInBlurb": "Magic-link sign-in. We email you a one-time link — no password to remember."
+    },
+    "already": {
+      "title": "Welcome back",
+      "blurb": "Your contractor account is active. Jump back into the dashboard.",
+      "goCta": "Open dashboard"
+    },
+    "claim": {
+      "title": "Claim your business profile",
+      "blurb": "Enter your state license number. We'll verify it against the issuing board and link your account.",
+      "privacyFootnote": "We never publish your license number. It's used only for one-time verification + the License-Verified badge on your profile.",
+      "stateLabel": "State",
+      "licenseLabel": "License number",
+      "licensePlaceholder": "e.g. 1234567",
+      "licenseHelper": "California CSLB number. Other states coming soon.",
+      "submitCta": "Verify and claim",
+      "submitting": "Verifying…",
+      "errorGeneric": "Couldn't verify. Check the number and try again.",
+      "pending": {
+        "title": "Almost there — pending review",
+        "blurb": "We found your profile but need a human to confirm. We'll email you within 1 business day.",
+        "reasonsLabel": "Signals"
+      }
+    }
+  },
+  "contractor": {
+    "dashboard": {
+      "kicker": "Contractor dashboard",
+      "backHome": "← Back to 6",
+      "badge": {
+        "licenseVerified": "Licensed · {state} {license}",
+        "payoutReady": "Payout ready",
+        "payoutPending": "Payout pending — finish Stripe onboarding"
+      },
+      "onboardingBanner": {
+        "title": "Complete payment setup",
+        "blurb": "You need to finish Stripe onboarding before homeowners can pay you. We'll email you the link."
+      },
+      "pending": {
+        "title": "Pending invitations",
+        "blurb": "Homeowners who picked you — accept or decline",
+        "empty": "No open invitations right now."
+      },
+      "active": {
+        "title": "Active jobs",
+        "blurb": "Paid + upcoming work",
+        "empty": "No active jobs."
+      },
+      "completed": {
+        "title": "Completed",
+        "blurb": "Past jobs",
+        "empty": "No completed jobs yet."
+      },
+      "nextAt": "Next: {when}",
+      "esignLabel": "Contract"
+    }
+  },
   "errors": {
     "general": {
       "title": "Something went wrong.",

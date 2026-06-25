@@ -389,6 +389,78 @@
       }
     }
   },
+  "forContractors": {
+    "kicker": "iSolveUrProblems · Para Contratistas",
+    "hero": {
+      "title": "Gestiona tu negocio con 6 de tu lado.",
+      "blurb": "Recibe leads filtrados, contratos redactados y cobros rápidos. 6 hace lo administrativo — tú haces el trabajo."
+    },
+    "benefit": {
+      "leads": "Leads de propietarios — pagas solo cuando ganas el trabajo",
+      "contracts": "Acuerdos de trabajo redactados y firmados en minutos",
+      "payouts": "Pagos por Stripe neto de comisión, llegan rápido",
+      "recurring": "Trabajos recurrentes en piloto automático — corte semanal, canales en otoño",
+      "crew": "Encuentra subcontratistas cuando tengas doble agenda"
+    },
+    "cta": {
+      "signIn": "Inicia sesión o crea una cuenta",
+      "signInBlurb": "Inicio con enlace mágico. Te enviamos un enlace único por correo — sin contraseña."
+    },
+    "already": {
+      "title": "Bienvenido de vuelta",
+      "blurb": "Tu cuenta de contratista está activa. Vuelve al panel.",
+      "goCta": "Abrir panel"
+    },
+    "claim": {
+      "title": "Reclama tu perfil",
+      "blurb": "Ingresa tu número de licencia estatal. Lo verificamos contra el órgano emisor y vinculamos tu cuenta.",
+      "privacyFootnote": "Nunca publicamos tu número de licencia. Se usa solo para verificación + la insignia Licencia Verificada en tu perfil.",
+      "stateLabel": "Estado",
+      "licenseLabel": "Número de licencia",
+      "licensePlaceholder": "ej. 1234567",
+      "licenseHelper": "Número CSLB de California. Otros estados próximamente.",
+      "submitCta": "Verificar y reclamar",
+      "submitting": "Verificando…",
+      "errorGeneric": "No se pudo verificar. Revisa el número e intenta de nuevo.",
+      "pending": {
+        "title": "Casi listo — revisión pendiente",
+        "blurb": "Encontramos tu perfil pero necesitamos confirmación humana. Te escribimos en 1 día hábil.",
+        "reasonsLabel": "Señales"
+      }
+    }
+  },
+  "contractor": {
+    "dashboard": {
+      "kicker": "Panel de contratista",
+      "backHome": "← Volver a 6",
+      "badge": {
+        "licenseVerified": "Licenciado · {state} {license}",
+        "payoutReady": "Pagos listos",
+        "payoutPending": "Pagos pendientes — completa Stripe"
+      },
+      "onboardingBanner": {
+        "title": "Completa la configuración de pago",
+        "blurb": "Termina Stripe antes de que los propietarios puedan pagarte. Te enviaremos el enlace."
+      },
+      "pending": {
+        "title": "Invitaciones pendientes",
+        "blurb": "Propietarios que te eligieron — acepta o rechaza",
+        "empty": "No hay invitaciones por ahora."
+      },
+      "active": {
+        "title": "Trabajos activos",
+        "blurb": "Pagados y próximos",
+        "empty": "No hay trabajos activos."
+      },
+      "completed": {
+        "title": "Completados",
+        "blurb": "Trabajos pasados",
+        "empty": "Aún no hay trabajos completados."
+      },
+      "nextAt": "Próximo: {when}",
+      "esignLabel": "Contrato"
+    }
+  },
   "errors": {
     "general": {
       "title": "Algo salió mal.",
