@@ -459,6 +459,39 @@
       },
       "nextAt": "Next: {when}",
       "esignLabel": "Contract"
+    },
+    "subscription": {
+      "title": "Your plan:",
+      "tier": {
+        "free": "Free",
+        "bronze": "Bronze",
+        "silver": "Silver",
+        "gold": "Gold"
+      },
+      "tierBlurb": {
+        "bronze": "Same-day priority · checklists · photo log",
+        "silver": "Bronze + crew marketplace · backup dispatcher · recurring",
+        "gold": "Silver + AI labeling · coaching · featured slots"
+      },
+      "status": {
+        "trialing": "Trial",
+        "active": "Active",
+        "past_due": "Payment failed",
+        "canceled": "Canceled",
+        "incomplete": "Setup incomplete",
+        "incomplete_expired": "Setup expired",
+        "unpaid": "Unpaid",
+        "paused": "Paused",
+        "none": "—"
+      },
+      "trialUntil": "Free trial through {date}",
+      "renewsOn": "Renews on {date}",
+      "cancelsOn": "Cancels on {date}",
+      "upgradeBlurb": "Upgrade to unlock crew marketplace, recurring jobs, AI labeling, and more.",
+      "manageCta": "Manage subscription",
+      "cancelCta": "Cancel",
+      "cancelConfirm": "Cancel at the end of your billing period? You keep access until then.",
+      "errorGeneric": "Something went wrong. Try again."
     }
   },
   "errors": {

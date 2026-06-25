@@ -8,6 +8,11 @@ import {
   listContractorJobs,
   type ContractorJobView,
 } from "../../../../src/lib/contractors/jobs";
+import {
+  getActiveSubscriptionForContractor,
+  type Tier,
+} from "../../../../src/lib/billing";
+import { SubscriptionPanel } from "../../../../src/components/contractor/SubscriptionPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -71,11 +76,21 @@ export default async function ContractorDashboardPage({
     redirect(`/${locale}/for-contractors`);
   }
 
-  const [contractor, jobs] = await Promise.all([
+  const [contractor, jobs, subscription] = await Promise.all([
     getContractorById(roleInfo.contractor_id),
     listContractorJobs({ contractor_id: roleInfo.contractor_id, limit: 30 }),
+    getActiveSubscriptionForContractor(roleInfo.contractor_id),
   ]);
   if (!contractor) notFound();
+
+  const currentTier: Tier = subscription?.tier ?? "free";
+  const subscriptionCurrent = {
+    tier: currentTier,
+    status: subscription?.status ?? "none",
+    current_period_end: subscription?.current_period_end ?? null,
+    cancel_at_period_end: subscription?.cancel_at_period_end ?? false,
+    trial_end: subscription?.trial_end ?? null,
+  };
 
   const pending = jobs.filter((j) => j.contract_status === "pending");
   const active = jobs.filter(
@@ -128,6 +143,11 @@ export default async function ContractorDashboardPage({
           <p className="text-zinc-200">{t("onboardingBanner.blurb")}</p>
         </div>
       )}
+
+      <SubscriptionPanel
+        contractor_id={contractor.id}
+        current={subscriptionCurrent}
+      />
 
       <JobsSection title={t("pending.title")} blurb={t("pending.blurb")} jobs={pending} t={t} emptyLabel={t("pending.empty")} />
       <JobsSection title={t("active.title")} blurb={t("active.blurb")} jobs={active} t={t} emptyLabel={t("active.empty")} />

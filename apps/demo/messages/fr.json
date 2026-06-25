@@ -459,6 +459,39 @@
       },
       "nextAt": "Prochain : {when}",
       "esignLabel": "Contrat"
+    },
+    "subscription": {
+      "title": "Votre formule :",
+      "tier": {
+        "free": "Gratuit",
+        "bronze": "Bronze",
+        "silver": "Argent",
+        "gold": "Or"
+      },
+      "tierBlurb": {
+        "bronze": "Priorité jour-même · checklists · journal photo",
+        "silver": "Bronze + marketplace équipe · remplacement · récurrents",
+        "gold": "Argent + IA étiquetage · coaching · mises en avant"
+      },
+      "status": {
+        "trialing": "Essai",
+        "active": "Actif",
+        "past_due": "Paiement échoué",
+        "canceled": "Annulé",
+        "incomplete": "Configuration incomplète",
+        "incomplete_expired": "Configuration expirée",
+        "unpaid": "Impayé",
+        "paused": "En pause",
+        "none": "—"
+      },
+      "trialUntil": "Essai gratuit jusqu'au {date}",
+      "renewsOn": "Renouvellement le {date}",
+      "cancelsOn": "Annulation le {date}",
+      "upgradeBlurb": "Passez à un plan supérieur pour le marketplace équipe, les travaux récurrents, l'étiquetage IA et plus.",
+      "manageCta": "Gérer l'abonnement",
+      "cancelCta": "Annuler",
+      "cancelConfirm": "Annuler à la fin de la période ? Vous gardez l'accès jusque-là.",
+      "errorGeneric": "Une erreur s'est produite. Réessayez."
     }
   },
   "errors": {

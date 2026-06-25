@@ -134,3 +134,30 @@ export const DROPBOX_SIGN_API_KEY = process.env.DROPBOX_SIGN_API_KEY || "";
 export const DROPBOX_SIGN_CLIENT_ID = process.env.DROPBOX_SIGN_CLIENT_ID || "";
 export const DROPBOX_SIGN_WEBHOOK_SECRET =
   process.env.DROPBOX_SIGN_WEBHOOK_SECRET || "";
+
+// M4.1 — Stripe Billing (contractor subscriptions). Different product
+// from Stripe Connect (M2.5 contractor payouts); same Stripe account +
+// same STRIPE_SECRET_KEY but separate webhook secret + separate Price
+// IDs per tier. Create the products in the Stripe dashboard, then drop
+// the IDs here. Q4.1a tier pricing is directional — Bert sets the
+// final numbers before launch.
+//
+// Tier mapping:
+//   - free   → no Price ID; default tier when no active subscription
+//   - bronze → STRIPE_PRICE_BRONZE
+//   - silver → STRIPE_PRICE_SILVER
+//   - gold   → STRIPE_PRICE_GOLD
+export const STRIPE_PRICE_BRONZE = process.env.STRIPE_PRICE_BRONZE || "";
+export const STRIPE_PRICE_SILVER = process.env.STRIPE_PRICE_SILVER || "";
+export const STRIPE_PRICE_GOLD = process.env.STRIPE_PRICE_GOLD || "";
+export const STRIPE_BILLING_WEBHOOK_SECRET =
+  process.env.STRIPE_BILLING_WEBHOOK_SECRET || "";
+
+// Trial length for new subscriptions (days). 14d default per Risks
+// section of M4 build order ("v1 should include a free trial").
+const _TRIAL_DAYS_RAW = process.env.STRIPE_TRIAL_DAYS;
+export const STRIPE_TRIAL_DAYS = (() => {
+  if (!_TRIAL_DAYS_RAW) return 14;
+  const n = parseInt(_TRIAL_DAYS_RAW, 10);
+  return Number.isFinite(n) && n >= 0 && n <= 90 ? n : 14;
+})();

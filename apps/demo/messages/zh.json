@@ -460,6 +460,39 @@
       },
       "nextAt": "下次:{when}",
       "esignLabel": "合同"
+    },
+    "subscription": {
+      "title": "当前套餐:",
+      "tier": {
+        "free": "免费",
+        "bronze": "青铜",
+        "silver": "白银",
+        "gold": "黄金"
+      },
+      "tierBlurb": {
+        "bronze": "当日优先 · 清单 · 拍照日志",
+        "silver": "青铜 + 团队市场 · 替补派遣 · 周期工作",
+        "gold": "白银 + AI 标注 · 教练 · 优先展示"
+      },
+      "status": {
+        "trialing": "试用",
+        "active": "生效中",
+        "past_due": "支付失败",
+        "canceled": "已取消",
+        "incomplete": "未完成",
+        "incomplete_expired": "配置过期",
+        "unpaid": "未支付",
+        "paused": "暂停",
+        "none": "—"
+      },
+      "trialUntil": "免费试用至 {date}",
+      "renewsOn": "{date} 续费",
+      "cancelsOn": "{date} 取消",
+      "upgradeBlurb": "升级解锁团队市场、周期工作、AI 标注等更多功能。",
+      "manageCta": "管理订阅",
+      "cancelCta": "取消",
+      "cancelConfirm": "在计费周期结束时取消吗?在此之前你仍享有权限。",
+      "errorGeneric": "出错了,请重试。"
     }
   },
   "errors": {

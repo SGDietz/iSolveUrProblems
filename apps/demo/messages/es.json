@@ -459,6 +459,39 @@
       },
       "nextAt": "Próximo: {when}",
       "esignLabel": "Contrato"
+    },
+    "subscription": {
+      "title": "Tu plan:",
+      "tier": {
+        "free": "Gratis",
+        "bronze": "Bronce",
+        "silver": "Plata",
+        "gold": "Oro"
+      },
+      "tierBlurb": {
+        "bronze": "Prioridad mismo-día · listas · registro fotográfico",
+        "silver": "Bronce + marketplace de equipo · suplente · recurrentes",
+        "gold": "Plata + etiquetado IA · coaching · destacados"
+      },
+      "status": {
+        "trialing": "Prueba",
+        "active": "Activo",
+        "past_due": "Pago fallido",
+        "canceled": "Cancelado",
+        "incomplete": "Configuración incompleta",
+        "incomplete_expired": "Configuración expirada",
+        "unpaid": "Sin pagar",
+        "paused": "Pausado",
+        "none": "—"
+      },
+      "trialUntil": "Prueba gratuita hasta {date}",
+      "renewsOn": "Se renueva el {date}",
+      "cancelsOn": "Se cancela el {date}",
+      "upgradeBlurb": "Mejora tu plan para acceder al marketplace de equipo, trabajos recurrentes, etiquetado IA y más.",
+      "manageCta": "Administrar suscripción",
+      "cancelCta": "Cancelar",
+      "cancelConfirm": "¿Cancelar al final del período? Mantienes acceso hasta entonces.",
+      "errorGeneric": "Algo salió mal. Inténtalo de nuevo."
     }
   },
   "errors": {

@@ -459,6 +459,39 @@
       },
       "nextAt": "Nächster: {when}",
       "esignLabel": "Vertrag"
+    },
+    "subscription": {
+      "title": "Dein Plan:",
+      "tier": {
+        "free": "Kostenlos",
+        "bronze": "Bronze",
+        "silver": "Silber",
+        "gold": "Gold"
+      },
+      "tierBlurb": {
+        "bronze": "Same-day-Priorität · Checklisten · Foto-Log",
+        "silver": "Bronze + Team-Marktplatz · Backup · Wiederkehrend",
+        "gold": "Silber + KI-Labeling · Coaching · Highlight-Slots"
+      },
+      "status": {
+        "trialing": "Testphase",
+        "active": "Aktiv",
+        "past_due": "Zahlung fehlgeschlagen",
+        "canceled": "Gekündigt",
+        "incomplete": "Setup unvollständig",
+        "incomplete_expired": "Setup abgelaufen",
+        "unpaid": "Unbezahlt",
+        "paused": "Pausiert",
+        "none": "—"
+      },
+      "trialUntil": "Gratis-Testphase bis {date}",
+      "renewsOn": "Verlängerung am {date}",
+      "cancelsOn": "Kündigt am {date}",
+      "upgradeBlurb": "Upgrade für Team-Marktplatz, wiederkehrende Jobs, KI-Labeling und mehr.",
+      "manageCta": "Abo verwalten",
+      "cancelCta": "Kündigen",
+      "cancelConfirm": "Am Ende der Abrechnungsperiode kündigen? Du behältst Zugriff bis dahin.",
+      "errorGeneric": "Etwas ist schiefgelaufen. Versuche es erneut."
     }
   },
   "errors": {
