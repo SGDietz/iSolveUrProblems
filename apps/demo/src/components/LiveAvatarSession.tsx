@@ -9,6 +9,7 @@ import {
   type SignupPorts,
 } from "../lib/signup/machine";
 import {
+  ACCOUNT_SETUP_TRIGGER_RE,
   extractAccountEmailCandidate,
   hasEndSessionIntent,
   isStitchedSessionClose,
@@ -1939,6 +1940,24 @@ const LiveAvatarSessionComponent: React.FC<{
           }).catch(() => {});
         };
         diag("transcript", { len: userText.length, head: userText.slice(0, 60) });
+        // Cut the server brain the INSTANT an account trigger or mid-flow turn is
+        // seen — before the machine even runs — so the unpatched, prod-shared
+        // brain (459ae665) can't blurt "I can't help with accounts" ahead of the
+        // scripted line. Suppressing it client-side is the prod-safe fix; the
+        // brain TEXT is corrected at merge. (G 2026-06-27, Herm TASK_034.)
+        const midAccountFlow =
+          accountSetupAwaitingReadyRef.current ||
+          accountSetupAwaitingEmailRef.current ||
+          accountSetupAwaitingNameRef.current ||
+          accountSetupAwaitingSendRef.current;
+        if (ACCOUNT_SETUP_TRIGGER_RE.test(userText) || midAccountFlow) {
+          try {
+            await interrupt();
+          } catch {
+            // never block the scripted line on an interrupt hiccup
+          }
+          diag("account-interrupt", { midAccountFlow });
+        }
         try {
           // While collecting the email, route straight to the account flow (a real
           // close still escapes inside takesEmailFastPath).
