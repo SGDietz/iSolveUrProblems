@@ -190,6 +190,12 @@ const LiveAvatarSessionComponent: React.FC<{
 
   useEffect(() => {
     if (sessionState === SessionState.DISCONNECTED) {
+      // Tear down the cross-browser device-link poll; a fresh session greets anew.
+      if (accountPollTimerRef.current) {
+        clearInterval(accountPollTimerRef.current);
+        accountPollTimerRef.current = null;
+      }
+      accountReturnGreetedRef.current = false;
       if (sessionStartErrorRef.current) {
         setSessionStartError(sessionStartErrorRef.current);
         sessionStartErrorRef.current = null;
@@ -519,6 +525,11 @@ const LiveAvatarSessionComponent: React.FC<{
   const lastAvatarParsedEmailRef = useRef<string | null>(null);
   const lastAccountLinkSendRef = useRef<{ email: string; at: number } | null>(null);
   const accountPendingStateTokenRef = useRef<string | null>(null);
+  // Cross-browser device-link poll (2026-06-27): after the link is sent, watch
+  // account_email_links by THIS session_id for the sign-in that lands in another
+  // browser, then greet by name. Timer + one-shot greeting guard.
+  const accountPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const accountReturnGreetedRef = useRef(false);
   // Signed-in / profile mirrors. Signed-in users never re-enter signup.
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
   const accountEmailRef = useRef<string | null>(null);
@@ -702,6 +713,85 @@ const LiveAvatarSessionComponent: React.FC<{
     }
   }, []);
 
+  // Cross-browser device-link poll (2026-06-27). The voice magic link signs in
+  // whatever browser OPENS it (usually the user's phone), so the cookie never
+  // reaches 6's browser. After the link is sent we poll /api/account/session-status
+  // by THIS session_id; /auth/callback stamps used_at on click, and the moment our
+  // row flips we pull the name SERVER-SIDE and 6 greets them by name. Stops on the
+  // first hit, if already signed in, or after ~6 min. 5s cadence keeps it under the
+  // 30/min rate budget.
+  const startDeviceLinkPoll = useCallback(() => {
+    if (accountPollTimerRef.current) return; // already polling
+    if (accountSignedInRef.current) return; // already signed in
+    const sid = dbSessionIdRef.current;
+    if (!sid) return;
+
+    let attempts = 0;
+    const MAX_ATTEMPTS = 72; // 72 * 5s = 6 min
+    const stop = () => {
+      if (accountPollTimerRef.current) {
+        clearInterval(accountPollTimerRef.current);
+        accountPollTimerRef.current = null;
+      }
+    };
+
+    const tick = async () => {
+      attempts += 1;
+      if (attempts > MAX_ATTEMPTS) {
+        stop();
+        return;
+      }
+      try {
+        const res = await fetch(
+          `/api/account/session-status?sessionId=${encodeURIComponent(sid)}`,
+        );
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (!data?.signedIn) return;
+
+        // Signed in on another device — stop polling and greet by name.
+        stop();
+        const name =
+          typeof data.fullName === "string" && data.fullName.trim()
+            ? data.fullName.trim()
+            : null;
+        if (name) {
+          deviceProfileRef.current = { ...deviceProfileRef.current, name };
+        }
+        if (typeof data.email === "string" && data.email) {
+          setAccountEmail(data.email);
+        }
+        if (accountReturnGreetedRef.current) return;
+        accountReturnGreetedRef.current = true;
+
+        const hasMemory =
+          (Array.isArray(data.lists) && data.lists.length > 0) ||
+          (data.resumeState && typeof data.resumeState === "object");
+        const spoken = name
+          ? hasMemory
+            ? `${name}, you're all signed in. You talked, I remembered. Let's pick up right where we left off.`
+            : `You're all signed in, ${name}! I've got you now.`
+          : "You're all signed in! I've got you now.";
+
+        // Cut the avatar's server brain before the scripted line so the machine
+        // owns the turn (same pattern as the signup say()).
+        try {
+          await interrupt();
+        } catch {
+          // never block the scripted line on an interrupt hiccup
+        }
+        await repeat(spoken);
+        lastAvatarResponseRef.current = spoken;
+        rememberConversationLine("assistant", spoken);
+      } catch {
+        // transient — the next tick retries
+      }
+    };
+
+    void tick();
+    accountPollTimerRef.current = setInterval(tick, 5000);
+  }, [interrupt, repeat, rememberConversationLine]);
+
   // Fire the magic link via /api/account/start (adapted from aiASAP).
   const startAccountSetup = useCallback(
     async (email: string): Promise<boolean> => {
@@ -761,6 +851,8 @@ const LiveAvatarSessionComponent: React.FC<{
         }
         chestRevealActiveRef.current = false;
         if (data?.emailSent) {
+          // Cross-browser pickup: watch for the sign-in landing in another browser.
+          startDeviceLinkPoll();
           lastAvatarParsedEmailRef.current = null;
           chestEmailTextRef.current = "";
           setChestEmailText("");
@@ -791,7 +883,7 @@ const LiveAvatarSessionComponent: React.FC<{
         return true;
       }
     },
-    [repeat, rememberConversationLine, buildAccountResumeState],
+    [repeat, rememberConversationLine, buildAccountResumeState, startDeviceLinkPoll],
   );
 
   const signupFlags = useMemo<SignupFlags>(
@@ -890,6 +982,7 @@ const LiveAvatarSessionComponent: React.FC<{
   // Cleanup chest timers + audio context on unmount.
   useEffect(() => {
     return () => {
+      if (accountPollTimerRef.current) clearInterval(accountPollTimerRef.current);
       if (chestRevealTimerRef.current) clearTimeout(chestRevealTimerRef.current);
       if (chestStatusTimerRef.current) clearTimeout(chestStatusTimerRef.current);
       if (tickAudioCtxRef.current) {
