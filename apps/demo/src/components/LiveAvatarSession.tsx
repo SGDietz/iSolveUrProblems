@@ -3004,11 +3004,11 @@ const LiveAvatarSessionComponent: React.FC<{
           2026-06-27: "above the hands, nothing on the hands"). Short labels,
           aiASAP-scaled text via --stage-width. */}
       {isActive && (
-        <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.30)] -translate-x-1/2 z-40 w-[88%] max-w-sm px-2 flex flex-col items-center gap-2">
+        <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.30)] -translate-x-1/2 z-40 flex w-[94%] max-w-[min(32rem,calc(var(--stage-width)*0.95))] flex-col items-center gap-[calc(var(--stage-height)*0.012)] px-2">
           {promptPills.map((prompt, i) => (
             <div
               key={i}
-              className="brand-pill w-full py-2 px-4 rounded-full flex items-center justify-center text-center font-semibold leading-tight min-h-[2.7rem] text-[calc(var(--stage-width)*0.045)]"
+              className="brand-pill rounded-full font-semibold leading-tight whitespace-nowrap text-[calc(var(--stage-height)*0.030)] px-[calc(var(--stage-height)*0.024)] py-[calc(var(--stage-height)*0.011)]"
             >
               <span className="brand-grad-text">{prompt}</span>
             </div>
@@ -3417,27 +3417,31 @@ const LiveAvatarSessionComponent: React.FC<{
                 {/* Start/Stop removed (G 2026-06-27): tap anywhere starts 6; voice
                     "close the session" stops him. The 3 problem pills above replace
                     it; Camera | Gallery stay side-by-side below. */}
-                <div className="grid grid-cols-2 gap-3 mb-2.5">
-                  <button
-                    type="button"
-                    className="brand-pill py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
-                    onClick={async () => {
-                      await unlockAudio();
-                      void handleCameraClick();
-                    }}
-                  >
-                    <Camera className="mr-2 w-5 h-5 shrink-0" strokeWidth={3} aria-hidden />
-                    <span className="brand-grad-text">{t("camera")}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="brand-pill py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
-                    onClick={() => void handleGalleryClick()}
-                  >
-                    <Images className="mr-2 w-5 h-5 shrink-0" strokeWidth={3} aria-hidden />
-                    <span className="brand-grad-text">{t("gallery")}</span>
-                  </button>
-                </div>
+                {/* Camera | Gallery — only WHILE talking (G 2026-06-27: hidden
+                    before 6 starts). */}
+                {isActive && (
+                  <div className="grid grid-cols-2 gap-3 mb-2.5">
+                    <button
+                      type="button"
+                      className="brand-pill py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
+                      onClick={async () => {
+                        await unlockAudio();
+                        void handleCameraClick();
+                      }}
+                    >
+                      <Camera className="mr-2 w-5 h-5 shrink-0" strokeWidth={3} aria-hidden />
+                      <span className="brand-grad-text">{t("camera")}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="brand-pill py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
+                      onClick={() => void handleGalleryClick()}
+                    >
+                      <Images className="mr-2 w-5 h-5 shrink-0" strokeWidth={3} aria-hidden />
+                      <span className="brand-grad-text">{t("gallery")}</span>
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="h-14 flex items-center justify-center">
                 <Link
