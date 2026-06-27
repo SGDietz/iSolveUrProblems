@@ -2381,97 +2381,20 @@ const LiveAvatarSessionComponent: React.FC<{
   }, [loadFallbackImage]);
 
   const handleCameraClick = async () => {
-    // If 6 is mid-sentence, cut him off. User wants to show us something —
-    // talking over that is a UX fail. (Added 2026-04-24 per G.)
+    // Camera now opens the DEVICE's native camera (G 2026-06-27: "open the
+    // camera on the device", no in-app vision feed). The captured photo/video
+    // routes through the same file input as Gallery; `capture="environment"`
+    // tells the phone to open the camera rather than the picker.
+    await unlockAudio();
     try {
       sessionRef.current?.interrupt?.();
     } catch {
       // non-fatal
     }
-    if (visionMode === "snapshot") {
-      // Stop camera if already in snapshot mode
-      if (cameraStream) {
-        cameraStream.getTracks().forEach((track) => track.stop());
-        setCameraStream(null);
-      }
-      setIsCameraActive(false);
-      setVisionMode(null);
-      setFallbackImage(null);
-      setFallbackImagePreview(null);
-
-      // CRITICAL: Don't pause or mute the video element
-      // Audio should continue playing
-      return;
-    }
-
-    // Set to snapshot mode (for taking a single photo)
-    setVisionMode("snapshot");
-
-    // If camera is not available, show fallback mode with default image
-    if (cameraAvailable === false) {
-      setIsCameraActive(true);
-      // If fallback image is not already set, load it
-      if (!fallbackImage) {
-        loadFallbackImage()
-          .then((file) => {
-            setFallbackImage(file);
-            const previewUrl = URL.createObjectURL(file);
-            setFallbackImagePreview(previewUrl);
-          })
-          .catch((error) => {
-            console.error("Error loading fallback image:", error);
-          });
-      }
-      return;
-    }
-
-    try {
-      // First try to get rear camera (environment)
-      let stream: MediaStream | null = null;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
-        });
-        setCameraAvailable(true);
-      } catch (error) {
-        // If rear camera fails, try front camera (user)
-        console.log("Rear camera not available, trying front camera");
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: "user" },
-          });
-          setCameraAvailable(true);
-        } catch (error2) {
-          // No camera available, use fallback mode with default image
-          console.log("No camera available, using fallback mode");
-          setCameraAvailable(false);
-          setIsCameraActive(true);
-          // If fallback image is not already set, load it
-          if (!fallbackImage) {
-            loadFallbackImage()
-              .then((file) => {
-                setFallbackImage(file);
-                const previewUrl = URL.createObjectURL(file);
-                setFallbackImagePreview(previewUrl);
-              })
-              .catch((error) => {
-                console.error("Error loading fallback image:", error);
-              });
-          }
-          return;
-        }
-      }
-
-      if (stream) {
-        setCameraStream(stream);
-        setIsCameraActive(true);
-      }
-    } catch (error) {
-      console.error("Error accessing camera:", error);
-      // Use fallback mode instead of showing error
-      setCameraAvailable(false);
-      setIsCameraActive(true);
-      fallbackImageInputRef.current?.click();
+    if (fileInputRef.current) {
+      fileInputRef.current.setAttribute("accept", "image/*,video/*");
+      fileInputRef.current.setAttribute("capture", "environment");
+      fileInputRef.current.click();
     }
   };
 
@@ -2512,6 +2435,8 @@ const LiveAvatarSessionComponent: React.FC<{
     await unlockAudio();
     if (fileInputRef.current) {
       fileInputRef.current.setAttribute("accept", "image/*,video/*");
+      // No `capture` → opens the phone's photo picker (Gallery), not the camera.
+      fileInputRef.current.removeAttribute("capture");
       fileInputRef.current.click();
     }
   }, [unlockAudio, sessionRef]);
