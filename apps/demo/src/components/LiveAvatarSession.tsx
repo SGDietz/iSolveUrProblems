@@ -27,7 +27,7 @@ import { SessionState, AgentEventsEnum } from "@heygen/liveavatar-web-sdk";
 import { useAvatarActions } from "../liveavatar/useAvatarActions";
 import { setVideoBusy, isVideoBusy } from "../liveavatar/videoRecordingState";
 import { captureMedia } from "../lib/captureMedia";
-import { Radio, Camera, Images, Video, MicOff } from "lucide-react";
+import { Radio, Camera, Images, Video, MicOff, Plus } from "lucide-react";
 import { useGoLiveStreamer } from "../lib/vision/useGoLiveStreamer";
 import { GoLivePrivacyBanner } from "./GoLivePrivacyBanner";
 import { HeaderControls } from "./HeaderControls";
@@ -3385,7 +3385,7 @@ const LiveAvatarSessionComponent: React.FC<{
                 <div className="grid grid-cols-2 gap-3 mb-2.5">
                   <button
                     type="button"
-                    className="brand-pill col-span-2 py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
+                    className="brand-pill py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
                     onClick={() => {
                       // Functional guard (no `disabled` attribute) so the browser
                       // doesn't apply :disabled styling that makes this button
@@ -3442,10 +3442,17 @@ const LiveAvatarSessionComponent: React.FC<{
                     )}
                     <span className="brand-grad-text">{isActive ? t("stop") : t("start")}</span>
                   </button>
-                  {/* Go Live removed 2026-06-26 per G — no vision mode; camera + gallery only.
-                      Start/Stop now spans full width (col-span-2). */}
-                </div>
-                <div className="grid grid-cols-2 gap-3 mb-2.5">
+                  {/* 4-pillbox 2x2 grid (G 2026-06-27): Start/Stop, New, Camera,
+                      Gallery — mirrors aiASAP's 4-pillbox layout. New = fresh
+                      problem (clears camera/uploads, keeps 6 live). */}
+                  <button
+                    type="button"
+                    className="brand-pill py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
+                    onClick={() => resetToHomeScreen()}
+                  >
+                    <Plus className="mr-2 w-5 h-5 shrink-0" strokeWidth={3} aria-hidden />
+                    <span className="brand-grad-text">New</span>
+                  </button>
                   <button
                     type="button"
                     className="brand-pill py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
