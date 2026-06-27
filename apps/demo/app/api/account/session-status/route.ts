@@ -1,4 +1,9 @@
-import { assertAllowedOrigin } from "../../../../src/lib/apiRouteSecurity";
+import {
+  assertAllowedOrigin,
+  isSafeTranscriptionSessionId,
+} from "../../../../src/lib/apiRouteSecurity";
+
+const NO_STORE = { "Content-Type": "application/json", "Cache-Control": "no-store" };
 
 const ISOLVE_SUPABASE_REF = "dphxcqjkzhvsdejtxdcj";
 const AIASAP_SUPABASE_REF = "wqszxsqzkaatghyrqviv";
@@ -30,10 +35,11 @@ export async function GET(request: Request) {
   const notSignedIn = () =>
     new Response(JSON.stringify({ signedIn: false }), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: NO_STORE,
     });
 
-  if (!sessionId || sessionId.length > 100) return notSignedIn();
+  // Strict: LiveAvatar session ids pass this (same gate as transcription routes).
+  if (!isSafeTranscriptionSessionId(sessionId)) return notSignedIn();
 
   const supaUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -75,7 +81,7 @@ export async function GET(request: Request) {
 
     return new Response(
       JSON.stringify({ signedIn: true, email: row.email, fullName, lists, resumeState }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
+      { status: 200, headers: NO_STORE },
     );
   } catch {
     return notSignedIn();

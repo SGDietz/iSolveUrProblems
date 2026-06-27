@@ -86,7 +86,12 @@ export async function POST(request: Request) {
 
   // token_hash flow: generate the link server-side and point it at OUR
   // /auth/callback so the session cookie reaches the browser deterministically.
+  // PUBLIC_APP_ORIGIN pins the email-link origin for local/tunnel testing — the
+  // phone can't reach localhost, and a proxy (cloudflared) may hand the server a
+  // localhost Host header. Unset in prod => identical behavior (request origin).
   const origin = (() => {
+    const override = process.env.PUBLIC_APP_ORIGIN?.trim();
+    if (override) return override.replace(/\/$/, "");
     try { return new URL(request.url).origin; } catch { return supaUrl.replace(/\/$/, ""); }
   })();
   const callbackBase = `${origin}/auth/callback`;
@@ -95,6 +100,9 @@ export async function POST(request: Request) {
 
   let emailSent = false;
   let sendError: string | null = null;
+  // The Supabase magic-link token in the email — stored on the row so /auth/callback
+  // flips the EXACT row for this link (not every row for the email). Herm TASK_036.
+  let deviceLinkTokenHash: string | null = null;
   const resendKey = process.env.RESEND_API_KEY;
 
   if (!serviceRoleKey) {
@@ -140,6 +148,9 @@ export async function POST(request: Request) {
         if (!hashedToken) {
           sendError = "generate_link returned no token_hash";
         } else {
+          // Remember THIS link's token as the device-link match key (callback flips
+          // only the row carrying it).
+          deviceLinkTokenHash = hashedToken;
           // 3) Build OUR token_hash link → iSolve /auth/callback.
           const magicLink = `${callbackBase}?token_hash=${encodeURIComponent(hashedToken)}&type=magiclink&next=${nextParam}`;
           const fromEmail =
@@ -179,11 +190,12 @@ export async function POST(request: Request) {
   // Save { lists, resumeState, fullName } to account_email_links for return recovery.
   // Service role bypasses RLS. Failures here don't block the response — the magic
   // link is the critical path. expires_at gates RESUME freshness, not sign-in.
+  // Only insert a device-link row when there's a real magic-link token to match
+  // later (deviceLinkTokenHash) AND a sessionId to poll by. token_hash = the
+  // Supabase link token so /auth/callback flips exactly this row.
   let pendingStateToken: string | null = null;
-  if (serviceRoleKey && sessionId) {
+  if (serviceRoleKey && sessionId && deviceLinkTokenHash) {
     try {
-      pendingStateToken = crypto.randomUUID();
-      const tokenHash = await hashToken(pendingStateToken);
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
       const captured = { lists, resumeState, fullName };
       const insertRes = await fetch(`${supaUrl}/rest/v1/account_email_links`, {
@@ -197,19 +209,20 @@ export async function POST(request: Request) {
         body: JSON.stringify({
           email,
           session_id: sessionId,
-          token_hash: tokenHash,
+          token_hash: deviceLinkTokenHash,
           captured_lists: captured,
           expires_at: expiresAt,
         }),
       });
-      if (!insertRes.ok) {
+      if (insertRes.ok) {
+        // Client breadcrumb only (localStorage); not a lookup key.
+        pendingStateToken = crypto.randomUUID();
+      } else {
         const detail = await insertRes.text();
         console.error("account_email_links insert failed:", insertRes.status, detail.slice(0, 200));
-        pendingStateToken = null;
       }
     } catch (error) {
       console.error("account_email_links insert threw:", error);
-      pendingStateToken = null;
     }
   }
 
@@ -224,12 +237,4 @@ export async function POST(request: Request) {
     JSON.stringify({ ok: true, emailSent: true, pendingStateToken }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
-}
-
-async function hashToken(token: string): Promise<string> {
-  const data = new TextEncoder().encode(token);
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hash))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }

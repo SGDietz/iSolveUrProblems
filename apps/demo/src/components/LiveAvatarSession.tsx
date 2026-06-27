@@ -530,6 +530,10 @@ const LiveAvatarSessionComponent: React.FC<{
   // browser, then greet by name. Timer + one-shot greeting guard.
   const accountPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const accountReturnGreetedRef = useRef(false);
+  // Non-overlap guards (Herm TASK_036): a slow tick must not overlap the next,
+  // and the greet must not double-fire while one is mid-speech.
+  const accountPollInFlightRef = useRef(false);
+  const accountReturnGreetingInFlightRef = useRef(false);
   // Signed-in / profile mirrors. Signed-in users never re-enter signup.
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
   const accountEmailRef = useRef<string | null>(null);
@@ -736,55 +740,70 @@ const LiveAvatarSessionComponent: React.FC<{
     };
 
     const tick = async () => {
-      attempts += 1;
-      if (attempts > MAX_ATTEMPTS) {
-        stop();
-        return;
-      }
+      // Don't overlap a slow request or an in-flight greeting.
+      if (accountPollInFlightRef.current || accountReturnGreetingInFlightRef.current) return;
+      accountPollInFlightRef.current = true;
       try {
+        attempts += 1;
+        if (attempts > MAX_ATTEMPTS) {
+          stop();
+          return;
+        }
         const res = await fetch(
           `/api/account/session-status?sessionId=${encodeURIComponent(sid)}`,
         );
         if (!res.ok) return;
         const data = await res.json().catch(() => null);
         if (!data?.signedIn) return;
-
-        // Signed in on another device — stop polling and greet by name.
-        stop();
-        const name =
-          typeof data.fullName === "string" && data.fullName.trim()
-            ? data.fullName.trim()
-            : null;
-        if (name) {
-          deviceProfileRef.current = { ...deviceProfileRef.current, name };
-        }
-        if (typeof data.email === "string" && data.email) {
-          setAccountEmail(data.email);
-        }
         if (accountReturnGreetedRef.current) return;
-        accountReturnGreetedRef.current = true;
 
-        const hasMemory =
-          (Array.isArray(data.lists) && data.lists.length > 0) ||
-          (data.resumeState && typeof data.resumeState === "object");
-        const spoken = name
-          ? hasMemory
-            ? `${name}, you're all signed in. You talked, I remembered. Let's pick up right where we left off.`
-            : `You're all signed in, ${name}! I've got you now.`
-          : "You're all signed in! I've got you now.";
-
-        // Cut the avatar's server brain before the scripted line so the machine
-        // owns the turn (same pattern as the signup say()).
+        accountReturnGreetingInFlightRef.current = true;
         try {
-          await interrupt();
-        } catch {
-          // never block the scripted line on an interrupt hiccup
+          const name =
+            typeof data.fullName === "string" && data.fullName.trim()
+              ? data.fullName.trim()
+              : null;
+          if (name) {
+            deviceProfileRef.current = { ...deviceProfileRef.current, name };
+          }
+          if (typeof data.email === "string" && data.email) {
+            // Close the React state lag so signup re-entry is blocked this tick.
+            accountEmailRef.current = data.email;
+            accountSignedInRef.current = true;
+            setAccountEmail(data.email);
+          }
+
+          const hasMemory =
+            (Array.isArray(data.lists) && data.lists.length > 0) ||
+            (data.resumeState && typeof data.resumeState === "object");
+          const spoken = name
+            ? hasMemory
+              ? `${name}, you're all signed in. You talked, I remembered. Let's pick up right where we left off.`
+              : `You're all signed in, ${name}! I've got you now.`
+            : "You're all signed in! I've got you now.";
+
+          // Cut the brain, then speak. Mark greeted + stop the poll ONLY after
+          // repeat() succeeds — if it throws, leave the poll alive to retry
+          // rather than strand 6 silent (Herm TASK_036 mute audit).
+          try {
+            await interrupt();
+          } catch {
+            // interrupt hiccup must not block the spoken line
+          }
+          await repeat(spoken);
+          accountReturnGreetedRef.current = true;
+          stop();
+          lastAvatarResponseRef.current = spoken;
+          rememberConversationLine("assistant", spoken);
+        } catch (e) {
+          console.error("device-link return greet failed", e);
+        } finally {
+          accountReturnGreetingInFlightRef.current = false;
         }
-        await repeat(spoken);
-        lastAvatarResponseRef.current = spoken;
-        rememberConversationLine("assistant", spoken);
       } catch {
         // transient — the next tick retries
+      } finally {
+        accountPollInFlightRef.current = false;
       }
     };
 
