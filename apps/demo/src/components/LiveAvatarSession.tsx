@@ -3143,7 +3143,7 @@ const LiveAvatarSessionComponent: React.FC<{
           chest. 6 NEVER reads it aloud — the box is the source of truth. Hidden
           unless account setup is collecting/sending; never covers the controls. */}
       {showChestEmail && (chestEmailStatus || chestEmailText) && (
-        <div className="pointer-events-none absolute left-1/2 top-[52%] z-20 w-[78%] max-w-[22rem] -translate-x-1/2 -translate-y-1/2 text-center">
+        <div className="pointer-events-none absolute left-1/2 top-[48%] z-50 w-[78%] max-w-[22rem] -translate-x-1/2 -translate-y-1/2 text-center">
           <div className="brand-pill mx-auto px-4 py-3">
             {chestEmailStatus ? (
               <div className="brand-grad-text text-sm font-semibold tracking-wide">
@@ -3429,36 +3429,33 @@ const LiveAvatarSessionComponent: React.FC<{
                 isStreamReady && (
                   <div className="mb-4 w-full flex items-center justify-center text-center">
                     <p className="text-inset drop-shadow-lg px-1 w-full max-w-none text-[1.3rem] sm:text-[1.5rem] font-semibold leading-tight">
-                      {!isActive ? (
-                        voiceStartAwaitingReady ? (
-                          <span className="block">{t("starting")}</span>
-                        ) : null
-                      ) : (
-                        <>
-                          <span className="block">{t("tell6")}</span>
-                          <span className="block">
-                            {t("or")} <em>{t("showHim")}</em>
-                          </span>
-                        </>
-                      )}
+                      {/* "Tell 6 what's wrong / or show him" removed per G
+                          2026-06-27 ("you gotta take that out"). Only the brief
+                          "starting…" feedback remains. */}
+                      {!isActive && voiceStartAwaitingReady ? (
+                        <span className="block">{t("starting")}</span>
+                      ) : null}
                     </p>
                   </div>
                 )} 
               <div className="mx-auto w-full max-w-sm">
-                {shouldShowBeginSurface && (
-                  <div className="grid gap-2.5 mb-2.5">
-                    {promptPills.map((prompt, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => void handleVoiceStartStop()}
-                        className="brand-pill py-2.5 px-4 rounded-full flex items-center justify-center text-center text-base sm:text-lg font-semibold leading-tight min-h-[3.2rem]"
-                      >
-                        <span className="brand-grad-text">{prompt}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {/* 3 problem-prompt pills — the normal state, shown before AND
+                    while talking to 6 (G 2026-06-27). Tap one to start him when
+                    idle; once he's live they're just idea prompts. */}
+                <div className="grid gap-2.5 mb-2.5">
+                  {promptPills.map((prompt, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => {
+                        if (!isActive) void handleVoiceStartStop();
+                      }}
+                      className="brand-pill py-2.5 px-4 rounded-full flex items-center justify-center text-center text-base sm:text-lg font-semibold leading-tight min-h-[3.2rem]"
+                    >
+                      <span className="brand-grad-text">{prompt}</span>
+                    </button>
+                  ))}
+                </div>
                 {/* Start/Stop removed (G 2026-06-27): tap anywhere starts 6; voice
                     "close the session" stops him. The 3 problem pills above replace
                     it; Camera | Gallery stay side-by-side below. */}
