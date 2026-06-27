@@ -3082,7 +3082,12 @@ const LiveAvatarSessionComponent: React.FC<{
       {/* Text overlays at the top */}
       <div className="absolute top-0 left-0 right-0 z-10 flex flex-col items-center pt-6 pb-2 md:pt-[4.5vh]">
         <div className="text-center px-4 mb-2">
-          <h1 className="brand-grad-text inline-block overflow-visible px-2 text-[1.5rem] sm:text-[2rem] font-bold leading-[1.12] tracking-tight">
+          {!isActive && (
+            <p className="brand-grad-text mb-1.5 text-[1.05rem] sm:text-[1.25rem] font-semibold italic leading-tight">
+              Tap or click anywhere to talk to 6
+            </p>
+          )}
+          <h1 className="brand-grad-text inline-block overflow-visible px-2 text-[2.1rem] sm:text-[2.7rem] font-bold leading-[1.1] tracking-tight">
             {t("title")}
           </h1>
           <p className="brand-grad-text mx-auto mt-1 max-w-[22rem] text-[0.7rem] sm:text-[0.8rem] font-bold uppercase tracking-[0.22em] leading-snug">
@@ -3113,7 +3118,21 @@ const LiveAvatarSessionComponent: React.FC<{
 
       {/* Full screen video */}
       <div
-        className={`relative w-full flex-1 flex items-center justify-center ${isCameraActive ? "pt-24" : ""}`}
+        className={`relative w-full flex-1 flex items-center justify-center ${isCameraActive ? "pt-24" : ""} ${!isActive && !isCameraActive ? "cursor-pointer" : ""}`}
+        onClick={() => {
+          // Tap/click ANYWHERE on the stage to start talking to 6 (aiASAP-style,
+          // G 2026-06-27). Controls are separate fixed elements, so their taps
+          // never bubble here. Mirrors the Start button's guard exactly.
+          if (isActive || isCameraActive) return;
+          if (
+            sessionState !== SessionState.CONNECTED ||
+            !isStreamReady ||
+            voiceStartAwaitingReady ||
+            (isLoading && !isActive)
+          )
+            return;
+          void handleVoiceStartStop();
+        }}
       >
         {/* Avatar video - full screen when camera inactive, small overlay in left corner when active */}
         <video
