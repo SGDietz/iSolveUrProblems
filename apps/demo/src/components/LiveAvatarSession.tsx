@@ -1895,19 +1895,40 @@ const LiveAvatarSessionComponent: React.FC<{
       // return below, so account setup works in normal Start voice (not just Go
       // Live). Inert until the user triggers account setup or is mid-flow. =====
       if (userText) {
+        // DEV-ONLY server-visible breadcrumb: traces whether this handler fires
+        // in normal Start voice and whether the account fast-path engages. We
+        // can't read the browser console without minting 6, so route it to the
+        // dev log via /api/diag-account. Inert in production.
+        const diag = (step: string, extra?: Record<string, unknown>) => {
+          if (process.env.NODE_ENV === "production") return;
+          void fetch("/api/diag-account", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ step, visionMode, ...extra }),
+            keepalive: true,
+          }).catch(() => {});
+        };
+        diag("transcript", { len: userText.length, head: userText.slice(0, 60) });
         try {
           // While collecting the email, route straight to the account flow (a real
           // close still escapes inside takesEmailFastPath).
           if (takesEmailFastPath(signupPorts, signupFlags, userText)) {
-            if (await handleAccountSetupSpeech(userText)) return;
+            diag("emailFastPath:matched");
+            if (await handleAccountSetupSpeech(userText)) {
+              diag("emailFastPath:handled");
+              return;
+            }
           }
           // General trigger ("set up an account" / "remember me") + mid-flow,
           // before any normal vision routing.
-          if (await handleAccountSetupSpeech(userText)) return;
+          const handled = await handleAccountSetupSpeech(userText);
+          diag("speechFlow", { handled });
+          if (handled) return;
         } catch (machineError) {
           // A throw here used to vanish as an unhandled rejection while 6's brain
           // freelanced the signup (the "machine looked dark" failure). Surface it
           // instead of silently dropping to the brain. (aiASAP signup-tracer.)
+          diag("threw", { msg: String(machineError) });
           console.error("[account-flow] machine threw:", machineError);
         }
       }
