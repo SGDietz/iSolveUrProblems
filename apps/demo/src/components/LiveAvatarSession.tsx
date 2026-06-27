@@ -8,7 +8,11 @@ import {
   type SignupFlags,
   type SignupPorts,
 } from "../lib/signup/machine";
-import { extractAccountEmailCandidate } from "../lib/signup/helpers";
+import {
+  extractAccountEmailCandidate,
+  hasEndSessionIntent,
+  isStitchedSessionClose,
+} from "../lib/signup/helpers";
 import { useTranslations } from "next-intl";
 import {
   LiveAvatarContextProvider,
@@ -520,6 +524,9 @@ const LiveAvatarSessionComponent: React.FC<{
   const [chestEmailText, setChestEmailText] = useState("");
   const [chestEmailStatus, setChestEmailStatus] = useState<string | null>(null);
   const [showChestEmail, setShowChestEmail] = useState(false);
+  // Prior user STT fragment — lets an STT-split "close the" + "session" stitch
+  // into one close intent (Herm TASK_034: voice-close was never wired in).
+  const lastUserFragmentRef = useRef<string>("");
   const [emailEntryOpen, setEmailEntryOpen] = useState(false);
   const [typedAccountEmail, setTypedAccountEmail] = useState("");
   const chestEmailTextRef = useRef<string>("");
@@ -1891,6 +1898,29 @@ const LiveAvatarSessionComponent: React.FC<{
         return;
       }
 
+      // ===== Voice-close intent — a genuine "close/end the session" wins BEFORE
+      // any account or vision routing (Herm TASK_034: it was never wired into
+      // this handler, so 6 told G "I can't close the session"). hasEndSessionIntent
+      // is guarded — questions, negations, "remember me / next time", list/shopping
+      // closes, and email spelling never trigger it; an STT-split "close the" +
+      // "session" is stitched onto the prior fragment. =====
+      if (userText) {
+        const priorFrag = lastUserFragmentRef.current;
+        lastUserFragmentRef.current = userText;
+        if (
+          hasEndSessionIntent(userText) ||
+          (priorFrag && isStitchedSessionClose(priorFrag, userText))
+        ) {
+          try {
+            await interrupt();
+          } catch {
+            // never block the close on an interrupt hiccup
+          }
+          handleStopSession();
+          return;
+        }
+      }
+
       // ===== Voice-account fast-path (Step 6b) — MUST run BEFORE the streaming
       // return below, so account setup works in normal Start voice (not just Go
       // Live). Inert until the user triggers account setup or is mid-flow. =====
@@ -2110,6 +2140,10 @@ const LiveAvatarSessionComponent: React.FC<{
     mode,
     repeat,
     isProcessingCameraQuestion,
+    handleAccountSetupSpeech,
+    handleStopSession,
+    signupPorts,
+    signupFlags,
   ]);
 
   // Track if initial analysis has been triggered to prevent repeated automatic analysis
