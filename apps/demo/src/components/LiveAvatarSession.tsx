@@ -1882,6 +1882,20 @@ const LiveAvatarSessionComponent: React.FC<{
         return;
       }
 
+      // ===== Voice-account fast-path (Step 6b) — MUST run BEFORE the streaming
+      // return below, so account setup works in normal Start voice (not just Go
+      // Live). Inert until the user triggers account setup or is mid-flow. =====
+      if (userText) {
+        // While collecting the email, route straight to the account flow (a real
+        // close still escapes inside takesEmailFastPath).
+        if (takesEmailFastPath(signupPorts, signupFlags, userText)) {
+          if (await handleAccountSetupSpeech(userText)) return;
+        }
+        // General trigger ("set up an account" / "remember me") + mid-flow,
+        // before any normal vision routing.
+        if (await handleAccountSetupSpeech(userText)) return;
+      }
+
       // Only process in streaming mode (Go Live)
       if (visionMode !== "streaming") {
         console.log("Not in streaming mode, skipping transcription processing");
@@ -2952,6 +2966,25 @@ const LiveAvatarSessionComponent: React.FC<{
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chest-email box (Step 6b): the email 6 captured by voice, shown on his
+          chest. 6 NEVER reads it aloud — the box is the source of truth. Hidden
+          unless account setup is collecting/sending; never covers the controls. */}
+      {showChestEmail && (
+        <div className="pointer-events-none absolute left-1/2 top-[52%] z-20 w-[78%] max-w-[22rem] -translate-x-1/2 -translate-y-1/2 text-center">
+          <div className="brand-pill mx-auto px-4 py-3">
+            {chestEmailStatus ? (
+              <div className="brand-grad-text text-sm font-semibold tracking-wide">
+                {chestEmailStatus}
+              </div>
+            ) : (
+              <div className="brand-grad-text font-mono text-base leading-snug break-all sm:text-lg">
+                {chestEmailText || " "}
+              </div>
+            )}
           </div>
         </div>
       )}
