@@ -35,15 +35,15 @@ import { HeaderControls } from "./HeaderControls";
 // Example "what's your problem" prompt pills shown before 6 starts — what folks
 // come to him with around the house and yard. He helps with all of them.
 const PROBLEM_PROMPTS = [
-  "Leaky faucet",
-  "Brown lawn",
-  "Squeaky door",
-  "Cracked wall",
-  "Clogged drain",
-  "Garden weeds",
-  "Stuck window",
-  "Running toilet",
-  "Clogged gutters",
+  "Leaky Faucet",
+  "Brown Lawn",
+  "Squeaky Door",
+  "Cracked Wall",
+  "Clogged Drain",
+  "Weeds & Crabgrass",
+  "Stuck Window",
+  "Running Toilet",
+  "Clogged Gutters",
 ];
 
 export type SessionStoppedReason = { reason?: "inactivity" };
