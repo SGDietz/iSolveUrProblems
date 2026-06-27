@@ -796,6 +796,15 @@ const LiveAvatarSessionComponent: React.FC<{
       get greetingCount() { return deviceProfileRef.current.greetingCount; },
       get chestText() { return chestEmailTextRef.current; },
       say: async (text: string, opts?: { remember?: boolean }) => {
+        // Cut the avatar's server brain BEFORE every scripted account line so the
+        // machine owns the turn. iSolve-6's brain (context 459ae665) is NOT
+        // patched for accounts, so without this it freelances "I can't help with
+        // accounts" over the scripted flow (smoke 2026-06-27).
+        try {
+          await interrupt();
+        } catch {
+          // never block the scripted line on an interrupt hiccup
+        }
         await repeat(text);
         lastAvatarResponseRef.current = text;
         if (opts?.remember) rememberConversationLine("assistant", text);
@@ -821,7 +830,7 @@ const LiveAvatarSessionComponent: React.FC<{
       clearEntry: () => clearAccountEmailEntry(),
       now: () => Date.now(),
     }),
-    [clearAccountEmailEntry, rememberConversationLine, repeat, revealEmailChars, startAccountSetup],
+    [clearAccountEmailEntry, interrupt, rememberConversationLine, repeat, revealEmailChars, startAccountSetup],
   );
 
   const handleAccountSetupSpeech = useCallback(
@@ -1886,14 +1895,21 @@ const LiveAvatarSessionComponent: React.FC<{
       // return below, so account setup works in normal Start voice (not just Go
       // Live). Inert until the user triggers account setup or is mid-flow. =====
       if (userText) {
-        // While collecting the email, route straight to the account flow (a real
-        // close still escapes inside takesEmailFastPath).
-        if (takesEmailFastPath(signupPorts, signupFlags, userText)) {
+        try {
+          // While collecting the email, route straight to the account flow (a real
+          // close still escapes inside takesEmailFastPath).
+          if (takesEmailFastPath(signupPorts, signupFlags, userText)) {
+            if (await handleAccountSetupSpeech(userText)) return;
+          }
+          // General trigger ("set up an account" / "remember me") + mid-flow,
+          // before any normal vision routing.
           if (await handleAccountSetupSpeech(userText)) return;
+        } catch (machineError) {
+          // A throw here used to vanish as an unhandled rejection while 6's brain
+          // freelanced the signup (the "machine looked dark" failure). Surface it
+          // instead of silently dropping to the brain. (aiASAP signup-tracer.)
+          console.error("[account-flow] machine threw:", machineError);
         }
-        // General trigger ("set up an account" / "remember me") + mid-flow,
-        // before any normal vision routing.
-        if (await handleAccountSetupSpeech(userText)) return;
       }
 
       // Only process in streaming mode (Go Live)
