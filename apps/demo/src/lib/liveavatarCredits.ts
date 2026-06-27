@@ -117,7 +117,23 @@ export async function getCreditsUsedToday(): Promise<number> {
 export async function assertCanMintSessionToken(): Promise<
   { ok: true } | { ok: false; message: string }
 > {
-  if (!isLiveAvatarCreditLimitEnabled()) return { ok: true };
+  // Explicit opt-out (local/dev only): cap deliberately turned off via env.
+  if (process.env.LIVEAVATAR_CREDIT_LIMIT_DISABLED === "1") return { ok: true };
+
+  // MONEY GUARD (safety posture ported from aiASAP): when no credit store is
+  // configured we cannot enforce the daily cap. FAIL CLOSED in production so the
+  // live site can never mint uncapped paid LiveAvatar sessions. (Was fail-open.)
+  if (!isLiveAvatarCreditLimitEnabled()) {
+    if (process.env.NODE_ENV === "production") {
+      return {
+        ok: false,
+        message:
+          "Usage limit could not be verified. Please try again in a few minutes.",
+      };
+    }
+    return { ok: true };
+  }
+
   try {
     const used = await getCreditsUsedToday();
     const limit = getDailyCreditLimit();
