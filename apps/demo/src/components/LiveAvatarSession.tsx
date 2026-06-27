@@ -2983,8 +2983,27 @@ const LiveAvatarSessionComponent: React.FC<{
     },
   });
 
+  // aiASAP-style "tap/click ANYWHERE to talk to 6": show a full-screen
+  // transparent begin surface once the avatar stream is live but before the
+  // user has started, so a tap anywhere starts 6. Hides the moment he's active
+  // or starting (voiceStartAwaitingReady) so it can't double-fire.
+  const shouldShowBeginSurface =
+    !isCameraActive &&
+    !isActive &&
+    sessionState === SessionState.CONNECTED &&
+    isStreamReady &&
+    !voiceStartAwaitingReady;
+
   return (
     <div className="site-bg fixed inset-0 w-screen h-screen flex flex-col">
+      {shouldShowBeginSurface && (
+        <button
+          type="button"
+          aria-label="Tap or click anywhere to talk to 6"
+          className="fixed inset-0 z-30 cursor-pointer bg-transparent"
+          onClick={() => void handleVoiceStartStop()}
+        />
+      )}
       <GoLivePrivacyBanner
         active={isCameraActive && visionMode === "streaming"}
       />
@@ -3118,21 +3137,7 @@ const LiveAvatarSessionComponent: React.FC<{
 
       {/* Full screen video */}
       <div
-        className={`relative w-full flex-1 flex items-center justify-center ${isCameraActive ? "pt-24" : ""} ${!isActive && !isCameraActive ? "cursor-pointer" : ""}`}
-        onClick={() => {
-          // Tap/click ANYWHERE on the stage to start talking to 6 (aiASAP-style,
-          // G 2026-06-27). Controls are separate fixed elements, so their taps
-          // never bubble here. Mirrors the Start button's guard exactly.
-          if (isActive || isCameraActive) return;
-          if (
-            sessionState !== SessionState.CONNECTED ||
-            !isStreamReady ||
-            voiceStartAwaitingReady ||
-            (isLoading && !isActive)
-          )
-            return;
-          void handleVoiceStartStop();
-        }}
+        className={`relative w-full flex-1 flex items-center justify-center ${isCameraActive ? "pt-24" : ""}`}
       >
         {/* Avatar video - full screen when camera inactive, small overlay in left corner when active */}
         <video
