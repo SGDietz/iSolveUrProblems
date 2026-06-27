@@ -1,6 +1,14 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import {
+  takesEmailFastPath,
+  accountSetupSpeechFlow,
+  confirmEmailCandidateFlow,
+  type SignupFlags,
+  type SignupPorts,
+} from "../lib/signup/machine";
+import { extractAccountEmailCandidate } from "../lib/signup/helpers";
 import { useTranslations } from "next-intl";
 import {
   LiveAvatarContextProvider,
@@ -474,6 +482,382 @@ const LiveAvatarSessionComponent: React.FC<{
     isStreamReady,
     ensureAudioOutputReady,
   ]);
+
+  // ===== Voice-account graft (Step 6b) — engine in src/lib/signup, body wired here =====
+  // Machine state (mirrors SignupPorts 1:1).
+  const accountSetupAwaitingReadyRef = useRef(false);
+  const accountSetupAwaitingEmailRef = useRef(false);
+  const accountSetupAwaitingNameRef = useRef(false);
+  const accountSetupAwaitingSendRef = useRef(false);
+  const accountSetupPendingEmailRef = useRef<string | null>(null);
+  const accountSetupRejectedEmailRef = useRef<string | null>(null);
+  const accountSetupSendEmailRef = useRef<string | null>(null);
+  const accountSetupEmailMissCountRef = useRef(0);
+  const accountSetupOfferMadeRef = useRef(false);
+  const accountSetupDeclinedAtRef = useRef(0);
+  const accountSetupSendArmedAtRef = useRef(0);
+  const accountSetupSendArmedByTextRef = useRef<string | null>(null);
+  const lastAvatarParsedEmailRef = useRef<string | null>(null);
+  const lastAccountLinkSendRef = useRef<{ email: string; at: number } | null>(null);
+  const accountPendingStateTokenRef = useRef<string | null>(null);
+  // Signed-in / profile mirrors. Signed-in users never re-enter signup.
+  const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const accountEmailRef = useRef<string | null>(null);
+  const accountSignedInRef = useRef(false);
+  const deviceProfileRef = useRef<{ name: string | null; greetingCount: number }>({
+    name: null,
+    greetingCount: 0,
+  });
+  const isAvatarTalkingRef = useRef(false);
+  useEffect(() => {
+    isAvatarTalkingRef.current = isAvatarTalking;
+  }, [isAvatarTalking]);
+  useEffect(() => {
+    accountEmailRef.current = accountEmail;
+    accountSignedInRef.current = !!accountEmail;
+  }, [accountEmail]);
+  // Chest-email box + letter-reveal machinery.
+  const [chestEmailText, setChestEmailText] = useState("");
+  const [chestEmailStatus, setChestEmailStatus] = useState<string | null>(null);
+  const [showChestEmail, setShowChestEmail] = useState(false);
+  const [emailEntryOpen, setEmailEntryOpen] = useState(false);
+  const [typedAccountEmail, setTypedAccountEmail] = useState("");
+  const chestEmailTextRef = useRef<string>("");
+  const chestRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chestRevealActiveRef = useRef(false);
+  const chestStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tickAudioCtxRef = useRef<AudioContext | null>(null);
+  // Minimal resume buffer so 6 can pick up the thread next time.
+  const conversationBufferRef = useRef<Array<{ role: "user" | "assistant"; text: string }>>([]);
+  const rememberConversationLine = useCallback(
+    (role: "user" | "assistant", text: string) => {
+      const t = text.trim();
+      if (!t) return;
+      conversationBufferRef.current.push({ role, text: t });
+      if (conversationBufferRef.current.length > 40) {
+        conversationBufferRef.current = conversationBufferRef.current.slice(-40);
+      }
+    },
+    [],
+  );
+  const buildAccountResumeState = useCallback(
+    () => ({ recentConversation: conversationBufferRef.current.slice(-20) }),
+    [],
+  );
+
+  // Synthesized typewriter click for the chest reveal (ported from aiASAP).
+  const playTypewriterClick = useCallback((seed: number) => {
+    if (typeof window === "undefined") return;
+    try {
+      const Ctor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return;
+      if (!tickAudioCtxRef.current) tickAudioCtxRef.current = new Ctor();
+      const ctx = tickAudioCtxRef.current;
+      if (!ctx) return;
+      if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+      const now = ctx.currentTime;
+      const jitter = ((seed % 7) - 3) / 100 + ((now * 1000) % 9) / 1000;
+      const gainScale = 0.8 + (seed % 5) / 12;
+      const noiseDur = 0.022;
+      const frameCount = Math.max(1, Math.floor(ctx.sampleRate * noiseDur));
+      const buffer = ctx.createBuffer(1, frameCount, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < frameCount; i += 1) {
+        const v = Math.sin((i + seed) * 12.9898) * 43758.5453;
+        data[i] = (v - Math.floor(v)) * 2 - 1;
+      }
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const noiseFilter = ctx.createBiquadFilter();
+      noiseFilter.type = "bandpass";
+      noiseFilter.frequency.value = 2300 + (seed % 11) * 70;
+      noiseFilter.Q.value = 0.9;
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.0001, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.5 * gainScale, now + 0.001);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + noiseDur);
+      noise.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(ctx.destination);
+      noise.start(now);
+      noise.stop(now + noiseDur);
+      const osc = ctx.createOscillator();
+      osc.type = "square";
+      osc.frequency.value = 2600 + jitter * 1200 + (seed % 9) * 40;
+      const oscGain = ctx.createGain();
+      oscGain.gain.setValueAtTime(0.0001, now);
+      oscGain.gain.exponentialRampToValueAtTime(0.12 * gainScale, now + 0.001);
+      oscGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.01);
+      osc.connect(oscGain);
+      oscGain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.012);
+    } catch {
+      // Audio is best-effort; never let a click break the reveal.
+    }
+  }, []);
+
+  // Reveal added email chars one-by-one on 6's chest (ported from aiASAP).
+  const revealEmailChars = useCallback(
+    (fromText: string, addedChars: string): Promise<string> => {
+      const full = `${fromText}${addedChars}`;
+      if (chestRevealTimerRef.current) {
+        clearTimeout(chestRevealTimerRef.current);
+        chestRevealTimerRef.current = null;
+      }
+      const chars = addedChars.split("");
+      if (chars.length === 0) {
+        setChestEmailText(full);
+        chestRevealActiveRef.current = false;
+        return Promise.resolve(full);
+      }
+      return new Promise<string>((resolve) => {
+        chestRevealActiveRef.current = true;
+        let shown = fromText;
+        let i = 0;
+        const step = () => {
+          const ch = chars[i];
+          shown += ch;
+          i += 1;
+          setChestEmailText(shown);
+          playTypewriterClick(ch.charCodeAt(0) + i);
+          if (i < chars.length) {
+            const delay = 95 + (ch.charCodeAt(0) % 16);
+            chestRevealTimerRef.current = setTimeout(step, delay);
+          } else {
+            chestRevealTimerRef.current = null;
+            chestRevealActiveRef.current = false;
+            setChestEmailText(full);
+            resolve(full);
+          }
+        };
+        chestRevealTimerRef.current = setTimeout(step, 0);
+      });
+    },
+    [playTypewriterClick],
+  );
+
+  const clearAccountEmailEntry = useCallback(() => {
+    accountSetupAwaitingReadyRef.current = false;
+    accountSetupAwaitingEmailRef.current = false;
+    accountSetupAwaitingNameRef.current = false;
+    accountSetupPendingEmailRef.current = null;
+    accountSetupRejectedEmailRef.current = null;
+    accountSetupAwaitingSendRef.current = false;
+    accountSetupSendEmailRef.current = null;
+    accountSetupEmailMissCountRef.current = 0;
+    lastAvatarParsedEmailRef.current = null;
+    chestEmailTextRef.current = "";
+    setEmailEntryOpen(false);
+    setTypedAccountEmail("");
+    setChestEmailText("");
+    setChestEmailStatus(null);
+    setShowChestEmail(false);
+    if (chestRevealTimerRef.current) {
+      clearTimeout(chestRevealTimerRef.current);
+      chestRevealTimerRef.current = null;
+    }
+    chestRevealActiveRef.current = false;
+    if (chestStatusTimerRef.current) {
+      clearTimeout(chestStatusTimerRef.current);
+      chestStatusTimerRef.current = null;
+    }
+  }, []);
+
+  // Fire the magic link via /api/account/start (adapted from aiASAP).
+  const startAccountSetup = useCallback(
+    async (email: string): Promise<boolean> => {
+      const normalizedEmail = email.trim().toLowerCase();
+      const prev = lastAccountLinkSendRef.current;
+      if (prev && prev.email === normalizedEmail && Date.now() - prev.at < 90000) {
+        const spoken =
+          "I already sent that sign-in link a moment ago - check your email, it can take a minute to land.";
+        await repeat(spoken);
+        lastAvatarResponseRef.current = spoken;
+        rememberConversationLine("assistant", spoken);
+        return true;
+      }
+      lastAccountLinkSendRef.current = { email: normalizedEmail, at: Date.now() };
+      setChestEmailStatus("Sending Email...");
+      setShowChestEmail(true);
+      try {
+        const response = await fetch("/api/account/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: normalizedEmail,
+            fullName: deviceProfileRef.current.name,
+            sessionId: dbSessionIdRef.current,
+            lists: [],
+            resumeState: buildAccountResumeState(),
+          }),
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.error || "Failed to send account link");
+        const pendingStateToken =
+          typeof data?.pendingStateToken === "string" ? data.pendingStateToken : null;
+        accountPendingStateTokenRef.current = pendingStateToken;
+        try {
+          if (pendingStateToken) {
+            window.localStorage.setItem("isolve.account.pending_state_token", pendingStateToken);
+          } else {
+            window.localStorage.removeItem("isolve.account.pending_state_token");
+          }
+        } catch {
+          // pending state is still stored server-side
+        }
+        const spoken = data?.emailSent
+          ? "Done. I sent you an email. Check for it now and click the link. When you come back, we'll pick up right where we left off."
+          : "I saved your email, but the email sender is not fully connected yet. I made a note for G to finish account email before this goes live.";
+        await repeat(spoken);
+        lastAvatarResponseRef.current = spoken;
+        rememberConversationLine("assistant", spoken);
+        accountSetupOfferMadeRef.current = false;
+        accountSetupDeclinedAtRef.current = 0;
+        accountSetupEmailMissCountRef.current = 0;
+        setEmailEntryOpen(false);
+        setTypedAccountEmail("");
+        if (chestRevealTimerRef.current) {
+          clearTimeout(chestRevealTimerRef.current);
+          chestRevealTimerRef.current = null;
+        }
+        chestRevealActiveRef.current = false;
+        if (data?.emailSent) {
+          lastAvatarParsedEmailRef.current = null;
+          chestEmailTextRef.current = "";
+          setChestEmailText("");
+          setChestEmailStatus("Email Link Sent");
+          setShowChestEmail(true);
+          if (chestStatusTimerRef.current) clearTimeout(chestStatusTimerRef.current);
+          chestStatusTimerRef.current = setTimeout(() => {
+            setShowChestEmail(false);
+            setChestEmailStatus(null);
+            setChestEmailText("");
+            chestStatusTimerRef.current = null;
+          }, 2200);
+        } else {
+          setChestEmailText("");
+          setChestEmailStatus(null);
+          setShowChestEmail(false);
+        }
+        return true;
+      } catch (error) {
+        console.error("Account setup failed:", error);
+        setChestEmailStatus(null);
+        setShowChestEmail(false);
+        const spoken =
+          "I had trouble setting up that email link. I made a note for G to fix account setup.";
+        await repeat(spoken);
+        lastAvatarResponseRef.current = spoken;
+        rememberConversationLine("assistant", spoken);
+        return true;
+      }
+    },
+    [repeat, rememberConversationLine, buildAccountResumeState],
+  );
+
+  const signupFlags = useMemo<SignupFlags>(
+    () => ({ accountBetaDisabled: false, emailTypedFallbackEnabled: false }),
+    [],
+  );
+  const signupPorts = useMemo<SignupPorts>(
+    () => ({
+      get awaitingReady() { return accountSetupAwaitingReadyRef.current; },
+      set awaitingReady(v: boolean) { accountSetupAwaitingReadyRef.current = v; },
+      get awaitingEmail() { return accountSetupAwaitingEmailRef.current; },
+      set awaitingEmail(v: boolean) { accountSetupAwaitingEmailRef.current = v; },
+      get awaitingName() { return accountSetupAwaitingNameRef.current; },
+      set awaitingName(v: boolean) { accountSetupAwaitingNameRef.current = v; },
+      get awaitingSend() { return accountSetupAwaitingSendRef.current; },
+      set awaitingSend(v: boolean) { accountSetupAwaitingSendRef.current = v; },
+      get pendingEmail() { return accountSetupPendingEmailRef.current; },
+      set pendingEmail(v: string | null) { accountSetupPendingEmailRef.current = v; },
+      get rejectedEmail() { return accountSetupRejectedEmailRef.current; },
+      set rejectedEmail(v: string | null) { accountSetupRejectedEmailRef.current = v; },
+      get sendEmail() { return accountSetupSendEmailRef.current; },
+      set sendEmail(v: string | null) { accountSetupSendEmailRef.current = v; },
+      get emailMissCount() { return accountSetupEmailMissCountRef.current; },
+      set emailMissCount(v: number) { accountSetupEmailMissCountRef.current = v; },
+      get offerMade() { return accountSetupOfferMadeRef.current; },
+      set offerMade(v: boolean) { accountSetupOfferMadeRef.current = v; },
+      get declinedAt() { return accountSetupDeclinedAtRef.current; },
+      set declinedAt(v: number) { accountSetupDeclinedAtRef.current = v; },
+      get lastParsedEmail() { return lastAvatarParsedEmailRef.current; },
+      set lastParsedEmail(v: string | null) { lastAvatarParsedEmailRef.current = v; },
+      get sendArmedAt() { return accountSetupSendArmedAtRef.current; },
+      set sendArmedAt(v: number) { accountSetupSendArmedAtRef.current = v; },
+      get sendArmedByText() { return accountSetupSendArmedByTextRef.current; },
+      set sendArmedByText(v: string | null) { accountSetupSendArmedByTextRef.current = v; },
+      get signedIn() { return accountSignedInRef.current; },
+      get avatarTalking() { return isAvatarTalkingRef.current; },
+      get userName() { return deviceProfileRef.current.name; },
+      get greetingCount() { return deviceProfileRef.current.greetingCount; },
+      get chestText() { return chestEmailTextRef.current; },
+      say: async (text: string, opts?: { remember?: boolean }) => {
+        await repeat(text);
+        lastAvatarResponseRef.current = text;
+        if (opts?.remember) rememberConversationLine("assistant", text);
+      },
+      saveName: (name: string) => {
+        deviceProfileRef.current = { ...deviceProfileRef.current, name };
+      },
+      showChest: () => setShowChestEmail(true),
+      setChestDisplay: (text: string) => {
+        chestEmailTextRef.current = text;
+        setChestEmailText(text);
+      },
+      revealChars: async (fromText: string, addedChars: string) => {
+        await revealEmailChars(fromText, addedChars);
+      },
+      clearRevealActive: () => {
+        chestRevealActiveRef.current = false;
+      },
+      openTypedBox: () => setEmailEntryOpen(true),
+      closeTypedBox: () => setEmailEntryOpen(false),
+      setTypedEmail: (value: string) => setTypedAccountEmail(value),
+      startAccountSetup: (email: string) => startAccountSetup(email),
+      clearEntry: () => clearAccountEmailEntry(),
+      now: () => Date.now(),
+    }),
+    [clearAccountEmailEntry, rememberConversationLine, repeat, revealEmailChars, startAccountSetup],
+  );
+
+  const handleAccountSetupSpeech = useCallback(
+    (userText: string) => {
+      // A signed-in user NEVER re-enters signup (switch accounts = log out path).
+      if (accountEmailRef.current) return Promise.resolve(false);
+      return accountSetupSpeechFlow(signupPorts, signupFlags, userText);
+    },
+    [signupPorts, signupFlags],
+  );
+
+  const handleTypedAccountEmailSubmit = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const candidate = extractAccountEmailCandidate(typedAccountEmail, null);
+      await confirmEmailCandidateFlow(signupPorts, candidate ?? typedAccountEmail);
+    },
+    [signupPorts, typedAccountEmail],
+  );
+
+  // Cleanup chest timers + audio context on unmount.
+  useEffect(() => {
+    return () => {
+      if (chestRevealTimerRef.current) clearTimeout(chestRevealTimerRef.current);
+      if (chestStatusTimerRef.current) clearTimeout(chestStatusTimerRef.current);
+      if (tickAudioCtxRef.current) {
+        try {
+          void tickAudioCtxRef.current.close();
+        } catch {
+          // ignore audio teardown errors
+        }
+        tickAudioCtxRef.current = null;
+      }
+    };
+  }, []);
+  // ===== end voice-account graft (Layer 1: wiring) =====
 
   // Probe mic permission state on mount + listen for changes. Falls back to
   // "prompt" if the browser doesn't expose Permissions API for microphone
