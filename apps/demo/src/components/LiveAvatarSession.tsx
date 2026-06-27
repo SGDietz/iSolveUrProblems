@@ -2931,7 +2931,7 @@ const LiveAvatarSessionComponent: React.FC<{
   });
 
   return (
-    <div className="fixed inset-0 w-screen h-screen bg-black flex flex-col">
+    <div className="site-bg fixed inset-0 w-screen h-screen flex flex-col">
       <GoLivePrivacyBanner
         active={isCameraActive && visionMode === "streaming"}
       />
@@ -3010,7 +3010,7 @@ const LiveAvatarSessionComponent: React.FC<{
       {/* Chest-email box (Step 6b): the email 6 captured by voice, shown on his
           chest. 6 NEVER reads it aloud — the box is the source of truth. Hidden
           unless account setup is collecting/sending; never covers the controls. */}
-      {showChestEmail && (
+      {showChestEmail && (chestEmailStatus || chestEmailText) && (
         <div className="pointer-events-none absolute left-1/2 top-[52%] z-20 w-[78%] max-w-[22rem] -translate-x-1/2 -translate-y-1/2 text-center">
           <div className="brand-pill mx-auto px-4 py-3">
             {chestEmailStatus ? (
@@ -3027,7 +3027,7 @@ const LiveAvatarSessionComponent: React.FC<{
       )}
 
       {/* Text overlays at the top */}
-      <div className="absolute top-0 left-0 right-0 z-10 flex flex-col items-center pt-6 pb-2">
+      <div className="absolute top-0 left-0 right-0 z-10 flex flex-col items-center pt-6 pb-2 md:pt-[4.5vh]">
         <div className="text-center px-4 mb-2">
           <h1 className="brand-grad-text inline-block overflow-visible px-2 text-[1.5rem] sm:text-[2rem] font-bold leading-[1.12] tracking-tight">
             {t("title")}
@@ -3286,7 +3286,7 @@ const LiveAvatarSessionComponent: React.FC<{
           )}
 
           {visionMode !== "streaming" && !isCameraActive && (
-            <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-[95%] max-w-7xl z-20 px-4 pb-2 flex flex-col items-center">
+            <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-[95%] max-w-7xl z-20 px-4 pb-2 md:pb-[2.5vh] flex flex-col items-center">
               {sessionState !== SessionState.DISCONNECTED &&
                 !isAvatarTalking &&
                 isStreamReady && (
@@ -3313,7 +3313,7 @@ const LiveAvatarSessionComponent: React.FC<{
                 <div className="grid grid-cols-2 gap-3 mb-2.5">
                   <button
                     type="button"
-                    className="brand-pill col-span-2 py-2 px-3 rounded-full flex items-center justify-center text-sm font-semibold whitespace-nowrap min-h-[2.85rem]"
+                    className="brand-pill col-span-2 py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
                     onClick={() => {
                       // Functional guard (no `disabled` attribute) so the browser
                       // doesn't apply :disabled styling that makes this button
@@ -3376,21 +3376,21 @@ const LiveAvatarSessionComponent: React.FC<{
                 <div className="grid grid-cols-2 gap-3 mb-2.5">
                   <button
                     type="button"
-                    className="brand-pill py-2 px-3 rounded-full flex items-center justify-center text-sm font-semibold whitespace-nowrap min-h-[2.85rem]"
+                    className="brand-pill py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
                     onClick={async () => {
                       await unlockAudio();
                       void handleCameraClick();
                     }}
                   >
-                    <Camera className="mr-1.5 w-4 h-4 shrink-0" strokeWidth={3} aria-hidden />
+                    <Camera className="mr-2 w-5 h-5 shrink-0" strokeWidth={3} aria-hidden />
                     <span className="brand-grad-text">{t("camera")}</span>
                   </button>
                   <button
                     type="button"
-                    className="brand-pill py-2 px-3 rounded-full flex items-center justify-center text-sm font-semibold whitespace-nowrap min-h-[2.85rem]"
+                    className="brand-pill py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
                     onClick={() => void handleGalleryClick()}
                   >
-                    <Images className="mr-1.5 w-4 h-4 shrink-0" strokeWidth={3} aria-hidden />
+                    <Images className="mr-2 w-5 h-5 shrink-0" strokeWidth={3} aria-hidden />
                     <span className="brand-grad-text">{t("gallery")}</span>
                   </button>
                 </div>
