@@ -3064,6 +3064,30 @@ const LiveAvatarSessionComponent: React.FC<{
           onClick={() => void handleVoiceStartStop()}
         />
       )}
+
+      {/* Tap/Click ANYWHERE To Talk To 6 — EXACT aiASAP prompt (position + style),
+          shown before 6 starts. pointer-events-none so the tap falls through to
+          the begin surface. (G 2026-06-27.) */}
+      {shouldShowBeginSurface && (
+        <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.14)] md:bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.22)] -translate-x-1/2 w-[94%] max-w-3xl z-40 px-3 flex flex-col items-center">
+          <p className="px-1 w-full max-w-none text-balance text-center">
+            <span className="inline-flex flex-col items-center justify-center gap-1 drop-shadow-[0_10px_28px_rgba(0,0,0,0.6)]">
+              <span
+                className="flex items-center text-[calc(var(--stage-width)*0.05)] font-bold italic tracking-[0.14em] bg-gradient-to-b from-[#ffe9c2] via-[#d7a05a] to-[#9e6a35] bg-clip-text text-transparent drop-shadow-[0_2px_18px_rgba(0,0,0,0.85)]"
+                style={{ fontFamily: '"Lora", Georgia, serif' }}
+              >
+                Tap/Click ANYWHERE
+              </span>
+              <span
+                className="text-[calc(var(--stage-width)*0.10)] font-extrabold tracking-[-0.025em] leading-none bg-gradient-to-b from-[#ffe9c2] via-[#d7a05a] to-[#3a2108] bg-clip-text text-transparent drop-shadow-[0_2px_18px_rgba(0,0,0,0.85)]"
+                style={{ fontFamily: '"Lora", Georgia, serif' }}
+              >
+                To Talk To 6
+              </span>
+            </span>
+          </p>
+        </div>
+      )}
       <GoLivePrivacyBanner
         active={isCameraActive && visionMode === "streaming"}
       />
@@ -3161,11 +3185,8 @@ const LiveAvatarSessionComponent: React.FC<{
       {/* Text overlays at the top */}
       <div className="absolute top-0 left-0 right-0 z-10 flex flex-col items-center pt-6 pb-2 md:pt-[4.5vh]">
         <div className="text-center px-4 mb-2">
-          {!isActive && (
-            <p className="brand-grad-text mb-1.5 text-[1.05rem] sm:text-[1.25rem] font-semibold italic leading-tight">
-              Tap or click anywhere to talk to 6
-            </p>
-          )}
+          {/* Small top tap line replaced by the big aiASAP-exact "Tap/Click
+              ANYWHERE To Talk To 6" prompt lower on the stage (G 2026-06-27). */}
           <h1 className="brand-grad-text inline-block overflow-visible px-2 text-[2.1rem] sm:text-[2.7rem] font-bold leading-[1.1] tracking-tight">
             {t("title")}
           </h1>
@@ -3439,23 +3460,22 @@ const LiveAvatarSessionComponent: React.FC<{
                   </div>
                 )} 
               <div className="mx-auto w-full max-w-sm">
-                {/* 3 problem-prompt pills — the normal state, shown before AND
-                    while talking to 6 (G 2026-06-27). Tap one to start him when
-                    idle; once he's live they're just idea prompts. */}
-                <div className="grid gap-2.5 mb-2.5">
-                  {promptPills.map((prompt, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => {
-                        if (!isActive) void handleVoiceStartStop();
-                      }}
-                      className="brand-pill py-2.5 px-4 rounded-full flex items-center justify-center text-center text-base sm:text-lg font-semibold leading-tight min-h-[3.2rem]"
-                    >
-                      <span className="brand-grad-text">{prompt}</span>
-                    </button>
-                  ))}
-                </div>
+                {/* 3 problem-prompt pills — the normal state WHILE talking to 6
+                    (G 2026-06-27 screenshot). Before he starts, the big aiASAP
+                    "Tap anywhere" prompt shows instead, so they never overlap. */}
+                {isActive && (
+                  <div className="grid gap-2.5 mb-2.5">
+                    {promptPills.map((prompt, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        className="brand-pill py-2.5 px-4 rounded-full flex items-center justify-center text-center text-base sm:text-lg font-semibold leading-tight min-h-[3.2rem]"
+                      >
+                        <span className="brand-grad-text">{prompt}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {/* Start/Stop removed (G 2026-06-27): tap anywhere starts 6; voice
                     "close the session" stops him. The 3 problem pills above replace
                     it; Camera | Gallery stay side-by-side below. */}
