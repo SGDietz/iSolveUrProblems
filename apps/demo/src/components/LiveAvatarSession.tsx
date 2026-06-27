@@ -32,6 +32,20 @@ import { useGoLiveStreamer } from "../lib/vision/useGoLiveStreamer";
 import { GoLivePrivacyBanner } from "./GoLivePrivacyBanner";
 import { HeaderControls } from "./HeaderControls";
 
+// Example "what's your problem" prompt pills shown before 6 starts — what folks
+// come to him with around the house and yard. He helps with all of them.
+const PROBLEM_PROMPTS = [
+  "My faucet won't stop dripping",
+  "Brown patches in my lawn",
+  "A door that keeps squeaking",
+  "Cracks creeping up my wall",
+  "A drain that keeps clogging",
+  "Weeds taking over my garden",
+  "A window painted shut",
+  "My toilet keeps running",
+  "Gutters overflowing every storm",
+];
+
 export type SessionStoppedReason = { reason?: "inactivity" };
 
 const VOICE_START_GREETING =
@@ -528,6 +542,20 @@ const LiveAvatarSessionComponent: React.FC<{
   // Prior user STT fragment — lets an STT-split "close the" + "session" stitch
   // into one close intent (Herm TASK_034: voice-close was never wired in).
   const lastUserFragmentRef = useRef<string>("");
+  // 3 example problem pills (G 2026-06-27): show before 6 starts; tap anywhere
+  // to talk. Picked after mount for variety (G loves the random chaos); SSR
+  // renders the first 3 to avoid a hydration mismatch.
+  const [promptPills, setPromptPills] = useState<string[]>(() =>
+    PROBLEM_PROMPTS.slice(0, 3),
+  );
+  useEffect(() => {
+    const pool = [...PROBLEM_PROMPTS];
+    const picked: string[] = [];
+    while (picked.length < 3 && pool.length) {
+      picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    }
+    setPromptPills(picked);
+  }, []);
   const [emailEntryOpen, setEmailEntryOpen] = useState(false);
   const [typedAccountEmail, setTypedAccountEmail] = useState("");
   const chestEmailTextRef = useRef<string>("");
@@ -3372,9 +3400,7 @@ const LiveAvatarSessionComponent: React.FC<{
                       {!isActive ? (
                         voiceStartAwaitingReady ? (
                           <span className="block">{t("starting")}</span>
-                        ) : (
-                          <span className="block text-[1rem] sm:text-[1.1rem]">{t("tapStartToBegin")}</span>
-                        )
+                        ) : null
                       ) : (
                         <>
                           <span className="block">{t("tell6")}</span>
@@ -3387,69 +3413,21 @@ const LiveAvatarSessionComponent: React.FC<{
                   </div>
                 )} 
               <div className="mx-auto w-full max-w-sm">
-                <div className="grid grid-cols-2 gap-3 mb-2.5">
-                  <button
-                    type="button"
-                    className="brand-pill col-span-2 py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
-                    onClick={() => {
-                      // Functional guard (no `disabled` attribute) so the browser
-                      // doesn't apply :disabled styling that makes this button
-                      // look different than the other 3 home buttons.
-                      if (
-                        sessionState !== SessionState.CONNECTED ||
-                        !isStreamReady ||
-                        voiceStartAwaitingReady ||
-                        (isLoading && !isActive)
-                      )
-                        return;
-                      void handleVoiceStartStop();
-                    }}
-                  >
-                    {/* <span className="inline-flex items-center gap-1.5">
-                      <span
-                        aria-hidden
-                        className={isActive ? "" : "text-[0.8em] leading-none"}
+                {!isActive && (
+                  <div className="grid gap-2.5 mb-2.5">
+                    {promptPills.map((prompt, i) => (
+                      <div
+                        key={i}
+                        className="brand-pill py-2.5 px-4 rounded-full flex items-center justify-center text-center text-base sm:text-lg font-semibold leading-tight min-h-[3.2rem]"
                       >
-                        {isActive ? "⏹" : "▶"}
-                      </span>
-                      <span className={isActive ? "" : "-ml-0.5"}>
-                        {isActive ? "Stop" : "Start"}
-                      </span>
-                    </span> */}
-                    {isActive ? (
-                      <svg
-                        className="mr-1.5 w-3.5 h-3.5 shrink-0"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={3}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden
-                      >
-                        <rect width="18" height="18" x="3" y="3" rx="2" />
-                        <rect x="10" y="10" width="4" height="4" fill="currentColor" stroke="none" />
-                      </svg>
-                    ) : (
-                      <svg
-                        className="mr-1.5 w-4 h-4 shrink-0"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={3}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden
-                      >
-                        <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />
-                        <polygon points="10 10 14 12 10 14" fill="currentColor" stroke="none" />
-                      </svg>
-                    )}
-                    <span className="brand-grad-text">{isActive ? t("stop") : t("start")}</span>
-                  </button>
-                  {/* 3 pillboxes (G 2026-06-27): Start/Stop full-width on top,
-                      Camera | Gallery side-by-side below. */}
-                </div>
+                        <span className="brand-grad-text">{prompt}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Start/Stop removed (G 2026-06-27): tap anywhere starts 6; voice
+                    "close the session" stops him. The 3 problem pills above replace
+                    it; Camera | Gallery stay side-by-side below. */}
                 <div className="grid grid-cols-2 gap-3 mb-2.5">
                   <button
                     type="button"
