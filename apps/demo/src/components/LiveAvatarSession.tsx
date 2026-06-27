@@ -2989,6 +2989,16 @@ const LiveAvatarSessionComponent: React.FC<{
     isStreamReady &&
     !voiceStartAwaitingReady;
 
+  // aiASAP-EXACT pill sizing (uiSize.ts: default scale = UI_CARD_SCALE[2] = 1.0).
+  // One uniform font across the visible prompts (length floored at 18 so short
+  // sets don't pop), width-budget capped so it never clips. Pills are w-full,
+  // px-4, height = font * 1.5 (text fills two-thirds). Matches the bottom-stack
+  // formula in aiASAP's LiveAvatarSession.
+  const _pillMaxLen = Math.max(...promptPills.map((p) => p.length), 0);
+  const _pillDivisor = (0.55 * Math.max(_pillMaxLen, 18)).toFixed(2);
+  const _pillFont = `min(calc(var(--stage-height) * 0.030), calc((min(calc(var(--stage-width) * 0.56), 92vw) - 2rem) / ${_pillDivisor}))`;
+  const _pillMinH = `calc(${_pillFont} * 1.5)`;
+
   return (
     <div className="site-bg fixed inset-0 w-screen h-screen flex flex-col">
       {shouldShowBeginSurface && (
@@ -3000,17 +3010,29 @@ const LiveAvatarSessionComponent: React.FC<{
         />
       )}
 
-      {/* 3 problem-prompt pills — shown WHILE talking, ABOVE 6's hands (G
-          2026-06-27: "above the hands, nothing on the hands"). Short labels,
-          aiASAP-scaled text via --stage-width. */}
-      {isActive && !showChestEmail && (
-        <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.22)] -translate-x-1/2 z-40 flex w-[90%] max-w-[min(34rem,calc(var(--stage-width)*0.96))] flex-col items-center gap-[calc(var(--stage-height)*0.012)] px-2">
-          {promptPills.map((prompt, i) => (
+      {/* Pill group while talking — aiASAP-EXACT dims (w-full, px-4, h=font*1.5).
+          When the email is being captured it shows as the TOP pill, REPLACING the
+          top prompt (G 2026-06-27: "drop the top pillbox, put the email bar in"). */}
+      {isActive && (
+        <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.22)] -translate-x-1/2 z-40 flex w-[94%] max-w-[min(42rem,calc(var(--stage-width)*1.0))] flex-col items-center gap-[calc(var(--stage-height)*0.010)] px-2">
+          {showChestEmail && (chestEmailStatus || chestEmailText) && (
+            <div
+              className="flex w-full items-center justify-center rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 px-4 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)]"
+              style={{ fontSize: _pillFont, minHeight: _pillMinH }}
+            >
+              <span className={chestEmailStatus ? "tracking-wide" : "break-all font-mono"}>
+                {chestEmailStatus ? chestEmailStatus : chestEmailText}
+              </span>
+            </div>
+          )}
+          {(showChestEmail && (chestEmailStatus || chestEmailText)
+            ? promptPills.slice(1)
+            : promptPills
+          ).map((prompt, i) => (
             <button
               key={i}
               type="button"
               onClick={() => {
-                // Tap a prompt → 6 dives into that problem. Cut any current line.
                 try {
                   void interrupt();
                 } catch {
@@ -3018,31 +3040,33 @@ const LiveAvatarSessionComponent: React.FC<{
                 }
                 void sendMessage(`Help me with my ${prompt.toLowerCase()}.`);
               }}
-              className="pointer-events-auto whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] text-[calc(var(--stage-height)*0.030)] px-[calc(var(--stage-height)*0.026)] py-[calc(var(--stage-height)*0.012)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+              className="pointer-events-auto flex w-full items-center justify-center whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 px-4 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+              style={{ fontSize: _pillFont, minHeight: _pillMinH }}
             >
               {prompt}
             </button>
           ))}
-          {/* 4th row: Camera | Gallery side-by-side, just BELOW the 3 prompts
-              (G 2026-06-27: "fourth pillbox higher, just below the other 3"). */}
-          <div className="grid w-full grid-cols-2 gap-[calc(var(--stage-height)*0.012)]">
+          {/* 4th row: Camera | Gallery side-by-side, just below the prompts. */}
+          <div className="grid w-full grid-cols-2 gap-[calc(var(--stage-height)*0.010)]">
             <button
               type="button"
               onClick={async () => {
                 await unlockAudio();
                 void handleCameraClick();
               }}
-              className="pointer-events-auto flex items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] text-[calc(var(--stage-height)*0.026)] px-[calc(var(--stage-height)*0.016)] py-[calc(var(--stage-height)*0.012)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+              className="pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 px-3 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+              style={{ fontSize: _pillFont, minHeight: _pillMinH }}
             >
-              <Camera className="shrink-0" style={{ width: "calc(var(--stage-height)*0.026)", height: "calc(var(--stage-height)*0.026)" }} strokeWidth={2.5} aria-hidden />
+              <Camera className="shrink-0" style={{ width: _pillFont, height: _pillFont }} strokeWidth={2.5} aria-hidden />
               {t("camera")}
             </button>
             <button
               type="button"
               onClick={() => void handleGalleryClick()}
-              className="pointer-events-auto flex items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] text-[calc(var(--stage-height)*0.026)] px-[calc(var(--stage-height)*0.016)] py-[calc(var(--stage-height)*0.012)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+              className="pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 px-3 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+              style={{ fontSize: _pillFont, minHeight: _pillMinH }}
             >
-              <Images className="shrink-0" style={{ width: "calc(var(--stage-height)*0.026)", height: "calc(var(--stage-height)*0.026)" }} strokeWidth={2.5} aria-hidden />
+              <Images className="shrink-0" style={{ width: _pillFont, height: _pillFont }} strokeWidth={2.5} aria-hidden />
               {t("gallery")}
             </button>
           </div>
@@ -3150,7 +3174,9 @@ const LiveAvatarSessionComponent: React.FC<{
       {/* Chest-email box (Step 6b): the email 6 captured by voice, shown on his
           chest. 6 NEVER reads it aloud — the box is the source of truth. Hidden
           unless account setup is collecting/sending; never covers the controls. */}
-      {showChestEmail && (chestEmailStatus || chestEmailText) && (
+      {/* Floating chest box DISABLED 2026-06-27 — the email now renders IN the
+          pill group (top row, replacing the top prompt) per G. */}
+      {false && showChestEmail && (chestEmailStatus || chestEmailText) && (
         <div className="pointer-events-none absolute left-1/2 top-[48%] z-50 w-[78%] max-w-[22rem] -translate-x-1/2 -translate-y-1/2 text-center">
           <div className="brand-pill mx-auto px-4 py-3">
             {chestEmailStatus ? (
