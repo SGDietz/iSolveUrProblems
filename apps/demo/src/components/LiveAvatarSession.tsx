@@ -3006,12 +3006,24 @@ const LiveAvatarSessionComponent: React.FC<{
       {isActive && (
         <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.30)] -translate-x-1/2 z-40 flex w-[94%] max-w-[min(32rem,calc(var(--stage-width)*0.95))] flex-col items-center gap-[calc(var(--stage-height)*0.012)] px-2">
           {promptPills.map((prompt, i) => (
-            <div
+            <button
               key={i}
-              className="brand-pill rounded-full font-semibold leading-tight whitespace-nowrap text-[calc(var(--stage-height)*0.030)] px-[calc(var(--stage-height)*0.024)] py-[calc(var(--stage-height)*0.011)]"
+              type="button"
+              onClick={() => {
+                // Tap a prompt → 6 dives into that problem (G: the pills are
+                // "prompts for what to say"). Cut any current line first, then
+                // send it to 6 as if the user said it.
+                try {
+                  void interrupt();
+                } catch {
+                  // non-fatal
+                }
+                void sendMessage(`Help me with my ${prompt.toLowerCase()}.`);
+              }}
+              className="brand-pill pointer-events-auto rounded-full font-semibold leading-tight whitespace-nowrap text-[calc(var(--stage-height)*0.030)] px-[calc(var(--stage-height)*0.024)] py-[calc(var(--stage-height)*0.011)] transition-transform active:scale-95"
             >
               <span className="brand-grad-text">{prompt}</span>
-            </div>
+            </button>
           ))}
         </div>
       )}
@@ -3121,11 +3133,11 @@ const LiveAvatarSessionComponent: React.FC<{
         <div className="pointer-events-none absolute left-1/2 top-[48%] z-50 w-[78%] max-w-[22rem] -translate-x-1/2 -translate-y-1/2 text-center">
           <div className="brand-pill mx-auto px-4 py-3">
             {chestEmailStatus ? (
-              <div className="brand-grad-text text-sm font-semibold tracking-wide">
+              <div className="brand-grad-text text-[calc(var(--stage-height)*0.022)] font-semibold tracking-wide">
                 {chestEmailStatus}
               </div>
             ) : (
-              <div className="brand-grad-text font-mono text-base leading-snug break-all sm:text-lg">
+              <div className="brand-grad-text font-mono text-[calc(var(--stage-height)*0.026)] leading-snug break-all">
                 {chestEmailText || " "}
               </div>
             )}
