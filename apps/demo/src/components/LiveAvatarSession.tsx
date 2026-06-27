@@ -35,15 +35,15 @@ import { HeaderControls } from "./HeaderControls";
 // Example "what's your problem" prompt pills shown before 6 starts — what folks
 // come to him with around the house and yard. He helps with all of them.
 const PROBLEM_PROMPTS = [
-  "My faucet won't stop dripping",
-  "Brown patches in my lawn",
-  "A door that keeps squeaking",
-  "Cracks creeping up my wall",
-  "A drain that keeps clogging",
-  "Weeds taking over my garden",
-  "A window painted shut",
-  "My toilet keeps running",
-  "Gutters overflowing every storm",
+  "Leaky faucet",
+  "Brown lawn",
+  "Squeaky door",
+  "Cracked wall",
+  "Clogged drain",
+  "Garden weeds",
+  "Stuck window",
+  "Running toilet",
+  "Clogged gutters",
 ];
 
 export type SessionStoppedReason = { reason?: "inactivity" };
@@ -1950,9 +1950,11 @@ const LiveAvatarSessionComponent: React.FC<{
         }
       }
 
-      // Voice "open camera" / "open gallery" (G 2026-06-27): jump straight to the
-      // in-app camera or the phone's photo picker on command. After close, before
-      // account/vision routing.
+      // Voice "open camera" / "open gallery" (G 2026-06-27): a browser BLOCKS a
+      // file input from opening unless a REAL tap triggers it — a voice command
+      // can't pop the picker. So 6 GUIDES them to tap the button and NEVER goes
+      // silent (the old version interrupted, tried to open, failed, said nothing
+      // → 6 sat mute, which G hit hard).
       if (userText) {
         if (
           /\b(?:open|show|start|turn on|bring up|use|fire up)\s+(?:the\s+|my\s+|your\s+)?camera\b/i.test(
@@ -1964,7 +1966,11 @@ const LiveAvatarSessionComponent: React.FC<{
           } catch {
             // non-fatal
           }
-          void handleCameraClick();
+          try {
+            await repeat("Just tap the Camera button right below me and your camera will open up.");
+          } catch {
+            // never leave 6 silent
+          }
           return;
         }
         if (
@@ -1977,7 +1983,11 @@ const LiveAvatarSessionComponent: React.FC<{
           } catch {
             // non-fatal
           }
-          void handleGalleryClick();
+          try {
+            await repeat("Just tap the Gallery button right below me to pull up your photos.");
+          } catch {
+            // never leave 6 silent
+          }
           return;
         }
       }
@@ -2990,6 +3000,22 @@ const LiveAvatarSessionComponent: React.FC<{
         />
       )}
 
+      {/* 3 problem-prompt pills — shown WHILE talking, ABOVE 6's hands (G
+          2026-06-27: "above the hands, nothing on the hands"). Short labels,
+          aiASAP-scaled text via --stage-width. */}
+      {isActive && (
+        <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.30)] -translate-x-1/2 z-40 w-[88%] max-w-sm px-2 flex flex-col items-center gap-2">
+          {promptPills.map((prompt, i) => (
+            <div
+              key={i}
+              className="brand-pill w-full py-2 px-4 rounded-full flex items-center justify-center text-center font-semibold leading-tight min-h-[2.7rem] text-[calc(var(--stage-width)*0.045)]"
+            >
+              <span className="brand-grad-text">{prompt}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Tap/Click ANYWHERE To Talk To 6 — EXACT aiASAP prompt (position + style),
           shown before 6 starts. pointer-events-none so the tap falls through to
           the begin surface. (G 2026-06-27.) */}
@@ -3385,22 +3411,9 @@ const LiveAvatarSessionComponent: React.FC<{
                   </div>
                 )} 
               <div className="mx-auto w-full max-w-sm">
-                {/* 3 problem-prompt pills — the normal state WHILE talking to 6
-                    (G 2026-06-27 screenshot). Before he starts, the big aiASAP
-                    "Tap anywhere" prompt shows instead, so they never overlap. */}
-                {isActive && (
-                  <div className="grid gap-2.5 mb-2.5">
-                    {promptPills.map((prompt, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        className="brand-pill py-2.5 px-4 rounded-full flex items-center justify-center text-center text-base sm:text-lg font-semibold leading-tight min-h-[3.2rem]"
-                      >
-                        <span className="brand-grad-text">{prompt}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {/* Prompt pills moved OUT of the bottom bar to a fixed element
+                    ABOVE 6's hands (G 2026-06-27: "above the hands, nothing on the
+                    hands"). See the promptPills block near the begin surface. */}
                 {/* Start/Stop removed (G 2026-06-27): tap anywhere starts 6; voice
                     "close the session" stops him. The 3 problem pills above replace
                     it; Camera | Gallery stay side-by-side below. */}
