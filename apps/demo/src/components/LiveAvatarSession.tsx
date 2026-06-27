@@ -3003,7 +3003,7 @@ const LiveAvatarSessionComponent: React.FC<{
       {/* 3 problem-prompt pills — shown WHILE talking, ABOVE 6's hands (G
           2026-06-27: "above the hands, nothing on the hands"). Short labels,
           aiASAP-scaled text via --stage-width. */}
-      {isActive && (
+      {isActive && !showChestEmail && (
         <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.22)] -translate-x-1/2 z-40 flex w-[90%] max-w-[min(34rem,calc(var(--stage-width)*0.96))] flex-col items-center gap-[calc(var(--stage-height)*0.012)] px-2">
           {promptPills.map((prompt, i) => (
             <button
