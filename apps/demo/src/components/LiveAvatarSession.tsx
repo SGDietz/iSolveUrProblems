@@ -131,6 +131,8 @@ const LiveAvatarSessionComponent: React.FC<{
 
   const isAttachedRef = useRef<boolean>(false);
   const greetingTriggeredRef = useRef<boolean>(false);
+  // Sync guard against double-entry into the voice-start path (double-greeting fix, Herm TASK_033).
+  const voiceStartPendingRef = useRef<boolean>(false);
   const audioUnlockedRef = useRef<boolean>(false);
   const wasMutedBeforeRecordingRef = useRef<boolean>(false);
   /** LiveAvatar server session id — used for DB + official transcript API (set when CONNECTED). */
@@ -432,6 +434,10 @@ const LiveAvatarSessionComponent: React.FC<{
     if (sessionState !== SessionState.CONNECTED || !isStreamReady) {
       return;
     }
+    // Double-greeting guard (Herm TASK_033): a fast second click / retry / start
+    // race must not enter the start path twice before React disables the button.
+    if (voiceStartPendingRef.current) return;
+    voiceStartPendingRef.current = true;
     setVoiceStartAwaitingReady(true);
     try {
       const ok = await ensureAudioOutputReady();
@@ -439,12 +445,20 @@ const LiveAvatarSessionComponent: React.FC<{
         return;
       }
       await start();
-      await repeat(VOICE_START_GREETING);
+      // One-shot greeting per live session: set the flag BEFORE awaiting the
+      // speech so overlapping calls can't both pass. Reset only on true session
+      // disconnect (the SessionState.DISCONNECTED effects), never on an ordinary
+      // mic Stop/Start within the same session.
+      if (!greetingTriggeredRef.current) {
+        greetingTriggeredRef.current = true;
+        await repeat(VOICE_START_GREETING);
+      }
       if (mode === "FULL") {
         startListening();
       }
       setHasUserPressedVoiceStart(true);
     } finally {
+      voiceStartPendingRef.current = false;
       setVoiceStartAwaitingReady(false);
     }
   }, [
