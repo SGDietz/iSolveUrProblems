@@ -3004,15 +3004,13 @@ const LiveAvatarSessionComponent: React.FC<{
           2026-06-27: "above the hands, nothing on the hands"). Short labels,
           aiASAP-scaled text via --stage-width. */}
       {isActive && (
-        <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.30)] -translate-x-1/2 z-40 flex w-[94%] max-w-[min(32rem,calc(var(--stage-width)*0.95))] flex-col items-center gap-[calc(var(--stage-height)*0.012)] px-2">
+        <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.22)] -translate-x-1/2 z-40 flex w-[90%] max-w-[min(34rem,calc(var(--stage-width)*0.96))] flex-col items-center gap-[calc(var(--stage-height)*0.012)] px-2">
           {promptPills.map((prompt, i) => (
             <button
               key={i}
               type="button"
               onClick={() => {
-                // Tap a prompt → 6 dives into that problem (G: the pills are
-                // "prompts for what to say"). Cut any current line first, then
-                // send it to 6 as if the user said it.
+                // Tap a prompt → 6 dives into that problem. Cut any current line.
                 try {
                   void interrupt();
                 } catch {
@@ -3020,11 +3018,34 @@ const LiveAvatarSessionComponent: React.FC<{
                 }
                 void sendMessage(`Help me with my ${prompt.toLowerCase()}.`);
               }}
-              className="brand-pill pointer-events-auto rounded-full font-semibold leading-tight whitespace-nowrap text-[calc(var(--stage-height)*0.030)] px-[calc(var(--stage-height)*0.024)] py-[calc(var(--stage-height)*0.011)] transition-transform active:scale-95"
+              className="pointer-events-auto whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] text-[calc(var(--stage-height)*0.030)] px-[calc(var(--stage-height)*0.026)] py-[calc(var(--stage-height)*0.012)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
             >
-              <span className="brand-grad-text">{prompt}</span>
+              {prompt}
             </button>
           ))}
+          {/* 4th row: Camera | Gallery side-by-side, just BELOW the 3 prompts
+              (G 2026-06-27: "fourth pillbox higher, just below the other 3"). */}
+          <div className="grid w-full grid-cols-2 gap-[calc(var(--stage-height)*0.012)]">
+            <button
+              type="button"
+              onClick={async () => {
+                await unlockAudio();
+                void handleCameraClick();
+              }}
+              className="pointer-events-auto flex items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] text-[calc(var(--stage-height)*0.026)] px-[calc(var(--stage-height)*0.016)] py-[calc(var(--stage-height)*0.012)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+            >
+              <Camera className="shrink-0" style={{ width: "calc(var(--stage-height)*0.026)", height: "calc(var(--stage-height)*0.026)" }} strokeWidth={2.5} aria-hidden />
+              {t("camera")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleGalleryClick()}
+              className="pointer-events-auto flex items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] text-[calc(var(--stage-height)*0.026)] px-[calc(var(--stage-height)*0.016)] py-[calc(var(--stage-height)*0.012)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+            >
+              <Images className="shrink-0" style={{ width: "calc(var(--stage-height)*0.026)", height: "calc(var(--stage-height)*0.026)" }} strokeWidth={2.5} aria-hidden />
+              {t("gallery")}
+            </button>
+          </div>
         </div>
       )}
 
@@ -3429,31 +3450,9 @@ const LiveAvatarSessionComponent: React.FC<{
                 {/* Start/Stop removed (G 2026-06-27): tap anywhere starts 6; voice
                     "close the session" stops him. The 3 problem pills above replace
                     it; Camera | Gallery stay side-by-side below. */}
-                {/* Camera | Gallery — only WHILE talking (G 2026-06-27: hidden
-                    before 6 starts). */}
-                {isActive && (
-                  <div className="grid grid-cols-2 gap-3 mb-2.5">
-                    <button
-                      type="button"
-                      className="brand-pill py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
-                      onClick={async () => {
-                        await unlockAudio();
-                        void handleCameraClick();
-                      }}
-                    >
-                      <Camera className="mr-2 w-5 h-5 shrink-0" strokeWidth={3} aria-hidden />
-                      <span className="brand-grad-text">{t("camera")}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="brand-pill py-2.5 px-3 rounded-full flex items-center justify-center text-xl font-semibold whitespace-nowrap min-h-[3.4rem]"
-                      onClick={() => void handleGalleryClick()}
-                    >
-                      <Images className="mr-2 w-5 h-5 shrink-0" strokeWidth={3} aria-hidden />
-                      <span className="brand-grad-text">{t("gallery")}</span>
-                    </button>
-                  </div>
-                )}
+                {/* Camera | Gallery moved UP into the prompt-pill group (the 4th
+                    row, just below the 3 prompts) per G 2026-06-27 — no longer
+                    pinned to the bottom bar. */}
               </div>
               <div className="h-14 flex items-center justify-center">
                 <Link
