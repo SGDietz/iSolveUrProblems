@@ -2559,15 +2559,18 @@ const LiveAvatarSessionComponent: React.FC<{
       )}
 
       {/* Text overlays at the top */}
-      <div className="absolute top-0 left-0 right-0 z-10 flex flex-col items-center pt-2 pb-2">
+      <div className="absolute top-0 left-0 right-0 z-10 flex flex-col items-center pt-6 pb-2">
         <div className="text-center px-4 mb-2">
-          <h1 className="aiasap-logo-mark brand-grad-text inline-block overflow-visible px-2 text-[1.5rem] sm:text-[2rem] font-bold italic leading-[1.12] tracking-tight">
+          <h1 className="brand-grad-text inline-block overflow-visible px-2 text-[1.5rem] sm:text-[2rem] font-bold leading-[1.12] tracking-tight">
             {t("title")}
           </h1>
           <p className="brand-grad-text mx-auto mt-1 max-w-[22rem] text-[0.7rem] sm:text-[0.8rem] font-bold uppercase tracking-[0.22em] leading-snug">
             {t("subtitle")}
           </p>
-          <HeaderControls />
+          {/* Language picker + Sign in removed 2026-06-26 per G — aiASAP's full
+              voice-led sign-in/account system is coming over to replace this.
+              HeaderControls kept dormant for that wiring. */}
+          {/* <HeaderControls /> */}
         </div>
         {microphoneWarning && (
           // Ordinary, small, no color — per G 2026-04-25.
@@ -2842,7 +2845,7 @@ const LiveAvatarSessionComponent: React.FC<{
                 <div className="grid grid-cols-2 gap-3 mb-2.5">
                   <button
                     type="button"
-                    className="brand-pill py-2 px-3 rounded-full flex items-center justify-center text-sm font-semibold whitespace-nowrap min-h-[2.85rem]"
+                    className="brand-pill col-span-2 py-2 px-3 rounded-full flex items-center justify-center text-sm font-semibold whitespace-nowrap min-h-[2.85rem]"
                     onClick={() => {
                       // Functional guard (no `disabled` attribute) so the browser
                       // doesn't apply :disabled styling that makes this button
@@ -2899,17 +2902,8 @@ const LiveAvatarSessionComponent: React.FC<{
                     )}
                     <span className="brand-grad-text">{isActive ? t("stop") : t("start")}</span>
                   </button>
-                  <button
-                    type="button"
-                    className="brand-pill py-2 px-3 rounded-full flex items-center justify-center text-sm font-semibold whitespace-nowrap min-h-[2.85rem]"
-                    onClick={async () => {
-                      await unlockAudio();
-                      handleGoLive();
-                    }}
-                  >
-                    <Radio className="mr-1.5 w-4 h-4 shrink-0" strokeWidth={3} aria-hidden />
-                    <span className="brand-grad-text">{t("goLive")}</span>
-                  </button>
+                  {/* Go Live removed 2026-06-26 per G — no vision mode; camera + gallery only.
+                      Start/Stop now spans full width (col-span-2). */}
                 </div>
                 <div className="grid grid-cols-2 gap-3 mb-2.5">
                   <button
