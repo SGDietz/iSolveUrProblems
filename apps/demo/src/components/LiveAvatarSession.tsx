@@ -1950,6 +1950,38 @@ const LiveAvatarSessionComponent: React.FC<{
         }
       }
 
+      // Voice "open camera" / "open gallery" (G 2026-06-27): jump straight to the
+      // in-app camera or the phone's photo picker on command. After close, before
+      // account/vision routing.
+      if (userText) {
+        if (
+          /\b(?:open|show|start|turn on|bring up|use|fire up)\s+(?:the\s+|my\s+|your\s+)?camera\b/i.test(
+            userText,
+          )
+        ) {
+          try {
+            await interrupt();
+          } catch {
+            // non-fatal
+          }
+          void handleCameraClick();
+          return;
+        }
+        if (
+          /\b(?:open|show|bring up|use|go to|pull up)\s+(?:the\s+|my\s+|your\s+)?(?:gallery|photos?|photo library|camera roll|pictures|images)\b/i.test(
+            userText,
+          )
+        ) {
+          try {
+            await interrupt();
+          } catch {
+            // non-fatal
+          }
+          void handleGalleryClick();
+          return;
+        }
+      }
+
       // ===== Voice-account fast-path (Step 6b) — MUST run BEFORE the streaming
       // return below, so account setup works in normal Start voice (not just Go
       // Live). Inert until the user triggers account setup or is mid-flow. =====
@@ -3391,7 +3423,7 @@ const LiveAvatarSessionComponent: React.FC<{
           )}
 
           {visionMode !== "streaming" && !isCameraActive && (
-            <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-[95%] max-w-7xl z-20 px-4 pb-2 md:pb-[2.5vh] flex flex-col items-center">
+            <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-[95%] max-w-7xl z-40 px-4 pb-2 md:pb-[2.5vh] flex flex-col items-center">
               {sessionState !== SessionState.DISCONNECTED &&
                 !isAvatarTalking &&
                 isStreamReady && (
@@ -3413,15 +3445,17 @@ const LiveAvatarSessionComponent: React.FC<{
                   </div>
                 )} 
               <div className="mx-auto w-full max-w-sm">
-                {!isActive && (
+                {shouldShowBeginSurface && (
                   <div className="grid gap-2.5 mb-2.5">
                     {promptPills.map((prompt, i) => (
-                      <div
+                      <button
                         key={i}
+                        type="button"
+                        onClick={() => void handleVoiceStartStop()}
                         className="brand-pill py-2.5 px-4 rounded-full flex items-center justify-center text-center text-base sm:text-lg font-semibold leading-tight min-h-[3.2rem]"
                       >
                         <span className="brand-grad-text">{prompt}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
