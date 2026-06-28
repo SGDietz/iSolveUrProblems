@@ -194,6 +194,11 @@ export async function POST(request: Request) {
   // later (deviceLinkTokenHash) AND a sessionId to poll by. token_hash = the
   // Supabase link token so /auth/callback flips exactly this row.
   let pendingStateToken: string | null = null;
+  // TRUTH-GATE (audit 2026-06-28): the email can send while the device-link row
+  // insert fails — in which case the return-greeting poll has nothing to find.
+  // Surface the durable-persistence truth so the client doesn't promise a
+  // device-link it can't honor.
+  let linkRowInserted = false;
   if (serviceRoleKey && sessionId && deviceLinkTokenHash) {
     try {
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -217,6 +222,7 @@ export async function POST(request: Request) {
       if (insertRes.ok) {
         // Client breadcrumb only (localStorage); not a lookup key.
         pendingStateToken = crypto.randomUUID();
+        linkRowInserted = true;
       } else {
         const detail = await insertRes.text();
         console.error("account_email_links insert failed:", insertRes.status, detail.slice(0, 200));
@@ -234,7 +240,7 @@ export async function POST(request: Request) {
   }
 
   return new Response(
-    JSON.stringify({ ok: true, emailSent: true, pendingStateToken }),
+    JSON.stringify({ ok: true, emailSent: true, linkRowInserted, pendingStateToken }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
 }

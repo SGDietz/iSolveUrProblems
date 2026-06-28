@@ -1061,8 +1061,17 @@ const LiveAvatarSessionComponent: React.FC<{
         }
         chestRevealActiveRef.current = false;
         if (data?.emailSent) {
-          // Cross-browser pickup: watch for the sign-in landing in another browser.
-          startDeviceLinkPoll();
+          // Cross-browser pickup: only poll when the device-link row actually
+          // persisted (truth-gate, audit 2026-06-28) — otherwise there's nothing
+          // for the poll to find. The email still sent; same-browser cookie
+          // sign-in on return still works regardless.
+          if (data?.linkRowInserted) {
+            startDeviceLinkPoll();
+          } else {
+            console.warn(
+              "account/start: device-link row NOT inserted — return-greeting poll skipped",
+            );
+          }
           lastAvatarParsedEmailRef.current = null;
           chestEmailTextRef.current = "";
           setChestEmailText("");

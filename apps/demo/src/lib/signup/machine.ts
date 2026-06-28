@@ -648,7 +648,7 @@ export async function accountSetupSpeechFlow(
       ports.awaitingReady = false;
       ports.awaitingEmail = false;
       ports.awaitingName = true;
-      await ports.say("Love it. First - what should I call you?");
+      await ports.say("You got it. First - what should I call you?");
       return true;
     }
     if (directEmail) {
