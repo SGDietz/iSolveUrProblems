@@ -412,7 +412,13 @@ const LiveAvatarSessionComponent: React.FC<{
       return;
     }
     const onAvatarSpeakStarted = () => {
-      if (!audioUnlockedRef.current) {
+      // (1) No audible output yet → cut. (2) Account floor held → cut the BRAIN's
+      // spontaneous turn so only the scripted machine speaks — but NOT when our
+      // own repeat() is the speaker (machineSpeakingRef), or we'd clip our line.
+      if (
+        !audioUnlockedRef.current ||
+        (accountFloorHeldRef.current && !machineSpeakingRef.current)
+      ) {
         void interrupt();
       }
       // Mark that the avatar just started speaking so Go Live filler knows
@@ -538,6 +544,13 @@ const LiveAvatarSessionComponent: React.FC<{
   const accountSetupAwaitingNameRef = useRef(false);
   const accountSetupAwaitingSendRef = useRef(false);
   const accountSetupPendingEmailRef = useRef<string | null>(null);
+  // Floor-hold (2026-06-27): TRUE for the whole multi-turn signup so the brain's
+  // OWN spontaneous turns (AVATAR_SPEAK_STARTED, not user transcription) get cut
+  // — the brain shares the unpatched prod CW (459ae665) and otherwise freelances
+  // ("Perfect! You're all set" with no real send). machineSpeakingRef marks when
+  // OUR scripted repeat() is the speaker so the floor-cut never clips our own line.
+  const accountFloorHeldRef = useRef(false);
+  const machineSpeakingRef = useRef(false);
   const accountSetupRejectedEmailRef = useRef<string | null>(null);
   const accountSetupSendEmailRef = useRef<string | null>(null);
   const accountSetupEmailMissCountRef = useRef(0);
@@ -580,6 +593,9 @@ const LiveAvatarSessionComponent: React.FC<{
   // Prior user STT fragment — lets an STT-split "close the" + "session" stitch
   // into one close intent (Herm TASK_034: voice-close was never wired in).
   const lastUserFragmentRef = useRef<string>("");
+  // Arrival time of the last user fragment, so the account stitch only glues a
+  // RECENT prior shard (split email / split trigger), never stale earlier speech.
+  const lastUserFragmentAtRef = useRef<number>(0);
   // 3 example problem pills (G 2026-06-27): show before 6 starts; tap anywhere
   // to talk. Picked after mount for variety (G loves the random chaos); SSR
   // renders the first 3 to avoid a hydration mismatch.
@@ -726,6 +742,7 @@ const LiveAvatarSessionComponent: React.FC<{
     accountSetupDeclinedAtRef.current = 0;
     accountSetupSendArmedAtRef.current = 0;
     accountSetupSendArmedByTextRef.current = null;
+    accountFloorHeldRef.current = false;
     lastAvatarParsedEmailRef.current = null;
     chestEmailTextRef.current = "";
     setEmailEntryOpen(false);
@@ -842,6 +859,13 @@ const LiveAvatarSessionComponent: React.FC<{
   const startAccountSetup = useCallback(
     async (email: string): Promise<boolean> => {
       const normalizedEmail = email.trim().toLowerCase();
+      // The whole send ceremony is OUR scripted speech — mark machine-speaking so
+      // the account floor-cut never clips "Done. I sent you an email." (these
+      // repeats don't go through signupPorts.say). Cleared on a grace timer.
+      machineSpeakingRef.current = true;
+      setTimeout(() => {
+        machineSpeakingRef.current = false;
+      }, 3500);
       const prev = lastAccountLinkSendRef.current;
       if (prev && prev.email === normalizedEmail && Date.now() - prev.at < 90000) {
         const spoken =
@@ -979,7 +1003,16 @@ const LiveAvatarSessionComponent: React.FC<{
         } catch {
           // never block the scripted line on an interrupt hiccup
         }
-        await repeat(text);
+        machineSpeakingRef.current = true;
+        try {
+          await repeat(text);
+        } finally {
+          // Keep the "our line" flag up briefly so the AVATAR_SPEAK_STARTED for
+          // this scripted line isn't mistaken for the brain and cut.
+          setTimeout(() => {
+            machineSpeakingRef.current = false;
+          }, 1000);
+        }
         lastAvatarResponseRef.current = text;
         if (opts?.remember) rememberConversationLine("assistant", text);
       },
@@ -2072,12 +2105,21 @@ const LiveAvatarSessionComponent: React.FC<{
       // is guarded — questions, negations, "remember me / next time", list/shopping
       // closes, and email spelling never trigger it; an STT-split "close the" +
       // "session" is stitched onto the prior fragment. =====
+      // Prior STT fragment, captured BEFORE we overwrite it, so BOTH the
+      // close-intent AND the account-trigger below can stitch a split phrase
+      // across two chunks ("will you remember" + "me next time" -> "remember me";
+      // "close the" + "session").
+      const priorUserFrag = lastUserFragmentRef.current;
+      const priorUserFragAt = lastUserFragmentAtRef.current;
       if (userText) {
-        const priorFrag = lastUserFragmentRef.current;
         lastUserFragmentRef.current = userText;
+        lastUserFragmentAtRef.current = Date.now();
+      }
+
+      if (userText) {
         if (
           hasEndSessionIntent(userText) ||
-          (priorFrag && isStitchedSessionClose(priorFrag, userText))
+          (priorUserFrag && isStitchedSessionClose(priorUserFrag, userText))
         ) {
           try {
             await interrupt();
@@ -2159,28 +2201,60 @@ const LiveAvatarSessionComponent: React.FC<{
           accountSetupAwaitingEmailRef.current ||
           accountSetupAwaitingNameRef.current ||
           accountSetupAwaitingSendRef.current;
-        if (ACCOUNT_SETUP_TRIGGER_RE.test(userText) || midAccountFlow) {
+        // STITCH a split trigger ("will you remember" + "me next time" ->
+        // "remember me") the same way close-intent does. If the trigger only
+        // matches the stitched text, drive the machine with the STITCHED text so
+        // it engages instead of the brain freelancing the whole signup.
+        // Stitch a split phrase across two RECENT chunks ("will you remember" +
+        // "me next time" -> "remember me"; "S G D I E T Z" + "at P M dot M E").
+        const recentPrior =
+          priorUserFrag !== "" && Date.now() - priorUserFragAt < 6000;
+        const stitchedAccount = recentPrior ? `${priorUserFrag} ${userText}` : userText;
+        const triggerOnChunk = ACCOUNT_SETUP_TRIGGER_RE.test(userText);
+        const triggerOnStitch =
+          !triggerOnChunk && recentPrior && ACCOUNT_SETUP_TRIGGER_RE.test(stitchedAccount);
+        const accountText = triggerOnStitch ? stitchedAccount : userText;
+        if (triggerOnChunk || triggerOnStitch || midAccountFlow) {
+          // Hold the floor for the whole signup so the brain can't freelance/fake
+          // it. Re-cut on every in-flow turn; released after the machine runs if
+          // no signup state remains (see syncAccountFloor below).
+          accountFloorHeldRef.current = true;
           try {
             await interrupt();
           } catch {
             // never block the scripted line on an interrupt hiccup
           }
-          diag("account-interrupt", { midAccountFlow });
+          diag("account-interrupt", { midAccountFlow, stitched: triggerOnStitch });
         }
         try {
           // While collecting the email, route straight to the account flow (a real
           // close still escapes inside takesEmailFastPath).
+          // Hold the floor while ANY signup gate is set; release it once the flow
+          // completes (send) or cancels, so the brain answers normal speech again
+          // instead of staying muted for the rest of the session.
+          const syncAccountFloor = () => {
+            accountFloorHeldRef.current =
+              accountSetupAwaitingReadyRef.current ||
+              accountSetupAwaitingEmailRef.current ||
+              accountSetupAwaitingNameRef.current ||
+              accountSetupAwaitingSendRef.current ||
+              accountSetupPendingEmailRef.current !== null;
+          };
           if (takesEmailFastPath(signupPorts, signupFlags, userText)) {
             diag("emailFastPath:matched");
-            if (await handleAccountSetupSpeech(userText)) {
+            // Stitched so a split spell parses as one address.
+            const fpHandled = await handleAccountSetupSpeech(stitchedAccount);
+            syncAccountFloor();
+            if (fpHandled) {
               diag("emailFastPath:handled");
               return;
             }
           }
           // General trigger ("set up an account" / "remember me") + mid-flow,
           // before any normal vision routing.
-          const handled = await handleAccountSetupSpeech(userText);
-          diag("speechFlow", { handled });
+          const handled = await handleAccountSetupSpeech(accountText);
+          syncAccountFloor();
+          diag("speechFlow", { handled, stitched: accountText !== userText });
           if (handled) return;
         } catch (machineError) {
           // A throw here used to vanish as an unhandled rejection while 6's brain
