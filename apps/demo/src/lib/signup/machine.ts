@@ -47,6 +47,7 @@ export interface SignupPorts {
   awaitingEmail: boolean; // accountSetupAwaitingEmailRef
   awaitingName: boolean; // accountSetupAwaitingNameRef
   awaitingSend: boolean; // accountSetupAwaitingSendRef
+  awaitingPostSendOffer: boolean; // accountSetupAwaitingPostSendOfferRef
   pendingEmail: string | null; // accountSetupPendingEmailRef
   rejectedEmail: string | null; // accountSetupRejectedEmailRef
   sendEmail: string | null; // accountSetupSendEmailRef
@@ -336,6 +337,18 @@ export async function accountSetupSpeechFlow(
     if (nameCandidate) {
       ports.saveName(nameCandidate);
       ports.awaitingName = false;
+      // NAME-AFTER-EMAIL: if a confirmed address is already parked, the name was
+      // the LAST thing missing — arm the send gate now instead of re-asking for
+      // an email we already have.
+      if (ports.sendEmail) {
+        ports.awaitingSend = true;
+        ports.sendArmedAt = ports.now();
+        ports.sendArmedByText = userText;
+        await ports.say(
+          `Thanks, ${nameCandidate}. Want me to send the sign-in link to that email now?`,
+        );
+        return true;
+      }
       ports.awaitingEmail = true;
       ports.pendingEmail = null;
       ports.rejectedEmail = null;
@@ -384,6 +397,29 @@ export async function accountSetupSpeechFlow(
       flags,
       "Yes. I opened the email box so you can type it. Check that it looks right on screen before I send anything.",
     );
+  }
+
+  if (ports.awaitingPostSendOffer) {
+    // After the link is sent, 6 asked "keep working, or wrap up?". A finish/no
+    // closes with a sign-off; a keep-going/yes drops the gate and hands the turn
+    // back to normal conversation. Anything unclear re-asks once.
+    if (ACCOUNT_READY_NO_RE.test(userText)) {
+      ports.awaitingPostSendOffer = false;
+      if (!ports.avatarTalking) {
+        await ports.say(
+          "You're all set. Check your email when you get a sec - I'll be right here.",
+        );
+      }
+      return true;
+    }
+    if (ACCOUNT_READY_YES_RE.test(userText)) {
+      ports.awaitingPostSendOffer = false;
+      return false; // let the brain carry the conversation forward
+    }
+    if (!ports.avatarTalking) {
+      await ports.say("Want to keep going, or wrap up for now?");
+    }
+    return true;
   }
 
   if (ports.awaitingSend) {
@@ -452,6 +488,19 @@ export async function accountSetupSpeechFlow(
       ports.awaitingEmail = false;
       ports.awaitingReady = false;
       ports.rejectedEmail = null;
+      // NAME-AFTER-EMAIL (G 2026-06-27): the email is confirmed but we still
+      // don't have a name. Grab it casually now so 6 can greet by name next
+      // time, THEN arm the send gate. sendEmail stays parked; the awaitingName
+      // handler routes a captured name straight to the send gate.
+      if (!ports.userName) {
+        ports.awaitingName = true;
+        if (!ports.avatarTalking) {
+          await ports.say(
+            "Perfect. And what should I call you, so I can say hey by name next time?",
+          );
+        }
+        return true;
+      }
       ports.awaitingSend = true;
       ports.sendArmedAt = ports.now();
       ports.sendArmedByText = userText;

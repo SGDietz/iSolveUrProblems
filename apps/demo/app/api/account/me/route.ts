@@ -24,6 +24,11 @@ export async function GET(request: Request) {
   const TIMEOUT_MS = 2500;
   let userEmail: string | null = null;
   let userFullName: string | null = null;
+  // Returning-greeting tier inputs (ported from aiASAP). visitCount/longGap come
+  // from user_metadata; default to a warm "second visit" line until /auth/callback
+  // stamps visit_count (separate follow-up).
+  let visitCount = 1;
+  let longGap = false;
 
   try {
     const authResult = await Promise.race([
@@ -50,6 +55,13 @@ export async function GET(request: Request) {
             : typeof meta.fullName === "string"
               ? (meta.fullName as string)
               : null;
+        const vc = meta.visit_count;
+        if (typeof vc === "number" && vc > 0) visitCount = vc;
+        const lv = meta.last_visit_at;
+        if (typeof lv === "string") {
+          const days = (Date.now() - new Date(lv).getTime()) / 86400000;
+          if (Number.isFinite(days) && days > 14) longGap = true;
+        }
       }
     }
   } catch (error) {
@@ -110,6 +122,8 @@ export async function GET(request: Request) {
     JSON.stringify({
       authenticated: true,
       user: { email: userEmail, fullName: userFullName },
+      visitCount,
+      longGap,
       lists,
       resumeState,
     }),

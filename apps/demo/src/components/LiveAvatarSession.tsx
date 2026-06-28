@@ -51,6 +51,83 @@ export type SessionStoppedReason = { reason?: "inactivity" | "explicit" };
 const VOICE_START_GREETING =
   "Hi, I'm 6, your ai buddy. You know why they call me 6? 'Cuz I got your back. So, what problems can I help you solve today?";
 
+// Returning-user intros (ported from aiASAP), tiered by how many times the user
+// + 6 have met; random pick within the tier each return, avoiding the last line.
+// {name} renders as ", Scott" when known and "" when not.
+const RETURNING_GREETING_TIERS: Record<string, string[]> = {
+  second: [
+    "Hey{name} - you came back! I was hoping you would. So what are we getting after today?",
+    "Well, look who's back{name}! Good to see you again - still got your back. What's on your mind?",
+    "Round two{name}! I remember you now - that's the whole point. What can I do for you today?",
+    "Back so soon{name}? I'll take it. What are we tackling today?",
+    "There's the face I remember{name}. What's first?",
+    "Twice in a row{name} - you're stuck with me now. What do you need?",
+    "Good - you're back{name}. I held your spot. What's the plan?",
+    "Hey{name}, round two already? Let's get after it.",
+  ],
+  third: [
+    "Three times now{name} - I'd say we're officially a team. What's the mission today?",
+    "You're turning into a regular{name}, and I love it. Where do we start?",
+    "Hey{name} - every time you swing by, I get a little more useful. What are we tackling?",
+    "Look at us{name} - three deep. What are we knocking out today?",
+    "You keep coming back{name}, and I keep getting sharper. What's the job?",
+    "Third time's a habit now{name}. Where do we point it?",
+    "We're a real team now{name}. Hit me - what do you need?",
+  ],
+  regular: [
+    "There you are{name}. Feels like old times. What's the move today?",
+    "Back again{name}! You know the deal - I've got your back. What's up?",
+    "Good to have you back{name}. We've got a rhythm now - what can I take off your plate?",
+    "Hey{name}. What are we getting into today?",
+    "You're back{name} - let's make it count. What's up?",
+    "Right where we left off{name}. What's on deck?",
+    "There's my guy{name}. What do you need today?",
+    "Good to see you{name}. Where do we start?",
+    "Welcome back{name}. What's first today?",
+    "Alright{name}, I'm warmed up. What are we doing?",
+    "Let's roll{name}. What's the first thing?",
+    "Ready when you are{name} - what's the move?",
+  ],
+  longGap: [
+    "Long time{name}! Missed you, honestly - catch me up, what's new?",
+    "Been a minute{name}! Good to have you back. What's new?",
+    "There you are{name} - it's been a while. Catch me up?",
+    "Long time no talk{name}! I kept your stuff safe. What's going on?",
+    "Welcome back{name} - felt like forever. What do you need?",
+  ],
+};
+const LAST_GREETING_STORAGE_KEY = "isolve.lastReturningGreeting";
+
+function pickReturningGreeting(
+  name: string | null,
+  visitCount: number,
+  longGap: boolean,
+): string {
+  const tier = longGap
+    ? "longGap"
+    : visitCount <= 1
+      ? "second"
+      : visitCount === 2
+        ? "third"
+        : "regular";
+  const pool = RETURNING_GREETING_TIERS[tier];
+  let last: string | null = null;
+  try {
+    last = window.localStorage.getItem(LAST_GREETING_STORAGE_KEY);
+  } catch {
+    // storage blocked — fall back to plain random
+  }
+  const choices = pool.length > 1 ? pool.filter((t) => t !== last) : pool;
+  const template = choices[Math.floor(Math.random() * choices.length)];
+  try {
+    window.localStorage.setItem(LAST_GREETING_STORAGE_KEY, template);
+  } catch {
+    // best-effort
+  }
+  const namePart = name ? `, ${name}` : "";
+  return template.replace("{name}", namePart);
+}
+
 const LiveAvatarSessionComponent: React.FC<{
   mode: "FULL" | "CUSTOM";
   onSessionStopped: (opts?: SessionStoppedReason) => void;
@@ -513,7 +590,20 @@ const LiveAvatarSessionComponent: React.FC<{
       // mic Stop/Start within the same session.
       if (!greetingTriggeredRef.current) {
         greetingTriggeredRef.current = true;
-        await repeat(VOICE_START_GREETING);
+        // Returning known user (cookie in THIS browser) hears a tiered warm line
+        // by name; first-timers/anonymous hear VOICE_START_GREETING. Use the ref
+        // (not state) to dodge render lag.
+        const greeting = accountEmailRef.current
+          ? pickReturningGreeting(
+              deviceProfileRef.current.name || null,
+              accountMemorySnapshotRef.current?.visitCount ?? 1,
+              accountMemorySnapshotRef.current?.longGap ?? false,
+            )
+          : VOICE_START_GREETING;
+        await repeat(greeting);
+        // Item 18: track the scripted greeting so an STT echo of it is filtered
+        // like every other scripted line (was missing for the start greeting).
+        lastAvatarResponseRef.current = greeting;
       }
       if (mode === "FULL") {
         startListening();
@@ -543,6 +633,7 @@ const LiveAvatarSessionComponent: React.FC<{
   const accountSetupAwaitingEmailRef = useRef(false);
   const accountSetupAwaitingNameRef = useRef(false);
   const accountSetupAwaitingSendRef = useRef(false);
+  const accountSetupAwaitingPostSendOfferRef = useRef(false);
   const accountSetupPendingEmailRef = useRef<string | null>(null);
   // Floor-hold (2026-06-27): TRUE for the whole multi-turn signup so the brain's
   // OWN spontaneous turns (AVATAR_SPEAK_STARTED, not user transcription) get cut
@@ -574,6 +665,9 @@ const LiveAvatarSessionComponent: React.FC<{
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
   const accountEmailRef = useRef<string | null>(null);
   const accountSignedInRef = useRef(false);
+  // Returning-greeting inputs (ported from aiASAP): visit count + long-gap flag
+  // from /api/account/me, read once at voice start to pick the right tier.
+  const accountMemorySnapshotRef = useRef<{ visitCount: number; longGap: boolean } | null>(null);
   const deviceProfileRef = useRef<{ name: string | null; greetingCount: number }>({
     name: null,
     greetingCount: 0,
@@ -586,6 +680,38 @@ const LiveAvatarSessionComponent: React.FC<{
     accountEmailRef.current = accountEmail;
     accountSignedInRef.current = !!accountEmail;
   }, [accountEmail]);
+  // On-load auth check (ported from aiASAP): if the magic-link cookie is in THIS
+  // browser, mark signed-in + capture name/visitCount/longGap so the first voice
+  // start greets as a returning user instead of the first-timer line. Anonymous
+  // users fall through to VOICE_START_GREETING. Fire-and-forget; never blocks.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/account/me", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (cancelled || !data?.authenticated || !data?.user?.email) return;
+        accountEmailRef.current = data.user.email;
+        accountSignedInRef.current = true;
+        setAccountEmail(data.user.email);
+        const name =
+          typeof data.user.fullName === "string" && data.user.fullName.trim()
+            ? data.user.fullName.trim()
+            : null;
+        if (name) deviceProfileRef.current = { ...deviceProfileRef.current, name };
+        accountMemorySnapshotRef.current = {
+          visitCount: typeof data.visitCount === "number" ? data.visitCount : 1,
+          longGap: data.longGap === true,
+        };
+      } catch {
+        // anonymous fallback — first-timer greeting
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Chest-email box + letter-reveal machinery.
   const [chestEmailText, setChestEmailText] = useState("");
   const [chestEmailStatus, setChestEmailStatus] = useState<string | null>(null);
@@ -736,6 +862,7 @@ const LiveAvatarSessionComponent: React.FC<{
     accountSetupPendingEmailRef.current = null;
     accountSetupRejectedEmailRef.current = null;
     accountSetupAwaitingSendRef.current = false;
+    accountSetupAwaitingPostSendOfferRef.current = false;
     accountSetupSendEmailRef.current = null;
     accountSetupEmailMissCountRef.current = 0;
     accountSetupOfferMadeRef.current = false;
@@ -910,6 +1037,19 @@ const LiveAvatarSessionComponent: React.FC<{
         await repeat(spoken);
         lastAvatarResponseRef.current = spoken;
         rememberConversationLine("assistant", spoken);
+        if (data?.emailSent) {
+          // CONTINUE-OR-FINISH (G 2026-06-27): the link is out — don't leave the
+          // user hanging. Offer to keep solving or wrap up; the machine's
+          // awaitingPostSendOffer gate routes their answer. Re-mark machine-speaking
+          // so this extra beat isn't clipped by the account floor-cut.
+          machineSpeakingRef.current = true;
+          const offer =
+            "Want to keep working on your problem, or wrap up for now? Your link's in your inbox either way.";
+          await repeat(offer);
+          lastAvatarResponseRef.current = offer;
+          rememberConversationLine("assistant", offer);
+          accountSetupAwaitingPostSendOfferRef.current = true;
+        }
         accountSetupOfferMadeRef.current = false;
         accountSetupDeclinedAtRef.current = 0;
         accountSetupEmailMissCountRef.current = 0;
@@ -970,6 +1110,8 @@ const LiveAvatarSessionComponent: React.FC<{
       set awaitingName(v: boolean) { accountSetupAwaitingNameRef.current = v; },
       get awaitingSend() { return accountSetupAwaitingSendRef.current; },
       set awaitingSend(v: boolean) { accountSetupAwaitingSendRef.current = v; },
+      get awaitingPostSendOffer() { return accountSetupAwaitingPostSendOfferRef.current; },
+      set awaitingPostSendOffer(v: boolean) { accountSetupAwaitingPostSendOfferRef.current = v; },
       get pendingEmail() { return accountSetupPendingEmailRef.current; },
       set pendingEmail(v: string | null) { accountSetupPendingEmailRef.current = v; },
       get rejectedEmail() { return accountSetupRejectedEmailRef.current; },
@@ -2200,7 +2342,8 @@ const LiveAvatarSessionComponent: React.FC<{
           accountSetupAwaitingReadyRef.current ||
           accountSetupAwaitingEmailRef.current ||
           accountSetupAwaitingNameRef.current ||
-          accountSetupAwaitingSendRef.current;
+          accountSetupAwaitingSendRef.current ||
+          accountSetupAwaitingPostSendOfferRef.current;
         // STITCH a split trigger ("will you remember" + "me next time" ->
         // "remember me") the same way close-intent does. If the trigger only
         // matches the stitched text, drive the machine with the STITCHED text so
@@ -2238,6 +2381,7 @@ const LiveAvatarSessionComponent: React.FC<{
               accountSetupAwaitingEmailRef.current ||
               accountSetupAwaitingNameRef.current ||
               accountSetupAwaitingSendRef.current ||
+              accountSetupAwaitingPostSendOfferRef.current ||
               accountSetupPendingEmailRef.current !== null;
           };
           if (takesEmailFastPath(signupPorts, signupFlags, userText)) {
