@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// DEV-ONLY diagnostic breadcrumb sink for the voice-account smoke.
+// Diagnostic breadcrumb sink for the voice-account smoke.
 //
-// We cannot open the app in a dev browser to read its console (loading the page
-// mints the avatar = real money), so the client account fast-path POSTs its
-// breadcrumbs here and they print to the dev server console — readable from the
-// dev log with no browser. Inert (404) in production so it never ships live.
+// We cannot open the app in a browser to read its console (loading the page mints
+// the avatar = real money), so the client POSTs breadcrumbs here and they print to
+// the server console — readable from the dev log (localhost) or the Vercel function
+// logs (preview). Gated on VERCEL_ENV, NOT NODE_ENV: Vercel preview runs as
+// NODE_ENV=production, so the old NODE_ENV gate 404'd on every preview smoke and we
+// got no breadcrumbs. VERCEL_ENV is "preview" on preview deploys and "production"
+// only on the real domain — so this logs on dev + preview, stays inert on prod.
 export async function POST(req: NextRequest) {
-  if (process.env.NODE_ENV === "production") {
+  if (process.env.VERCEL_ENV === "production") {
     return NextResponse.json({ ok: false }, { status: 404 });
   }
   try {

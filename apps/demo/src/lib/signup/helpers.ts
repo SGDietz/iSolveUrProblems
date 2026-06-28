@@ -5,9 +5,9 @@
 
 export const ACCOUNT_MEMORY_VALUE_LINES = [
   "With an account, your lists stay intact, I remember the last conversation, and we pick up where we left off every time.",
-  "That account is how I remember your likes, dislikes, lists, and the thread of the conversation instead of acting like we just met.",
+  "That account is how I remember your name, your lists, and the thread of our last conversation, instead of acting like we just met.",
   "If you've got a phone, you've got a friend. The account is what lets me remember you next time.",
-  "When you create an account, I will remember everything you ask me to keep.",
+  "When you create an account, I pick up right where we left off - your name, your lists, and our last conversation.",
 ];
 
 export const INTERNAL_SIGNAL_RE =
@@ -16,8 +16,14 @@ export const INTERNAL_SIGNAL_RE =
 export const LIST_CLOSE_RE =
   /\b(?:close|hide|dismiss|drop|put away|take down|minimize|cierra|cerrar|oculta|ocultar|quita|quitar|ferme|fermer|cache|cacher|schliesse|schlie\u00dfe|ausblenden)\s+(?:the|my|this|that|la|mi|esta|esa|le|ma|cette|die|meine|diese)?\s*(?:grocery|shopping|walmart|to[-\s]?do|compras|mercado|tareas|courses|einkauf)?\s*(?:list|lists|lista|listas|liste)\b|\bmake\s+(?:the|my|this|that)?\s*(?:list|lists)\s+(?:disappear|go away)\b|\b(?:take|remove|drop)\s+(?:the|my|this|that)?\s*(?:grocery|shopping|walmart|to[-\s]?do)?\s*(?:list|lists)\s+(?:down|off|from)(?:\s+(?:the\s+)?screen)?\b|\btake\s+(?:it|this|that)\s+down\b|\bput\s+(?:it|this|that|the\s+list|the\s+lists)\s+away\b|\bno\s+(?:visible\s+)?list\b|\bback\s+to\s+(?:the\s+)?(?:prompts|boxes)\b/i;
 
+// Broadened 2026-06-28 (workflow latent-coverage finding) for natural signup
+// phrasings, with anchors that keep false positives out: "keep me" must be
+// on-file/logged-in/signed-in (so "keep me posted" stays out), "save my" must hit
+// an account noun (so "save my spot/money" stays out), and the remember-question
+// branch needs an auxiliary directly before remember+me/who-i-am (so "remember to
+// add milk" / "remember when" stay out).
 export const ACCOUNT_SETUP_TRIGGER_RE =
-  /\b(?:set up|setup|create|start|make|open)\s+(?:an?\s+)?account\b|\b(?:remember me|remember this next time|remember everything|save this for next time|sign me in|log me in)\b/i;
+  /\b(?:set up|setup|create|start|make|open)\s+(?:an?\s+)?account\b|\b(?:remember me|remember this next time|remember everything|save this for next time|sign me in|log me in)\b|\bset me up\b|\bsign me up\b|\bkeep me (?:on file|logged in|signed in)\b|\bsave my (?:info|details|account|email|profile)\b|\bremember who i am\b|\b(?:will|would|are|gonna|going to|do)\s+(?:you\s+)?remember\s+(?:me|who i am)\b/i;
 export const ACCOUNT_READY_YES_RE =
   /\b(?:yes|yeah|yep|sure|ready|ok|okay|correct|that'?s correct|that is correct|that'?s right|that is right|that does|that'?s it|that is it|it is|it'?s correct|it'?s right|sounds right|looks right|looks good|do it|let'?s do it|set it up|send it|send the email|send the link|send that)\b/i;
 // 2026-06-10 (tracer find): 6's brain asks "first time signing up, or already

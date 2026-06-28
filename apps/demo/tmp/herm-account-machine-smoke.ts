@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { accountSetupSpeechFlow, type SignupFlags, type SignupPorts } from "../src/lib/signup/machine.js";
+import { ACCOUNT_SETUP_TRIGGER_RE } from "../src/lib/signup/helpers.js";
 
 type State = {
   awaitingReady: boolean;
@@ -223,7 +224,26 @@ async function testSpelledEmailWithBoxWordNotTreatedAsComplaint() {
   assert.doesNotMatch(state.said.join("\n"), /The email box is up now/i);
 }
 
+function testTriggerRegexCoverage() {
+  // Broadened trigger (2026-06-28): natural signup phrasings match...
+  for (const m of [
+    "set up an account", "remember me", "set me up", "sign me up",
+    "keep me on file", "save my info", "save my account", "remember who I am",
+    "if I close you out, will you remember me?",
+  ]) {
+    assert.ok(ACCOUNT_SETUP_TRIGGER_RE.test(m), `trigger SHOULD match: ${m}`);
+  }
+  // ...but these false-positive baits must NOT match (no muting the brain on normal talk).
+  for (const n of [
+    "keep me posted", "save my money", "save my spot", "remember to add milk",
+    "remember when we talked", "I can't remember where I put my keys",
+  ]) {
+    assert.ok(!ACCOUNT_SETUP_TRIGGER_RE.test(n), `trigger must NOT match: ${n}`);
+  }
+}
+
 async function main() {
+  testTriggerRegexCoverage();
   await testNameAfterEmailOutOfOrder();
   await testPostSendOfferGate();
   await testPostSendOfferDoesNotSwallowProblem();

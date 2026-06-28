@@ -248,12 +248,50 @@ export async function POST(request: Request) {
         // Client breadcrumb only (localStorage); not a lookup key.
         pendingStateToken = crypto.randomUUID();
         linkRowInserted = true;
+        console.error(
+          "bc:link-row-inserted",
+          JSON.stringify({ inserted: true, emailSent, hasName: Boolean(fullName) }),
+        );
       } else {
         const detail = await insertRes.text();
         console.error("account_email_links insert failed:", insertRes.status, detail.slice(0, 200));
+        console.error("bc:link-row-inserted", JSON.stringify({ inserted: false, status: insertRes.status }));
       }
     } catch (error) {
       console.error("account_email_links insert threw:", error);
+    }
+  }
+
+  // LEAD-SESSION SEED (Herm TASK_041 #4): the account flow is the authoritative
+  // name source (user confirmed it on-chest) but never wrote lead_sessions — so
+  // that table kept re-asking for a name 6 already has. Seed it best-effort with
+  // merge-duplicates; a later spoken pass uses pickBetterFullName so this won't
+  // clobber a better name. Must NOT block the magic-link response.
+  if (serviceRoleKey && sessionId && fullName) {
+    try {
+      const seedRes = await fetch(`${supaUrl}/rest/v1/lead_sessions?on_conflict=session_id`, {
+        method: "POST",
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify([
+          {
+            session_id: sessionId,
+            full_name: fullName,
+            email,
+            consent_status: "accepted",
+            last_prompted_field: null,
+            last_prompted_at: null,
+            updated_at: new Date().toISOString(),
+          },
+        ]),
+      });
+      console.error("bc:lead-session-seeded", JSON.stringify({ ok: seedRes.ok, status: seedRes.status }));
+    } catch (error) {
+      console.error("lead_sessions seed threw:", error);
     }
   }
 

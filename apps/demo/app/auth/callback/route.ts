@@ -63,12 +63,15 @@ async function markDeviceLinkUsed(email: string, tokenHash: string): Promise<voi
     return;
   }
   const rows = await res.json().catch(() => null);
-  if (!Array.isArray(rows) || rows.length !== 1) {
+  const rowCount = Array.isArray(rows) ? rows.length : -1;
+  if (rowCount !== 1) {
     console.error(
       "auth/callback: account_email_links used_at patch matched unexpected row count",
-      Array.isArray(rows) ? rows.length : "unknown",
+      rowCount,
     );
   }
+  // Non-secret breadcrumb (count only — never the row, it carries the token_hash).
+  console.error("bc:callback-row-used", JSON.stringify({ rowCount, ok: res.ok }));
 }
 
 /**

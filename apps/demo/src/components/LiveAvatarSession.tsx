@@ -48,6 +48,23 @@ const PROBLEM_PROMPTS = [
 
 export type SessionStoppedReason = { reason?: "inactivity" | "explicit" };
 
+// Un-gated breadcrumb sink (fires on Vercel PREVIEW too, unlike the component's
+// diag() which is dev-only) → POST /api/diag-account → server console → Vercel fn
+// logs. Non-secret ONLY (booleans/counts/enums — never raw email/name/token).
+// Hoisted function, so it is callable from anywhere in this module (Herm TASK_041 #5).
+function breadcrumb(step: string, extra?: Record<string, unknown>): void {
+  try {
+    void fetch("/api/diag-account", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ step: `bc:${step}`, ...extra }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // best-effort; never throw from instrumentation
+  }
+}
+
 const VOICE_START_GREETING =
   "Hi, I'm 6, your ai buddy. You know why they call me 6? 'Cuz I got your back. So, what problems can I help you solve today?";
 
@@ -701,6 +718,9 @@ const LiveAvatarSessionComponent: React.FC<{
   // browser, then greet by name. Timer + one-shot greeting guard.
   const accountPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const accountReturnGreetedRef = useRef(false);
+  // The EXACT session_id sent to /api/account/start (may be the minted fallback,
+  // NOT dbSessionIdRef) — the device-link poll must query THIS id (Herm TASK_041 #3).
+  const accountLinkSessionIdRef = useRef<string | null>(null);
   // Non-overlap guards (Herm TASK_036): a slow tick must not overlap the next,
   // and the greet must not double-fire while one is mid-speech.
   const accountPollInFlightRef = useRef(false);
@@ -942,7 +962,7 @@ const LiveAvatarSessionComponent: React.FC<{
   const startDeviceLinkPoll = useCallback(() => {
     if (accountPollTimerRef.current) return; // already polling
     if (accountSignedInRef.current) return; // already signed in
-    const sid = dbSessionIdRef.current;
+    const sid = accountLinkSessionIdRef.current ?? dbSessionIdRef.current;
     if (!sid) return;
 
     let attempts = 0;
@@ -997,6 +1017,16 @@ const LiveAvatarSessionComponent: React.FC<{
               : `You're all signed in, ${name}! I've got you now.`
             : "You're all signed in! I've got you now.";
 
+          // Signed in → signup is DONE. Clear ALL gates + release the floor so the
+          // return-greet is not cut as rogue brain — a lingering post-send-offer
+          // gate kept the floor locked and clipped this greet (Herm TASK_041 #1/#2).
+          accountSetupAwaitingReadyRef.current = false;
+          accountSetupAwaitingEmailRef.current = false;
+          accountSetupAwaitingNameRef.current = false;
+          accountSetupAwaitingSendRef.current = false;
+          accountSetupAwaitingPostSendOfferRef.current = false;
+          accountSetupPendingEmailRef.current = null;
+          accountFloorHeldRef.current = false;
           // Cut the brain, then speak. Mark greeted + stop the poll ONLY after
           // repeat() succeeds — if it throws, leave the poll alive to retry
           // rather than strand 6 silent (Herm TASK_036 mute audit).
@@ -1005,11 +1035,15 @@ const LiveAvatarSessionComponent: React.FC<{
           } catch {
             // interrupt hiccup must not block the spoken line
           }
+          // Grant ONE machine speak-start allowance so AVATAR_SPEAK_STARTED can't
+          // mistake the greet for the brain and clip it (belt-and-suspenders).
+          machineSpeakStartsAllowedRef.current += 1;
           await repeat(spoken);
           accountReturnGreetedRef.current = true;
           stop();
           lastAvatarResponseRef.current = spoken;
           rememberConversationLine("assistant", spoken);
+          breadcrumb("return-greet-fired", { named: Boolean(name) });
         } catch (e) {
           console.error("device-link return greet failed", e);
         } finally {
@@ -1058,7 +1092,18 @@ const LiveAvatarSessionComponent: React.FC<{
         // Allow exactly THIS upcoming AVATAR_SPEAK_STARTED past the account-floor cut
         // (source-counting) — any other start while held is the brain, and is cut.
         machineSpeakStartsAllowedRef.current += 1;
-        await repeat(text);
+        try {
+          await repeat(text);
+        } catch (repeatErr) {
+          // repeat() failed → no avatar start will consume the allowance we just
+          // added; roll it back so a later BRAIN start can't slip through on a stale
+          // allowance (Herm TASK_041 stale-allowance edge).
+          machineSpeakStartsAllowedRef.current = Math.max(
+            0,
+            machineSpeakStartsAllowedRef.current - 1,
+          );
+          throw repeatErr;
+        }
       } finally {
         // Clear after the full estimated duration so AVATAR_SPEAK_STARTED for this
         // repeat() is never mistaken for the brain and clipped. Token-checked so a
@@ -1066,6 +1111,10 @@ const LiveAvatarSessionComponent: React.FC<{
         machineSpeechClearTimerRef.current = setTimeout(() => {
           if (machineSpeechTokenRef.current !== token) return;
           machineSpeakingRef.current = false;
+          // This (latest) line's window expired. If its start never fired, the
+          // allowance is stale — clear it so a later brain start can't consume it
+          // (Herm TASK_041). Safe: token-checked, so no newer scripted line is pending.
+          machineSpeakStartsAllowedRef.current = 0;
           machineSpeechClearTimerRef.current = null;
         }, guardMs);
       }
@@ -1081,6 +1130,9 @@ const LiveAvatarSessionComponent: React.FC<{
       const normalizedEmail = email.trim().toLowerCase();
       const sessionIdForAccount =
         safeAccountSessionId(dbSessionIdRef.current) ?? safeAccountSessionId(mintedSessionIdRef.current);
+      // Remember the EXACT id we send so the device-link poll queries the same row
+      // (start may use the minted fallback, but the poll only knew dbSessionIdRef).
+      if (sessionIdForAccount) accountLinkSessionIdRef.current = sessionIdForAccount;
 
       // Do not send a magic-link email unless the same session has a pollable id.
       // Otherwise the email can be real but 6 can never detect the click/name on
@@ -1254,7 +1306,10 @@ const LiveAvatarSessionComponent: React.FC<{
       saveName: (name: string) => {
         deviceProfileRef.current = { ...deviceProfileRef.current, name };
       },
-      showChest: () => setShowChestEmail(true),
+      showChest: () => {
+        breadcrumb("showChest-emailStep");
+        setShowChestEmail(true);
+      },
       setChestDisplay: (text: string) => {
         chestEmailTextRef.current = text;
         setChestEmailText(text);
@@ -2437,7 +2492,8 @@ const LiveAvatarSessionComponent: React.FC<{
           accountSetupAwaitingEmailRef.current ||
           accountSetupAwaitingNameRef.current ||
           accountSetupAwaitingSendRef.current ||
-          accountSetupAwaitingPostSendOfferRef.current;
+          accountSetupAwaitingPostSendOfferRef.current ||
+          accountSetupPendingEmailRef.current !== null;
         // STITCH a split trigger ("will you remember" + "me next time" ->
         // "remember me") the same way close-intent does. If the trigger only
         // matches the stitched text, drive the machine with the STITCHED text so
@@ -3559,7 +3615,7 @@ const LiveAvatarSessionComponent: React.FC<{
                 await unlockAudio();
                 void handleCameraClick();
               }}
-              className="pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 px-3 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+              className="pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-3 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
               style={{ fontSize: _pillFont, minHeight: _pillMinH }}
             >
               <Camera className="shrink-0" style={{ width: _pillFont, height: _pillFont }} strokeWidth={2.5} aria-hidden />
@@ -3568,7 +3624,7 @@ const LiveAvatarSessionComponent: React.FC<{
             <button
               type="button"
               onClick={() => void handleGalleryClick()}
-              className="pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 px-3 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+              className="pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-3 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
               style={{ fontSize: _pillFont, minHeight: _pillMinH }}
             >
               <Images className="shrink-0" style={{ width: _pillFont, height: _pillFont }} strokeWidth={2.5} aria-hidden />
@@ -3699,7 +3755,7 @@ const LiveAvatarSessionComponent: React.FC<{
       )}
 
       {/* Text overlays at the top */}
-      <div className="absolute top-0 left-0 right-0 z-10 flex flex-col items-center pt-6 pb-2 md:pt-[4.5vh]">
+      <div className="absolute top-0 left-0 right-0 z-10 flex flex-col items-center pt-10 pb-2 md:pt-[6.5vh]">
         <div className="text-center px-4 mb-2">
           {/* Small top tap line replaced by the big aiASAP-exact "Tap/Click
               ANYWHERE To Talk To 6" prompt lower on the stage (G 2026-06-27). */}
