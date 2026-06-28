@@ -509,14 +509,24 @@ const LiveAvatarSessionComponent: React.FC<{
       return;
     }
     const onAvatarSpeakStarted = () => {
-      // (1) No audible output yet → cut. (2) Account floor held → cut the BRAIN's
-      // spontaneous turn so only the scripted machine speaks — but NOT when our
-      // own repeat() is the speaker (machineSpeakingRef), or we'd clip our line.
-      if (
-        !audioUnlockedRef.current ||
-        (accountFloorHeldRef.current && !machineSpeakingRef.current)
-      ) {
+      // (1) No audible output yet → cut.
+      if (!audioUnlockedRef.current) {
         void interrupt();
+        lastVisionResponseTimeRef.current = Date.now();
+        return;
+      }
+      // (2) Account floor held → the MACHINE owns the turn. Allow ONLY the scripted
+      // lines we queued via repeat() (source-counting, Herm TASK_041 + workflow):
+      // each say() pre-increments machineSpeakStartsAllowedRef, this start consumes
+      // one. A start with NO allowance is the prod-shared brain (459ae665)
+      // freelancing ("Love it... say your email") → cut it. Stricter than the old
+      // duration-guard, which let brain audio through during 6's own guard window.
+      if (accountFloorHeldRef.current) {
+        if (machineSpeakStartsAllowedRef.current > 0) {
+          machineSpeakStartsAllowedRef.current -= 1;
+        } else {
+          void interrupt();
+        }
       }
       // Mark that the avatar just started speaking so Go Live filler knows
       // not to fire on top. Without this, filler tracked only OUR repeat()
@@ -663,6 +673,19 @@ const LiveAvatarSessionComponent: React.FC<{
   const accountFloorHeldRef = useRef(false);
   const machineSpeakingRef = useRef(false);
   const machineSpeechClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Machine-speech guard window (Herm TASK_040): repeat() can resolve before the
+  // avatar's audio actually starts/finishes, so the old fixed 1s clear let
+  // AVATAR_SPEAK_STARTED cut our OWN scripted line — the clipped one-word gibberish
+  // G heard on the smoke. Guard by an estimated spoken duration + a token so a newer
+  // line's timer never clears an older line's flag.
+  const machineSpeechGuardUntilRef = useRef(0);
+  const machineSpeechTokenRef = useRef(0);
+  // Source-counting allowance (Herm TASK_041 + workflow): incremented right before
+  // each scripted repeat(); AVATAR_SPEAK_STARTED consumes one. While the account
+  // floor is held, a start with NO allowance is the prod brain freelancing → cut it.
+  // Replaces the broad duration-guard for the CUT decision, which let brain audio
+  // through during 6's own guard window (the recurring "Love it" leak).
+  const machineSpeakStartsAllowedRef = useRef(0);
   const accountSetupRejectedEmailRef = useRef<string | null>(null);
   const accountSetupSendEmailRef = useRef<string | null>(null);
   const accountSetupEmailMissCountRef = useRef(0);
@@ -1009,7 +1032,17 @@ const LiveAvatarSessionComponent: React.FC<{
         clearTimeout(machineSpeechClearTimerRef.current);
         machineSpeechClearTimerRef.current = null;
       }
+      // Estimate how long this line will actually be spoken (~140 wpm) and hold the
+      // "our line" floor for that whole window, not just until repeat() resolves.
+      // repeat() returns when the line is QUEUED, seconds before the audio finishes;
+      // the old fixed 1s clear let the floor-cut interrupt 6 mid-sentence → the
+      // clipped one-word gibberish. Token guards against an old line's timer
+      // clearing a newer line's flag.
+      const token = ++machineSpeechTokenRef.current;
+      const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+      const guardMs = Math.min(15000, Math.max(2800, wordCount * 450 + 1400));
       machineSpeakingRef.current = true;
+      machineSpeechGuardUntilRef.current = Date.now() + guardMs;
       try {
         if (opts?.interruptFirst !== false) {
           try {
@@ -1018,15 +1051,23 @@ const LiveAvatarSessionComponent: React.FC<{
             // never block scripted account speech on an interrupt hiccup
           }
         }
+        // Re-assert after interrupt() — its round-trip can eat part of the window
+        // before the avatar even starts speaking.
+        machineSpeakingRef.current = true;
+        machineSpeechGuardUntilRef.current = Date.now() + guardMs;
+        // Allow exactly THIS upcoming AVATAR_SPEAK_STARTED past the account-floor cut
+        // (source-counting) — any other start while held is the brain, and is cut.
+        machineSpeakStartsAllowedRef.current += 1;
         await repeat(text);
       } finally {
-        // Keep the "our line" flag up briefly so AVATAR_SPEAK_STARTED for this
-        // repeat() is not mistaken for the brain and clipped. Always clear it so
-        // the account floor-cut cannot get stuck disabled after a second line.
+        // Clear after the full estimated duration so AVATAR_SPEAK_STARTED for this
+        // repeat() is never mistaken for the brain and clipped. Token-checked so a
+        // newer scripted line never has its flag cleared by an older line's timer.
         machineSpeechClearTimerRef.current = setTimeout(() => {
+          if (machineSpeechTokenRef.current !== token) return;
           machineSpeakingRef.current = false;
           machineSpeechClearTimerRef.current = null;
-        }, 1000);
+        }, guardMs);
       }
       lastAvatarResponseRef.current = text;
       if (opts?.remember) rememberConversationLine("assistant", text);
@@ -1101,21 +1142,18 @@ const LiveAvatarSessionComponent: React.FC<{
           lastAccountLinkSendRef.current = null;
         }
         const spoken = fullSuccess
-          ? "Done. I sent you an email. Check for it now and click the link. When you come back, we'll pick up right where we left off."
+          ? "Done. I sent you an email. Check for it now and click the link. When you come back, we'll pick up right where we left off. Want to keep working on your problem, or wrap up for now? Your link's in your inbox either way."
           : data?.errorCode === "missing_session_id"
             ? "Give me one more second to finish connecting, then I'll send that link. Try saying yes, send it again in a moment."
             : emailSent
               ? "I sent your sign-in link - check your email and click it to finish. Heads up: I couldn't fully save your session this round, so I made a note for G."
               : "I saved your email, but the email sender is not fully connected yet. I made a note for G to finish account email before this goes live.";
+        // Success + the continue-or-finish offer are ONE spoken line now (Herm
+        // TASK_040): two back-to-back repeat() calls had the second interrupt()
+        // clip the first. The machine's awaitingPostSendOffer gate still routes
+        // the user's answer.
         await sayAccountScriptedLine(spoken, { remember: true });
         if (fullSuccess) {
-          // CONTINUE-OR-FINISH (G 2026-06-27): the account fully persisted — offer
-          // to keep solving or wrap up; the machine's awaitingPostSendOffer gate
-          // routes their answer. The shared scripted-speech helper clears the
-          // machine-speaking flag after every line so the floor-cut cannot stick.
-          const offer =
-            "Want to keep working on your problem, or wrap up for now? Your link's in your inbox either way.";
-          await sayAccountScriptedLine(offer, { remember: true });
           accountSetupAwaitingPostSendOfferRef.current = true;
         }
         accountSetupOfferMadeRef.current = false;
@@ -1203,7 +1241,10 @@ const LiveAvatarSessionComponent: React.FC<{
       get sendArmedByText() { return accountSetupSendArmedByTextRef.current; },
       set sendArmedByText(v: string | null) { accountSetupSendArmedByTextRef.current = v; },
       get signedIn() { return accountSignedInRef.current; },
-      get avatarTalking() { return isAvatarTalkingRef.current; },
+      // While the account floor is held the MACHINE owns the turn (Herm TASK_041):
+      // mask avatarTalking so the machine never mistakes rogue brain speech for
+      // "6 is carrying the voice" and silently skips its scripted lines.
+      get avatarTalking() { return accountFloorHeldRef.current ? false : isAvatarTalkingRef.current; },
       get userName() { return deviceProfileRef.current.name; },
       get greetingCount() { return deviceProfileRef.current.greetingCount; },
       get chestText() { return chestEmailTextRef.current; },
@@ -2436,6 +2477,9 @@ const LiveAvatarSessionComponent: React.FC<{
               accountSetupAwaitingSendRef.current ||
               accountSetupAwaitingPostSendOfferRef.current ||
               accountSetupPendingEmailRef.current !== null;
+            // Floor released → drop any stale speak-allowance so a later normal brain
+            // turn is never wrongly permitted (allowance only matters while held).
+            if (!accountFloorHeldRef.current) machineSpeakStartsAllowedRef.current = 0;
           };
           if (takesEmailFastPath(signupPorts, signupFlags, userText)) {
             diag("emailFastPath:matched");
@@ -2459,6 +2503,16 @@ const LiveAvatarSessionComponent: React.FC<{
           // instead of silently dropping to the brain. (aiASAP signup-tracer.)
           diag("threw", { msg: String(machineError) });
           console.error("[account-flow] machine threw:", machineError);
+          // SILENCE SAFETY (Herm TASK_040): a throw must not leave the floor stuck
+          // HELD with no scripted line coming — that mutes the brain too and makes
+          // 6 go silent for 10s+. Re-derive the hold from the gates.
+          accountFloorHeldRef.current =
+            accountSetupAwaitingReadyRef.current ||
+            accountSetupAwaitingEmailRef.current ||
+            accountSetupAwaitingNameRef.current ||
+            accountSetupAwaitingSendRef.current ||
+            accountSetupAwaitingPostSendOfferRef.current ||
+            accountSetupPendingEmailRef.current !== null;
         }
       }
 
@@ -3414,7 +3468,10 @@ const LiveAvatarSessionComponent: React.FC<{
   const _pillMinH = `calc(${_pillFont} * 1.5)`;
   // When the email box is up, it REPLACES all 3 prompt pills (G 2026-06-27):
   // only the distinct email field + Camera/Gallery remain.
-  const _emailBoxActive = Boolean(showChestEmail && (chestEmailStatus || chestEmailText));
+  // FIX (Herm TASK_040): show the box the instant showChest() fires, even before
+  // any letters land — the old `&& (status||text)` kept it hidden at the empty
+  // spell prompt, so G saw NO email box and the pills never dropped.
+  const _emailBoxActive = Boolean(showChestEmail);
 
   return (
     <div className="site-bg fixed inset-0 w-screen h-screen flex flex-col">
@@ -3433,14 +3490,44 @@ const LiveAvatarSessionComponent: React.FC<{
       {isActive && (
         <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.12)] md:bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.22)] -translate-x-1/2 z-40 flex w-[94%] max-w-[min(42rem,calc(var(--stage-width)*1.0))] flex-col items-center gap-[calc(var(--stage-height)*0.010)] px-2">
           {_emailBoxActive && (
+            // ONE bigger, clearly-labeled email box (G 2026-06-28): "drop all
+            // pill boxes, put only one up for the email, a bigger box that says
+            // email in it." On send it flips to the confirmation + a checkmark,
+            // mirroring aiASAP's "Email Link Sent ✓".
             <div
-              className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-[#f1c477] bg-[#140c05]/95 px-4 text-[#ffe9c2] font-semibold leading-tight shadow-[inset_0_2px_14px_rgba(0,0,0,0.6),0_0_22px_rgba(241,196,119,0.38)] backdrop-blur-[2px]"
-              style={{ fontSize: _pillFont, minHeight: _pillMinH, maxWidth: _pillMaxWidth }}
+              className="flex w-full flex-col items-center justify-center gap-[calc(var(--stage-height)*0.006)] rounded-2xl border-2 border-[#f1c477] bg-[#140c05]/95 px-5 py-[calc(var(--stage-height)*0.018)] mb-[calc(var(--stage-height)*0.06)] text-center leading-tight shadow-[inset_0_2px_14px_rgba(0,0,0,0.6),0_0_30px_rgba(241,196,119,0.45)] backdrop-blur-[2px]"
+              style={{ maxWidth: "min(calc(var(--stage-width) * 0.66), 90vw)" }}
             >
-              <Mail className="shrink-0" style={{ width: _pillFont, height: _pillFont }} strokeWidth={2.5} aria-hidden />
-              <span className={chestEmailStatus ? "tracking-wide" : "break-all font-mono"}>
-                {chestEmailStatus ? chestEmailStatus : chestEmailText}
-              </span>
+              {chestEmailStatus ? (
+                <span
+                  className="flex items-center justify-center gap-2 font-black tracking-wide bg-gradient-to-b from-[#ffe9c2] via-[#d7a05a] to-[#3a2108] bg-clip-text text-transparent"
+                  style={{ fontSize: `calc(${_pillFont} * 1.0)` }}
+                >
+                  {chestEmailStatus}
+                  {/\bsent\b/i.test(chestEmailStatus) ? " ✓" : ""}
+                </span>
+              ) : (
+                <>
+                  <span
+                    className="flex items-center gap-2 font-semibold uppercase tracking-[0.18em] text-[#f1c477]"
+                    style={{ fontSize: `calc(${_pillFont} * 0.55)` }}
+                  >
+                    <Mail
+                      className="shrink-0"
+                      style={{ width: `calc(${_pillFont} * 0.72)`, height: `calc(${_pillFont} * 0.72)` }}
+                      strokeWidth={2.5}
+                      aria-hidden
+                    />
+                    Your Email
+                  </span>
+                  <span
+                    className="w-full break-all font-mono font-black text-[#ffe9c2]"
+                    style={{ fontSize: `calc(${_pillFont} * 1.0)` }}
+                  >
+                    {chestEmailText || "spell your email…"}
+                  </span>
+                </>
+              )}
             </div>
           )}
           {(_emailBoxActive ? [] : promptPills).map((prompt, i) => (
@@ -3461,7 +3548,10 @@ const LiveAvatarSessionComponent: React.FC<{
               {prompt}
             </button>
           ))}
-          {/* 4th row: Camera | Gallery side-by-side, just below the prompts. */}
+          {/* 4th row: Camera | Gallery side-by-side, just below the prompts.
+              Hidden while collecting the email (G 2026-06-28: "drop all pill
+              boxes, including camera and gallery, put only one up for the email"). */}
+          {!_emailBoxActive && (
           <div className="grid w-full grid-cols-2 gap-[calc(var(--stage-height)*0.010)]" style={{ maxWidth: _pillMaxWidth }}>
             <button
               type="button"
@@ -3485,6 +3575,7 @@ const LiveAvatarSessionComponent: React.FC<{
               {t("gallery")}
             </button>
           </div>
+          )}
         </div>
       )}
 
@@ -3665,7 +3756,7 @@ const LiveAvatarSessionComponent: React.FC<{
             back, but the HeyGen stream still needed a few seconds to
             paint, so users briefly saw a black screen. */}
         {!isStreamReady && !isCameraActive && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black">
+          <div className="absolute inset-0 z-30 flex items-center justify-center site-bg">
             <div className="text-center">
               <p
                 className="brand-grad-text text-[1.35rem] sm:text-[1.6rem] italic"
@@ -3959,13 +4050,15 @@ const LiveAvatarSessionComponent: React.FC<{
 export const LiveAvatarSession: React.FC<{
   mode: "FULL" | "CUSTOM";
   sessionAccessToken: string;
+  initialSessionId?: string | null;
   onSessionStopped: (opts?: SessionStoppedReason) => void;
-  onExit?: () => void;
-}> = ({ mode, sessionAccessToken, onSessionStopped, onExit }) => {
+  onExit?: (completeExit?: boolean) => void;
+}> = ({ mode, sessionAccessToken, initialSessionId, onSessionStopped, onExit }) => {
   return (
     <LiveAvatarContextProvider sessionAccessToken={sessionAccessToken}>
       <LiveAvatarSessionComponent
         mode={mode}
+        initialSessionId={initialSessionId}
         onSessionStopped={onSessionStopped}
         onExit={onExit}
       />

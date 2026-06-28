@@ -15,9 +15,10 @@ const AIASAP_SUPABASE_REF = "wqszxsqzkaatghyrqviv";
  * phone, NOT the browser running 6 (Comet). So the live 6 session never sees the
  * sign-in cookie and can't greet the returning user by name.
  *
- * Fix: /auth/callback stamps account_email_links.used_at for the signed-in email
- * (server-side, no cookie needed here). The live 6 session POLLS this endpoint by
- * its OWN session_id; the moment its row flips to used, it pulls the name + resume
+ * Fix: /auth/callback stamps account_email_links.used_at only on the exact row
+ * carrying the clicked magic-link token (server-side, no cookie needed here). The
+ * live 6 session POLLS this endpoint by its OWN session_id; the moment its row
+ * flips to used, it pulls the name + resume
  * SERVER-SIDE and 6 greets them. Same gap aiASAP has.
  *
  * Read-only, service-role, keyed by an unguessable LiveAvatar session id. No rate

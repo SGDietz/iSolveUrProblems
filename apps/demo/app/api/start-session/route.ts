@@ -29,8 +29,9 @@ async function loadResumeMemoryFromLinks(
   // Wrong-DB guard: only iSolve's project.
   if (!supaUrl.includes(ISOLVE_SUPABASE_REF) || supaUrl.includes(AIASAP_SUPABASE_REF)) return empty;
   try {
+    const nowIso = new Date().toISOString();
     const res = await fetch(
-      `${supaUrl}/rest/v1/account_email_links?email=eq.${encodeURIComponent(email)}&order=created_at.desc&limit=1&select=captured_lists`,
+      `${supaUrl}/rest/v1/account_email_links?email=eq.${encodeURIComponent(email)}&used_at=not.is.null&expires_at=gte.${encodeURIComponent(nowIso)}&order=used_at.desc,created_at.desc&limit=1&select=captured_lists`,
       { headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` } },
     );
     if (!res.ok) return empty;

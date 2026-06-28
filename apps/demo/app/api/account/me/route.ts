@@ -89,7 +89,7 @@ export async function GET(request: Request) {
   if (dbOk && serviceRoleKey) {
     try {
       const nowIso = new Date().toISOString();
-      const url = `${supaUrl}/rest/v1/account_email_links?email=eq.${encodeURIComponent(userEmail)}&expires_at=gte.${encodeURIComponent(nowIso)}&order=created_at.desc&limit=1&select=captured_lists`;
+      const url = `${supaUrl}/rest/v1/account_email_links?email=eq.${encodeURIComponent(userEmail)}&used_at=not.is.null&expires_at=gte.${encodeURIComponent(nowIso)}&order=used_at.desc,created_at.desc&limit=1&select=captured_lists`;
       const fetchResult = await Promise.race([
         fetch(url, {
           method: "GET",

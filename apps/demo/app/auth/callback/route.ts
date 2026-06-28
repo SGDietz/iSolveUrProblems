@@ -21,11 +21,12 @@ function appBase(request: NextRequest): string {
 }
 
 /**
- * Cross-browser device link: flip every pending magic-link row for this email to
- * used. The live 6 session polls /api/account/session-status by its session_id and,
- * the moment its row flips, greets the user by name — even though THIS browser holds
- * the cookie, not 6's. Best-effort with service role; a failure here must NEVER block
- * the sign-in redirect.
+ * Cross-browser device link: flip ONLY the exact magic-link row carrying this token
+ * (matched by email + token_hash) to used — never every pending row for the email,
+ * which would false-greet a second session for the same person. The live 6 session
+ * polls /api/account/session-status by its session_id and, the moment its row flips,
+ * greets the user by name — even though THIS browser holds the cookie, not 6's.
+ * Best-effort with service role; a failure here must NEVER block the sign-in redirect.
  */
 async function markDeviceLinkUsed(email: string, tokenHash: string): Promise<void> {
   const supaUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -39,16 +40,35 @@ async function markDeviceLinkUsed(email: string, tokenHash: string): Promise<voi
   const q = `${supaUrl}/rest/v1/account_email_links?email=eq.${encodeURIComponent(
     email.toLowerCase(),
   )}&token_hash=eq.${encodeURIComponent(tokenHash)}&used_at=is.null`;
-  await fetch(q, {
+  const res = await fetch(q, {
     method: "PATCH",
     headers: {
       apikey: serviceRoleKey,
       Authorization: `Bearer ${serviceRoleKey}`,
       "Content-Type": "application/json",
-      Prefer: "return=minimal",
+      // Return the affected row so callback smoke/logs can distinguish a true
+      // device-link flip from a silent zero-row PATCH. Never log the row itself:
+      // it carries the magic-link token_hash.
+      Prefer: "return=representation",
     },
     body: JSON.stringify({ used_at: new Date().toISOString() }),
   });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    console.error(
+      "auth/callback: account_email_links used_at patch failed",
+      res.status,
+      detail.slice(0, 200),
+    );
+    return;
+  }
+  const rows = await res.json().catch(() => null);
+  if (!Array.isArray(rows) || rows.length !== 1) {
+    console.error(
+      "auth/callback: account_email_links used_at patch matched unexpected row count",
+      Array.isArray(rows) ? rows.length : "unknown",
+    );
+  }
 }
 
 /**
@@ -67,7 +87,7 @@ async function stampVisit(
   if (supaUrl.includes(AIASAP_SUPABASE_REF) || !supaUrl.includes(ISOLVE_SUPABASE_REF)) return;
   const prev =
     typeof currentMeta.visit_count === "number" ? currentMeta.visit_count : 0;
-  await fetch(`${supaUrl}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
+  const res = await fetch(`${supaUrl}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
     method: "PUT",
     headers: {
       apikey: serviceRoleKey,
@@ -82,6 +102,14 @@ async function stampVisit(
       },
     }),
   });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    console.error(
+      "auth/callback: visit metadata stamp failed",
+      res.status,
+      detail.slice(0, 200),
+    );
+  }
 }
 
 /**
@@ -121,24 +149,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Voice device-link only: stamp the exact row for THIS link's token so the
-    // live 6 session (polling by session_id) greets — without flipping other
-    // sessions' rows for the same email. OAuth/code is not a voice device link.
-    if (tokenHash) {
-      try {
-        const { data } = await supabase.auth.getUser();
-        const email = data?.user?.email;
-        if (email) await markDeviceLinkUsed(email, tokenHash);
-        const uid = data?.user?.id;
-        if (uid) {
-          await stampVisit(
-            uid,
-            (data?.user?.user_metadata ?? {}) as Record<string, unknown>,
-          );
-        }
-      } catch (e) {
-        console.error("auth/callback: device-link mark failed", e);
+    // After either OAuth/code or voice magic-link auth succeeds, stamp visit
+    // metadata so greeting tiers advance. For voice links, also stamp only the
+    // exact account_email_links row carrying this token so the live 6 session
+    // polling by session_id can greet without flipping other same-email rows.
+    try {
+      const { data } = await supabase.auth.getUser();
+      const user = data?.user;
+      if (user?.id) {
+        await stampVisit(user.id, (user.user_metadata ?? {}) as Record<string, unknown>);
       }
+      if (tokenHash && user?.email) await markDeviceLinkUsed(user.email, tokenHash);
+    } catch (e) {
+      console.error("auth/callback: post-auth visit/device-link stamp failed", e);
     }
   } catch (e) {
     console.error("auth/callback failed", e);

@@ -9,6 +9,7 @@ import { rememberAnonymousSessionId } from "../lib/auth/AuthProvider";
 export const LiveAvatarDemo = () => {
   const t = useTranslations("home");
   const [sessionToken, setSessionToken] = useState("");
+  const [liveAvatarSessionId, setLiveAvatarSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isExited, setIsExited] = useState(false);
@@ -29,6 +30,7 @@ export const LiveAvatarDemo = () => {
       }
       const { session_token, session_id } = await res.json();
       setSessionToken(session_token);
+      setLiveAvatarSessionId(typeof session_id === "string" ? session_id : null);
       // Stash the anonymous session_id so /api/auth/link-session can re-key
       // its rows to the user when they sign in (M1.1 anonymous → authed).
       if (session_id) rememberAnonymousSessionId(session_id);
@@ -57,9 +59,11 @@ export const LiveAvatarDemo = () => {
       // Restart surface instead of silently auto-restarting (which re-mints 6).
       setIsExited(true);
       setSessionToken("");
+      setLiveAvatarSessionId(null);
       return;
     }
     setSessionToken("");
+    setLiveAvatarSessionId(null);
   };
 
   // Helper function to try closing the tab with multiple methods
@@ -211,12 +215,16 @@ export const LiveAvatarDemo = () => {
   if (isExited) {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center gap-4">
+        {/* Still pic of 6 on the ended screen (G 2026-06-28) so 6's face stays
+            present even after the avatar comes down. */}
+        <img
+          src="/startscreen.png"
+          alt="6"
+          className="w-44 h-56 rounded-2xl border border-[#e0aa62]/40 object-cover object-top shadow-[0_0_28px_rgba(241,196,119,0.35)]"
+        />
         <div className="text-inset text-2xl font-semibold">{t("sessionEnded")}</div>
         <div className="text-inset text-center text-lg opacity-90">
           {t("thankYou")}
-        </div>
-        <div className="text-inset text-center text-base opacity-90">
-          {t("restartPrompt")}
         </div>
         <button
           type="button"
@@ -301,7 +309,7 @@ export const LiveAvatarDemo = () => {
 
   if (!sessionToken) {
     return (
-      <div className="w-full min-h-screen flex flex-col items-center justify-center gap-4 bg-black px-4">
+      <div className="w-full min-h-screen flex flex-col items-center justify-center gap-4 px-4 site-bg">
         {error && (
           <div className="max-w-xl rounded-xl bg-black/55 px-5 py-4 backdrop-blur-sm border border-gold/20">
             <p className="text-center text-gold text-lg font-semibold leading-snug">
@@ -334,6 +342,7 @@ export const LiveAvatarDemo = () => {
   return (
     <LiveAvatarSession
       mode="FULL"
+      initialSessionId={liveAvatarSessionId}
       sessionAccessToken={sessionToken}
       onSessionStopped={onSessionStopped}
       onExit={handleExit}

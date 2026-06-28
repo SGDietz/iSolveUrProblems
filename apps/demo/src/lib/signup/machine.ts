@@ -38,6 +38,14 @@ const POST_SEND_KEEP_GOING_RE =
 const POST_SEND_WRAP_UP_RE =
   /\b(?:wrap\s+up|finish(?:\s+(?:up|account|setup|signing\s+in))?|done|all\s+done|that'?s\s+all|stop|end|close|quit|exit|sign\s+off|log\s+off|i'?m\s+good|we'?re\s+good)\b/i;
 
+// META ESCAPE (Herm TASK_040): while collecting the email, G's UI bug reports
+// ("the pillboxes should drop", "on your chest should be the email box", "when
+// you say spell it slowly") were parsed as FAILED email spelling → 6 looped
+// "Please spell it slowly." These phrases never appear in a real spelled
+// address, so matching them lets 6 redirect instead of re-prompting forever.
+const ACCOUNT_EMAIL_META_RE =
+  /\b(?:pill\s?boxe?s?|the\s+pills?|(?:on|the|your|his|my)\s+chest|email\s+box|the\s+box\b|should\s+(?:drop|show|appear)|when\s+you\s+say\s+spell\s+it\s+slowly|not\s+(?:showing|dropping|appearing)|didn'?t\s+(?:drop|show|appear)|nothing'?s?\s+(?:showing|there|dropping))\b/i;
+
 export interface SignupFlags {
   accountBetaDisabled: boolean;
   emailTypedFallbackEnabled: boolean;
@@ -559,6 +567,23 @@ export async function accountSetupSpeechFlow(
   }
 
   if (ports.awaitingEmail) {
+    // META ESCAPE (Herm TASK_040): a UI complaint mid-spell is NOT a failed
+    // email — don't loop "Please spell it slowly." Re-show the box and redirect.
+    // GUARD (Herm TASK_041): never treat an ACTUAL spelled address as a complaint.
+    // "thebox at example dot com" / "pillbox@..." contain box/pill words but ARE
+    // emails. If the turn looks like email input (@, "at"/"dot", or a run of single
+    // letters), skip the meta escape and spell it.
+    const looksLikeEmailInput =
+      /@|\b(?:at|dot)\b|(?:\b[a-z]\b[\s,.'-]*){3,}/i.test(userText);
+    if (!looksLikeEmailInput && ACCOUNT_EMAIL_META_RE.test(userText)) {
+      ports.showChest();
+      if (!ports.avatarTalking) {
+        await ports.say(
+          "The email box is up now - spell your address one letter at a time and watch it land there.",
+        );
+      }
+      return true;
+    }
     // PRIMARY path: the user is spelling their email aloud. Build it up on
     // 6's chest letter-by-letter; never guess a full address from words.
     return appendSpelledEmailFlow(ports, flags, userText);

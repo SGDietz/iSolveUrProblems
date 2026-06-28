@@ -1,0 +1,5 @@
+# Local-only Herm/Claude smoke and Supabase CLI artifacts.
+# Keep Vercel payloads clean whether deploy starts at repo root or apps/demo.
+apps/demo/tmp/
+apps/demo/supabase/.temp/
+*.log

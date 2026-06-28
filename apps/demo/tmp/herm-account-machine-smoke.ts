@@ -189,13 +189,50 @@ async function testAwaitingNameLongSentenceDoesNotMute() {
   assert.match(state.said.at(-1) ?? "", /just your first name when you're ready/);
 }
 
+async function testExplicitSingleLetterNameCaptured() {
+  // #3 (G's 2026-06-28 smoke): "Okay, my name is G, the letter G." MUST capture
+  // the name "G" and advance. On the smoke 6 kept looping "just your first name".
+  const { state, ports } = makePorts({ awaitingName: true });
+  assert.equal(await turn(ports, "Okay, my name is G, the letter G."), true);
+  assert.equal(state.name, "G");
+  assert.equal(state.awaitingName, false);
+  assert.doesNotMatch(state.said.at(-1) ?? "", /just your first name/i);
+}
+
+async function testEmailMetaComplaintDoesNotLoopSpell() {
+  // #4 (G's 2026-06-28 smoke): a UI bug report while awaiting the email must NOT
+  // be treated as a failed spelling and loop "Please spell it slowly."
+  const { state, ports } = makePorts({ awaitingEmail: true });
+  assert.equal(
+    await turn(
+      ports,
+      "when you say spell it slowly, the pillboxes should drop and on your chest should be the email box",
+    ),
+    true,
+  );
+  assert.equal(state.awaitingEmail, true); // gate stays armed, not torn down
+  assert.doesNotMatch(state.said.join("\n"), /Please spell it slowly/i);
+}
+
+async function testSpelledEmailWithBoxWordNotTreatedAsComplaint() {
+  // #4 false-positive fix (Herm TASK_041): a real address like "thebox at example
+  // dot com" contains "box" but IS an email — it must NOT hit the meta escape and
+  // must fall through to the spelling path.
+  const { state, ports } = makePorts({ awaitingEmail: true });
+  await turn(ports, "thebox at example dot com");
+  assert.doesNotMatch(state.said.join("\n"), /The email box is up now/i);
+}
+
 async function main() {
   await testNameAfterEmailOutOfOrder();
   await testPostSendOfferGate();
   await testPostSendOfferDoesNotSwallowProblem();
   await testAwaitingNameLongSentenceDoesNotMute();
+  await testExplicitSingleLetterNameCaptured();
+  await testEmailMetaComplaintDoesNotLoopSpell();
+  await testSpelledEmailWithBoxWordNotTreatedAsComplaint();
   console.log(
-    "PASS herm-account-machine-smoke: name-after-email, no-'Love it', send consent, post-send offer, no-swallow, name-no-mute",
+    "PASS herm-account-machine-smoke: name-after-email, no-'Love it', send consent, post-send offer, no-swallow, name-no-mute, single-letter-name, email-meta-no-loop, box-email-not-complaint",
   );
 }
 

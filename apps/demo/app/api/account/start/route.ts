@@ -1,4 +1,8 @@
-import { assertAllowedOrigin, truncateUtf8String } from "../../../../src/lib/apiRouteSecurity";
+import {
+  assertAllowedOrigin,
+  isSafeTranscriptionSessionId,
+  truncateUtf8String,
+} from "../../../../src/lib/apiRouteSecurity";
 import { checkRateLimit } from "../../../../src/lib/rateLimit";
 import { buildMagicLinkEmailHtml } from "../../../../src/lib/magicLinkEmail";
 
@@ -63,10 +67,11 @@ export async function POST(request: Request) {
       typeof body.fullName === "string"
         ? truncateUtf8String(body.fullName.trim(), 200)
         : null;
-    sessionId =
+    const rawSessionId =
       typeof body.sessionId === "string"
-        ? truncateUtf8String(body.sessionId.trim(), 100)
+        ? truncateUtf8String(body.sessionId.trim(), 128)
         : null;
+    sessionId = isSafeTranscriptionSessionId(rawSessionId) ? rawSessionId : null;
     lists = Array.isArray(body.lists) ? body.lists.slice(0, 50) : [];
     resumeState =
       body.resumeState && typeof body.resumeState === "object" ? body.resumeState : null;
@@ -81,6 +86,23 @@ export async function POST(request: Request) {
     return new Response(
       JSON.stringify({ ok: false, emailSent: false, error: "Invalid email address" }),
       { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  // P0 truth gate: a voice-account email without a safe LiveAvatar session id
+  // cannot be linked back to the live 6 session. Do not send and then degrade;
+  // force the client to wait/retry once the minted/SDK session id is available.
+  if (!sessionId) {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        emailSent: false,
+        linkRowInserted: false,
+        fullSuccess: false,
+        errorCode: "missing_session_id",
+        error: "LiveAvatar session id required before sending magic link",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
     );
   }
 
@@ -163,7 +185,7 @@ export async function POST(request: Request) {
               "Content-Type": "application/json",
               // DEDUP: the transcript-sync auto-trigger may send for the SAME
               // signup. Same key (session+email) => Resend sends ONCE.
-              "Idempotency-Key": `magiclink:${(sessionId ?? "").trim()}:${email.trim().toLowerCase()}`,
+              "Idempotency-Key": `magiclink:${sessionId.trim()}:${email.trim().toLowerCase()}`,
             },
             body: JSON.stringify({
               from: fromEmail,
@@ -237,13 +259,33 @@ export async function POST(request: Request) {
 
   if (!emailSent) {
     return new Response(
-      JSON.stringify({ ok: false, emailSent: false, error: sendError || "Failed to send magic link" }),
+      JSON.stringify({
+        ok: false,
+        emailSent: false,
+        linkRowInserted: false,
+        fullSuccess: false,
+        error: sendError || "Failed to send magic link",
+      }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
   }
 
+  const fullSuccess = linkRowInserted;
+
   return new Response(
-    JSON.stringify({ ok: true, emailSent: true, linkRowInserted, pendingStateToken }),
+    JSON.stringify({
+      ok: fullSuccess,
+      emailSent: true,
+      linkRowInserted,
+      fullSuccess,
+      pendingStateToken,
+      ...(fullSuccess
+        ? {}
+        : {
+            degraded: true,
+            error: "Email sent but account session was not durably saved",
+          }),
+    }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
 }
