@@ -27,7 +27,7 @@ import { SessionState, AgentEventsEnum } from "@heygen/liveavatar-web-sdk";
 import { useAvatarActions } from "../liveavatar/useAvatarActions";
 import { setVideoBusy, isVideoBusy } from "../liveavatar/videoRecordingState";
 import { captureMedia } from "../lib/captureMedia";
-import { Radio, Camera, Images, Video, MicOff } from "lucide-react";
+import { Radio, Camera, Images, Video, MicOff, Mail } from "lucide-react";
 import { useGoLiveStreamer } from "../lib/vision/useGoLiveStreamer";
 import { GoLivePrivacyBanner } from "./GoLivePrivacyBanner";
 import { HeaderControls } from "./HeaderControls";
@@ -46,7 +46,7 @@ const PROBLEM_PROMPTS = [
   "Clogged Gutters",
 ];
 
-export type SessionStoppedReason = { reason?: "inactivity" };
+export type SessionStoppedReason = { reason?: "inactivity" | "explicit" };
 
 const VOICE_START_GREETING =
   "Hi, I'm 6, your ai buddy. You know why they call me 6? 'Cuz I got your back. So, what problems can I help you solve today?";
@@ -187,6 +187,10 @@ const LiveAvatarSessionComponent: React.FC<{
     null,
   );
   const sessionStartErrorRef = useRef<string | null>(null);
+  // Set true by an explicit user/voice close so the DISCONNECTED handler routes
+  // to the parent's Restart surface instead of silently auto-restarting (which
+  // would re-mint the avatar). Cleared after each disconnect is handled.
+  const explicitEndSessionRef = useRef(false);
 
   useEffect(() => {
     if (sessionState === SessionState.DISCONNECTED) {
@@ -196,19 +200,31 @@ const LiveAvatarSessionComponent: React.FC<{
         accountPollTimerRef.current = null;
       }
       accountReturnGreetedRef.current = false;
+      // Wipe the signup machine on EVERY disconnect so stale account state
+      // (awaitingEmail/pendingEmail/send-armed/etc.) never leaks into the next
+      // session and hijacks the first utterance ("make a Walmart list" ->
+      // "spell it slowly"). A fresh session re-offers signup cleanly.
+      clearAccountEmailEntry();
       if (sessionStartErrorRef.current) {
         setSessionStartError(sessionStartErrorRef.current);
         sessionStartErrorRef.current = null;
         greetingTriggeredRef.current = false;
+        explicitEndSessionRef.current = false;
         return;
       }
-      const opts: SessionStoppedReason | undefined = wasStoppedDueToInactivity()
-        ? { reason: "inactivity" }
-        : undefined;
+      const opts: SessionStoppedReason | undefined = explicitEndSessionRef.current
+        ? { reason: "explicit" }
+        : wasStoppedDueToInactivity()
+          ? { reason: "inactivity" }
+          : undefined;
+      explicitEndSessionRef.current = false;
       onSessionStopped(opts);
       // Reset greeting trigger when session disconnects
       greetingTriggeredRef.current = false;
     }
+    // clearAccountEmailEntry is stable ([] deps) but declared later; including it
+    // in deps would TDZ at render. Safe to omit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionState, onSessionStopped, wasStoppedDueToInactivity]);
 
   useEffect(() => {
@@ -357,13 +373,20 @@ const LiveAvatarSessionComponent: React.FC<{
   // Wrapper for stopSession - on home screen stop session (parent shows start screen); otherwise reset to home screen
   const handleStopSession = useCallback(() => {
     if (isOnHomeScreen()) {
-      // On home screen: stop session so parent can show start screen (Talk to iScott)
+      // On home screen: stop session so the parent shows the Restart surface
+      // (not a silent auto-restart that re-mints 6).
+      explicitEndSessionRef.current = true;
       greetingTriggeredRef.current = false; // Reset greeting trigger
+      clearAccountEmailEntry(); // Wipe signup machine so stale state can't leak.
       stopSession();
     } else {
-      // Not on home screen: reset to home screen (keep session)
+      // Not on home screen: reset to home screen (keep session). Cancel any
+      // in-flight signup too.
+      clearAccountEmailEntry();
       resetToHomeScreen();
     }
+    // clearAccountEmailEntry is stable ([] deps), declared later (TDZ if added).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnHomeScreen, resetToHomeScreen, stopSession]);
 
   // SDK starts voice chat on connect; hold mic inactive until the user taps Start.
@@ -699,6 +722,10 @@ const LiveAvatarSessionComponent: React.FC<{
     accountSetupAwaitingSendRef.current = false;
     accountSetupSendEmailRef.current = null;
     accountSetupEmailMissCountRef.current = 0;
+    accountSetupOfferMadeRef.current = false;
+    accountSetupDeclinedAtRef.current = 0;
+    accountSetupSendArmedAtRef.current = 0;
+    accountSetupSendArmedByTextRef.current = null;
     lastAvatarParsedEmailRef.current = null;
     chestEmailTextRef.current = "";
     setEmailEntryOpen(false);
@@ -3108,8 +3135,15 @@ const LiveAvatarSessionComponent: React.FC<{
   // formula in aiASAP's LiveAvatarSession.
   const _pillMaxLen = Math.max(...promptPills.map((p) => p.length), 0);
   const _pillDivisor = (0.55 * Math.max(_pillMaxLen, 18)).toFixed(2);
-  const _pillFont = `min(calc(var(--stage-height) * 0.030), calc((min(calc(var(--stage-width) * 0.56), 92vw) - 2rem) / ${_pillDivisor}))`;
+  // aiASAP caps EACH pill at 56% of stage width (centered) — NOT the full
+  // container. Missing this cap is why iSolve pills ran full-width/chunky
+  // (G 2026-06-27 screenshot). Matches aiASAP LiveAvatarSession bottom stack.
+  const _pillMaxWidth = "min(calc(var(--stage-width) * 0.56), 92vw)";
+  const _pillFont = `min(calc(var(--stage-height) * 0.030), calc((${_pillMaxWidth} - 2rem) / ${_pillDivisor}))`;
   const _pillMinH = `calc(${_pillFont} * 1.5)`;
+  // When the email box is up, it REPLACES all 3 prompt pills (G 2026-06-27):
+  // only the distinct email field + Camera/Gallery remain.
+  const _emailBoxActive = Boolean(showChestEmail && (chestEmailStatus || chestEmailText));
 
   return (
     <div className="site-bg fixed inset-0 w-screen h-screen flex flex-col">
@@ -3126,21 +3160,19 @@ const LiveAvatarSessionComponent: React.FC<{
           When the email is being captured it shows as the TOP pill, REPLACING the
           top prompt (G 2026-06-27: "drop the top pillbox, put the email bar in"). */}
       {isActive && (
-        <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.22)] -translate-x-1/2 z-40 flex w-[94%] max-w-[min(42rem,calc(var(--stage-width)*1.0))] flex-col items-center gap-[calc(var(--stage-height)*0.010)] px-2">
-          {showChestEmail && (chestEmailStatus || chestEmailText) && (
+        <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.12)] md:bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.22)] -translate-x-1/2 z-40 flex w-[94%] max-w-[min(42rem,calc(var(--stage-width)*1.0))] flex-col items-center gap-[calc(var(--stage-height)*0.010)] px-2">
+          {_emailBoxActive && (
             <div
-              className="flex w-full items-center justify-center rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 px-4 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)]"
-              style={{ fontSize: _pillFont, minHeight: _pillMinH }}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-[#f1c477] bg-[#140c05]/95 px-4 text-[#ffe9c2] font-semibold leading-tight shadow-[inset_0_2px_14px_rgba(0,0,0,0.6),0_0_22px_rgba(241,196,119,0.38)] backdrop-blur-[2px]"
+              style={{ fontSize: _pillFont, minHeight: _pillMinH, maxWidth: _pillMaxWidth }}
             >
+              <Mail className="shrink-0" style={{ width: _pillFont, height: _pillFont }} strokeWidth={2.5} aria-hidden />
               <span className={chestEmailStatus ? "tracking-wide" : "break-all font-mono"}>
                 {chestEmailStatus ? chestEmailStatus : chestEmailText}
               </span>
             </div>
           )}
-          {(showChestEmail && (chestEmailStatus || chestEmailText)
-            ? promptPills.slice(1)
-            : promptPills
-          ).map((prompt, i) => (
+          {(_emailBoxActive ? [] : promptPills).map((prompt, i) => (
             <button
               key={i}
               type="button"
@@ -3153,13 +3185,13 @@ const LiveAvatarSessionComponent: React.FC<{
                 void sendMessage(`Help me with my ${prompt.toLowerCase()}.`);
               }}
               className="pointer-events-auto flex w-full items-center justify-center whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 px-4 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
-              style={{ fontSize: _pillFont, minHeight: _pillMinH }}
+              style={{ fontSize: _pillFont, minHeight: _pillMinH, maxWidth: _pillMaxWidth }}
             >
               {prompt}
             </button>
           ))}
           {/* 4th row: Camera | Gallery side-by-side, just below the prompts. */}
-          <div className="grid w-full grid-cols-2 gap-[calc(var(--stage-height)*0.010)]">
+          <div className="grid w-full grid-cols-2 gap-[calc(var(--stage-height)*0.010)]" style={{ maxWidth: _pillMaxWidth }}>
             <button
               type="button"
               onClick={async () => {

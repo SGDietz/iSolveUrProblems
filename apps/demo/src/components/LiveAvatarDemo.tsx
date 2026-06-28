@@ -50,9 +50,11 @@ export const LiveAvatarDemo = () => {
     void startSession();
   }, [isExited, sessionToken, startSession]);
 
-  const onSessionStopped = (opts?: { reason?: "inactivity" }) => {
+  const onSessionStopped = (opts?: { reason?: "inactivity" | "explicit" }) => {
     sessionBootstrapRef.current = false;
-    if (opts?.reason === "inactivity") {
+    if (opts?.reason === "inactivity" || opts?.reason === "explicit") {
+      // Explicit/voice close OR inactivity: show the existing Session Ended +
+      // Restart surface instead of silently auto-restarting (which re-mints 6).
       setIsExited(true);
       setSessionToken("");
       return;
