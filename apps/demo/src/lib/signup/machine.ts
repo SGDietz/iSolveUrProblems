@@ -33,6 +33,11 @@ import {
 } from "./helpers";
 import { normalizeUtterance } from "../speech/dedupe";
 
+const POST_SEND_KEEP_GOING_RE =
+  /\b(?:keep\s+(?:going|working|talking|solving)|continue|stay|go\s+on|keep\s+at\s+it|let'?s\s+keep|work\s+on\s+(?:it|this|my\s+problem))\b/i;
+const POST_SEND_WRAP_UP_RE =
+  /\b(?:wrap\s+up|finish(?:\s+(?:up|account|setup|signing\s+in))?|done|all\s+done|that'?s\s+all|stop|end|close|quit|exit|sign\s+off|log\s+off|i'?m\s+good|we'?re\s+good)\b/i;
+
 export interface SignupFlags {
   accountBetaDisabled: boolean;
   emailTypedFallbackEnabled: boolean;
@@ -400,10 +405,14 @@ export async function accountSetupSpeechFlow(
   }
 
   if (ports.awaitingPostSendOffer) {
-    // After the link is sent, 6 asked "keep working, or wrap up?". A finish/no
-    // closes with a sign-off; a keep-going/yes drops the gate and hands the turn
-    // back to normal conversation. Anything unclear re-asks once.
-    if (ACCOUNT_READY_NO_RE.test(userText)) {
+    // After the link is sent, 6 asked "keep working, or wrap up?". Use a
+    // dedicated either/or parser here: account yes/no regexes do not understand
+    // natural answers like "wrap up" or "keep going".
+    if (POST_SEND_KEEP_GOING_RE.test(userText) || ACCOUNT_READY_YES_RE.test(userText)) {
+      ports.awaitingPostSendOffer = false;
+      return false; // let the brain carry the conversation forward
+    }
+    if (POST_SEND_WRAP_UP_RE.test(userText) || ACCOUNT_READY_NO_RE.test(userText)) {
       ports.awaitingPostSendOffer = false;
       if (!ports.avatarTalking) {
         await ports.say(
@@ -411,10 +420,6 @@ export async function accountSetupSpeechFlow(
         );
       }
       return true;
-    }
-    if (ACCOUNT_READY_YES_RE.test(userText)) {
-      ports.awaitingPostSendOffer = false;
-      return false; // let the brain carry the conversation forward
     }
     if (!ports.avatarTalking) {
       await ports.say("Want to keep going, or wrap up for now?");
