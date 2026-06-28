@@ -1031,17 +1031,26 @@ const LiveAvatarSessionComponent: React.FC<{
         } catch {
           // pending state is still stored server-side
         }
-        const spoken = data?.emailSent
+        // FALSE-GREEN FIX (audit 2026-06-28): a sent email with NO durable
+        // account_email_links row means the return-greeting + resume can't work.
+        // Only claim FULL success — the "pick up where we left off" line, the
+        // green "Email Link Sent" status, the continue offer, and the poll — when
+        // the row actually persisted. Email-sent-but-no-row gets an honest line.
+        const emailSent = data?.emailSent === true;
+        const fullSuccess = emailSent && data?.linkRowInserted === true;
+        const spoken = fullSuccess
           ? "Done. I sent you an email. Check for it now and click the link. When you come back, we'll pick up right where we left off."
-          : "I saved your email, but the email sender is not fully connected yet. I made a note for G to finish account email before this goes live.";
+          : emailSent
+            ? "I sent your sign-in link - check your email and click it to finish. Heads up: I couldn't fully save your session this round, so I made a note for G."
+            : "I saved your email, but the email sender is not fully connected yet. I made a note for G to finish account email before this goes live.";
         await repeat(spoken);
         lastAvatarResponseRef.current = spoken;
         rememberConversationLine("assistant", spoken);
-        if (data?.emailSent) {
-          // CONTINUE-OR-FINISH (G 2026-06-27): the link is out — don't leave the
-          // user hanging. Offer to keep solving or wrap up; the machine's
-          // awaitingPostSendOffer gate routes their answer. Re-mark machine-speaking
-          // so this extra beat isn't clipped by the account floor-cut.
+        if (fullSuccess) {
+          // CONTINUE-OR-FINISH (G 2026-06-27): the account fully persisted — offer
+          // to keep solving or wrap up; the machine's awaitingPostSendOffer gate
+          // routes their answer. Re-mark machine-speaking so this extra beat isn't
+          // clipped by the account floor-cut.
           machineSpeakingRef.current = true;
           const offer =
             "Want to keep working on your problem, or wrap up for now? Your link's in your inbox either way.";
@@ -1060,18 +1069,8 @@ const LiveAvatarSessionComponent: React.FC<{
           chestRevealTimerRef.current = null;
         }
         chestRevealActiveRef.current = false;
-        if (data?.emailSent) {
-          // Cross-browser pickup: only poll when the device-link row actually
-          // persisted (truth-gate, audit 2026-06-28) — otherwise there's nothing
-          // for the poll to find. The email still sent; same-browser cookie
-          // sign-in on return still works regardless.
-          if (data?.linkRowInserted) {
-            startDeviceLinkPoll();
-          } else {
-            console.warn(
-              "account/start: device-link row NOT inserted — return-greeting poll skipped",
-            );
-          }
+        if (fullSuccess) {
+          startDeviceLinkPoll();
           lastAvatarParsedEmailRef.current = null;
           chestEmailTextRef.current = "";
           setChestEmailText("");
@@ -1085,6 +1084,12 @@ const LiveAvatarSessionComponent: React.FC<{
             chestStatusTimerRef.current = null;
           }, 2200);
         } else {
+          if (emailSent) {
+            // Sent but not persisted — never show the green; surface it loudly.
+            console.warn(
+              "account/start: email sent but account_email_links row NOT inserted — no 'Email Link Sent', no poll, no offer",
+            );
+          }
           setChestEmailText("");
           setChestEmailStatus(null);
           setShowChestEmail(false);
