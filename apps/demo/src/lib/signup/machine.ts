@@ -374,7 +374,15 @@ export async function accountSetupSpeechFlow(
     // catch your name" on loop. Let the brain answer; keep listening for a
     // name-shaped reply — the gate stays armed.
     if (userText.trim().split(/\s+/).length > 6) {
-      return false;
+      // A long sentence while we wait on the name. The brain CAN'T answer here
+      // (the account floor is held), so returning false leaves 6 mute and the
+      // user stuck (Herm TASK_037 #5). Gently re-prompt, keep the name gate armed.
+      if (!ports.avatarTalking) {
+        await ports.say(
+          "I'm still here - just your first name when you're ready, and we'll keep going.",
+        );
+      }
+      return true;
     }
     await ports.say("Sorry, I didn't catch your name. What should I call you?");
     return true;
@@ -405,13 +413,10 @@ export async function accountSetupSpeechFlow(
   }
 
   if (ports.awaitingPostSendOffer) {
-    // After the link is sent, 6 asked "keep working, or wrap up?". Use a
-    // dedicated either/or parser here: account yes/no regexes do not understand
-    // natural answers like "wrap up" or "keep going".
-    if (POST_SEND_KEEP_GOING_RE.test(userText) || ACCOUNT_READY_YES_RE.test(userText)) {
-      ports.awaitingPostSendOffer = false;
-      return false; // let the brain carry the conversation forward
-    }
+    // After the link is sent, 6 asked "keep working, or wrap up?".
+    // Explicit wrap-up/close → sign off. ANYTHING ELSE (an explicit "keep going"
+    // OR a real problem like "my sink is leaking") → drop the gate and hand the
+    // turn to the brain. Never swallow a real turn by re-asking (Herm TASK_037 #6).
     if (POST_SEND_WRAP_UP_RE.test(userText) || ACCOUNT_READY_NO_RE.test(userText)) {
       ports.awaitingPostSendOffer = false;
       if (!ports.avatarTalking) {
@@ -421,10 +426,8 @@ export async function accountSetupSpeechFlow(
       }
       return true;
     }
-    if (!ports.avatarTalking) {
-      await ports.say("Want to keep going, or wrap up for now?");
-    }
-    return true;
+    ports.awaitingPostSendOffer = false;
+    return false; // keep-going OR a real problem — let the brain carry it forward
   }
 
   if (ports.awaitingSend) {

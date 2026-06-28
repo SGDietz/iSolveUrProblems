@@ -52,6 +52,39 @@ async function markDeviceLinkUsed(email: string, tokenHash: string): Promise<voi
 }
 
 /**
+ * Stamp visit_count + last_visit_at on the auth user so the returning-greeting
+ * tiers actually advance (Herm TASK_037 #3 — nothing was incrementing them, so
+ * returners were stuck on the "second" tier forever). Service-role admin update,
+ * merged onto existing metadata so full_name etc. survive. Best-effort.
+ */
+async function stampVisit(
+  userId: string,
+  currentMeta: Record<string, unknown>,
+): Promise<void> {
+  const supaUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supaUrl || !serviceRoleKey) return;
+  if (supaUrl.includes(AIASAP_SUPABASE_REF) || !supaUrl.includes(ISOLVE_SUPABASE_REF)) return;
+  const prev =
+    typeof currentMeta.visit_count === "number" ? currentMeta.visit_count : 0;
+  await fetch(`${supaUrl}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
+    method: "PUT",
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      user_metadata: {
+        ...currentMeta,
+        visit_count: prev + 1,
+        last_visit_at: new Date().toISOString(),
+      },
+    }),
+  });
+}
+
+/**
  * OAuth + magic-link callback handler.
  *
  * Two flows land here, both establishing the server session cookie:
@@ -96,6 +129,13 @@ export async function GET(request: NextRequest) {
         const { data } = await supabase.auth.getUser();
         const email = data?.user?.email;
         if (email) await markDeviceLinkUsed(email, tokenHash);
+        const uid = data?.user?.id;
+        if (uid) {
+          await stampVisit(
+            uid,
+            (data?.user?.user_metadata ?? {}) as Record<string, unknown>,
+          );
+        }
       } catch (e) {
         console.error("auth/callback: device-link mark failed", e);
       }

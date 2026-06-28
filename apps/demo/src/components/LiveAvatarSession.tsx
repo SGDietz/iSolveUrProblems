@@ -97,6 +97,12 @@ const RETURNING_GREETING_TIERS: Record<string, string[]> = {
   ],
 };
 const LAST_GREETING_STORAGE_KEY = "isolve.lastReturningGreeting";
+const SAFE_ACCOUNT_SESSION_ID = /^[a-zA-Z0-9_-]{8,128}$/;
+
+function safeAccountSessionId(value: string | null | undefined): string | null {
+  const v = value?.trim() ?? "";
+  return SAFE_ACCOUNT_SESSION_ID.test(v) ? v : null;
+}
 
 function pickReturningGreeting(
   name: string | null,
@@ -130,9 +136,10 @@ function pickReturningGreeting(
 
 const LiveAvatarSessionComponent: React.FC<{
   mode: "FULL" | "CUSTOM";
+  initialSessionId?: string | null;
   onSessionStopped: (opts?: SessionStoppedReason) => void;
   onExit?: (completeExit?: boolean) => void;
-}> = ({ mode, onSessionStopped, onExit }) => {
+}> = ({ mode, initialSessionId, onSessionStopped, onExit }) => {
   const t = useTranslations("home");
   const [message, setMessage] = useState("");
   const {
@@ -239,8 +246,12 @@ const LiveAvatarSessionComponent: React.FC<{
   const voiceStartPendingRef = useRef<boolean>(false);
   const audioUnlockedRef = useRef<boolean>(false);
   const wasMutedBeforeRecordingRef = useRef<boolean>(false);
-  /** LiveAvatar server session id — used for DB + official transcript API (set when CONNECTED). */
-  const dbSessionIdRef = useRef<string | null>(null);
+  /** LiveAvatar server session id — used for DB + official transcript API. Seed
+   * from /api/start-session immediately, then replace with the SDK id once
+   * CONNECTED. That closes the account-link race where email could send before
+   * `sessionRef.current.sessionId` was populated, leaving no pollable row. */
+  const dbSessionIdRef = useRef<string | null>(safeAccountSessionId(initialSessionId));
+  const mintedSessionIdRef = useRef<string | null>(safeAccountSessionId(initialSessionId));
   /** Cursor for GET /v1/sessions/{id}/transcript (LiveAvatar `next_timestamp`). */
   const transcriptCursorRef = useRef<number | null>(null);
   const lastSyncedLaSessionIdRef = useRef<string | null>(null);
@@ -268,6 +279,14 @@ const LiveAvatarSessionComponent: React.FC<{
   // to the parent's Restart surface instead of silently auto-restarting (which
   // would re-mint the avatar). Cleared after each disconnect is handled.
   const explicitEndSessionRef = useRef(false);
+
+  useEffect(() => {
+    const safe = safeAccountSessionId(initialSessionId);
+    mintedSessionIdRef.current = safe;
+    if (safe && !dbSessionIdRef.current) {
+      dbSessionIdRef.current = safe;
+    }
+  }, [initialSessionId]);
 
   useEffect(() => {
     if (sessionState === SessionState.DISCONNECTED) {
@@ -342,6 +361,7 @@ const LiveAvatarSessionComponent: React.FC<{
         lastSyncedLaSessionIdRef.current = sid;
       }
       dbSessionIdRef.current = sid;
+      mintedSessionIdRef.current = sid;
     }
   }, [sessionState, sessionRef]);
 
@@ -642,6 +662,7 @@ const LiveAvatarSessionComponent: React.FC<{
   // OUR scripted repeat() is the speaker so the floor-cut never clips our own line.
   const accountFloorHeldRef = useRef(false);
   const machineSpeakingRef = useRef(false);
+  const machineSpeechClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accountSetupRejectedEmailRef = useRef<string | null>(null);
   const accountSetupSendEmailRef = useRef<string | null>(null);
   const accountSetupEmailMissCountRef = useRef(0);
@@ -982,24 +1003,61 @@ const LiveAvatarSessionComponent: React.FC<{
     accountPollTimerRef.current = setInterval(tick, 5000);
   }, [interrupt, repeat, rememberConversationLine]);
 
+  const sayAccountScriptedLine = useCallback(
+    async (text: string, opts?: { remember?: boolean; interruptFirst?: boolean }) => {
+      if (machineSpeechClearTimerRef.current) {
+        clearTimeout(machineSpeechClearTimerRef.current);
+        machineSpeechClearTimerRef.current = null;
+      }
+      machineSpeakingRef.current = true;
+      try {
+        if (opts?.interruptFirst !== false) {
+          try {
+            await interrupt();
+          } catch {
+            // never block scripted account speech on an interrupt hiccup
+          }
+        }
+        await repeat(text);
+      } finally {
+        // Keep the "our line" flag up briefly so AVATAR_SPEAK_STARTED for this
+        // repeat() is not mistaken for the brain and clipped. Always clear it so
+        // the account floor-cut cannot get stuck disabled after a second line.
+        machineSpeechClearTimerRef.current = setTimeout(() => {
+          machineSpeakingRef.current = false;
+          machineSpeechClearTimerRef.current = null;
+        }, 1000);
+      }
+      lastAvatarResponseRef.current = text;
+      if (opts?.remember) rememberConversationLine("assistant", text);
+    },
+    [interrupt, repeat, rememberConversationLine],
+  );
+
   // Fire the magic link via /api/account/start (adapted from aiASAP).
   const startAccountSetup = useCallback(
     async (email: string): Promise<boolean> => {
       const normalizedEmail = email.trim().toLowerCase();
-      // The whole send ceremony is OUR scripted speech — mark machine-speaking so
-      // the account floor-cut never clips "Done. I sent you an email." (these
-      // repeats don't go through signupPorts.say). Cleared on a grace timer.
-      machineSpeakingRef.current = true;
-      setTimeout(() => {
-        machineSpeakingRef.current = false;
-      }, 3500);
+      const sessionIdForAccount =
+        safeAccountSessionId(dbSessionIdRef.current) ?? safeAccountSessionId(mintedSessionIdRef.current);
+
+      // Do not send a magic-link email unless the same session has a pollable id.
+      // Otherwise the email can be real but 6 can never detect the click/name on
+      // return — the exact false-green trap G kept hitting.
+      if (!sessionIdForAccount) {
+        setChestEmailStatus(null);
+        setShowChestEmail(false);
+        const spoken =
+          "Give me one more second to finish connecting, then I'll send that link. Try saying yes, send it again in a moment.";
+        await sayAccountScriptedLine(spoken, { remember: true });
+        return true;
+      }
+
       const prev = lastAccountLinkSendRef.current;
       if (prev && prev.email === normalizedEmail && Date.now() - prev.at < 90000) {
         const spoken =
           "I already sent that sign-in link a moment ago - check your email, it can take a minute to land.";
-        await repeat(spoken);
-        lastAvatarResponseRef.current = spoken;
-        rememberConversationLine("assistant", spoken);
+        await sayAccountScriptedLine(spoken, { remember: true });
         return true;
       }
       lastAccountLinkSendRef.current = { email: normalizedEmail, at: Date.now() };
@@ -1012,7 +1070,7 @@ const LiveAvatarSessionComponent: React.FC<{
           body: JSON.stringify({
             email: normalizedEmail,
             fullName: deviceProfileRef.current.name,
-            sessionId: dbSessionIdRef.current,
+            sessionId: sessionIdForAccount,
             lists: [],
             resumeState: buildAccountResumeState(),
           }),
@@ -1037,26 +1095,27 @@ const LiveAvatarSessionComponent: React.FC<{
         // green "Email Link Sent" status, the continue offer, and the poll — when
         // the row actually persisted. Email-sent-but-no-row gets an honest line.
         const emailSent = data?.emailSent === true;
-        const fullSuccess = emailSent && data?.linkRowInserted === true;
+        const fullSuccess =
+          data?.fullSuccess === true || (emailSent && data?.linkRowInserted === true);
+        if (!emailSent) {
+          lastAccountLinkSendRef.current = null;
+        }
         const spoken = fullSuccess
           ? "Done. I sent you an email. Check for it now and click the link. When you come back, we'll pick up right where we left off."
-          : emailSent
-            ? "I sent your sign-in link - check your email and click it to finish. Heads up: I couldn't fully save your session this round, so I made a note for G."
-            : "I saved your email, but the email sender is not fully connected yet. I made a note for G to finish account email before this goes live.";
-        await repeat(spoken);
-        lastAvatarResponseRef.current = spoken;
-        rememberConversationLine("assistant", spoken);
+          : data?.errorCode === "missing_session_id"
+            ? "Give me one more second to finish connecting, then I'll send that link. Try saying yes, send it again in a moment."
+            : emailSent
+              ? "I sent your sign-in link - check your email and click it to finish. Heads up: I couldn't fully save your session this round, so I made a note for G."
+              : "I saved your email, but the email sender is not fully connected yet. I made a note for G to finish account email before this goes live.";
+        await sayAccountScriptedLine(spoken, { remember: true });
         if (fullSuccess) {
           // CONTINUE-OR-FINISH (G 2026-06-27): the account fully persisted — offer
           // to keep solving or wrap up; the machine's awaitingPostSendOffer gate
-          // routes their answer. Re-mark machine-speaking so this extra beat isn't
-          // clipped by the account floor-cut.
-          machineSpeakingRef.current = true;
+          // routes their answer. The shared scripted-speech helper clears the
+          // machine-speaking flag after every line so the floor-cut cannot stick.
           const offer =
             "Want to keep working on your problem, or wrap up for now? Your link's in your inbox either way.";
-          await repeat(offer);
-          lastAvatarResponseRef.current = offer;
-          rememberConversationLine("assistant", offer);
+          await sayAccountScriptedLine(offer, { remember: true });
           accountSetupAwaitingPostSendOfferRef.current = true;
         }
         accountSetupOfferMadeRef.current = false;
@@ -1097,17 +1156,16 @@ const LiveAvatarSessionComponent: React.FC<{
         return true;
       } catch (error) {
         console.error("Account setup failed:", error);
+        lastAccountLinkSendRef.current = null;
         setChestEmailStatus(null);
         setShowChestEmail(false);
         const spoken =
           "I had trouble setting up that email link. I made a note for G to fix account setup.";
-        await repeat(spoken);
-        lastAvatarResponseRef.current = spoken;
-        rememberConversationLine("assistant", spoken);
+        await sayAccountScriptedLine(spoken, { remember: true });
         return true;
       }
     },
-    [repeat, rememberConversationLine, buildAccountResumeState, startDeviceLinkPoll],
+    [buildAccountResumeState, sayAccountScriptedLine, startDeviceLinkPoll],
   );
 
   const signupFlags = useMemo<SignupFlags>(
@@ -1150,27 +1208,7 @@ const LiveAvatarSessionComponent: React.FC<{
       get greetingCount() { return deviceProfileRef.current.greetingCount; },
       get chestText() { return chestEmailTextRef.current; },
       say: async (text: string, opts?: { remember?: boolean }) => {
-        // Cut the avatar's server brain BEFORE every scripted account line so the
-        // machine owns the turn. iSolve-6's brain (context 459ae665) is NOT
-        // patched for accounts, so without this it freelances "I can't help with
-        // accounts" over the scripted flow (smoke 2026-06-27).
-        try {
-          await interrupt();
-        } catch {
-          // never block the scripted line on an interrupt hiccup
-        }
-        machineSpeakingRef.current = true;
-        try {
-          await repeat(text);
-        } finally {
-          // Keep the "our line" flag up briefly so the AVATAR_SPEAK_STARTED for
-          // this scripted line isn't mistaken for the brain and cut.
-          setTimeout(() => {
-            machineSpeakingRef.current = false;
-          }, 1000);
-        }
-        lastAvatarResponseRef.current = text;
-        if (opts?.remember) rememberConversationLine("assistant", text);
+        await sayAccountScriptedLine(text, { remember: opts?.remember });
       },
       saveName: (name: string) => {
         deviceProfileRef.current = { ...deviceProfileRef.current, name };
@@ -1193,7 +1231,7 @@ const LiveAvatarSessionComponent: React.FC<{
       clearEntry: () => clearAccountEmailEntry(),
       now: () => Date.now(),
     }),
-    [clearAccountEmailEntry, interrupt, rememberConversationLine, repeat, revealEmailChars, startAccountSetup],
+    [clearAccountEmailEntry, revealEmailChars, sayAccountScriptedLine, startAccountSetup],
   );
 
   const handleAccountSetupSpeech = useCallback(
@@ -1218,6 +1256,7 @@ const LiveAvatarSessionComponent: React.FC<{
   useEffect(() => {
     return () => {
       if (accountPollTimerRef.current) clearInterval(accountPollTimerRef.current);
+      if (machineSpeechClearTimerRef.current) clearTimeout(machineSpeechClearTimerRef.current);
       if (chestRevealTimerRef.current) clearTimeout(chestRevealTimerRef.current);
       if (chestStatusTimerRef.current) clearTimeout(chestStatusTimerRef.current);
       if (tickAudioCtxRef.current) {

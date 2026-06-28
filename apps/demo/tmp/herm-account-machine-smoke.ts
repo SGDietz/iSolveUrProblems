@@ -167,10 +167,36 @@ async function testPostSendOfferGate() {
   assert.equal(keep.state.said.length, 0);
 }
 
+async function testPostSendOfferDoesNotSwallowProblem() {
+  // Herm TASK_037 #6: a real problem at the offer gate must NOT be re-asked /
+  // swallowed — it drops the gate and hands the turn to the brain (returns false).
+  const { state, ports } = makePorts({ awaitingPostSendOffer: true });
+  assert.equal(await turn(ports, "my sink is leaking under the cabinet"), false);
+  assert.equal(state.awaitingPostSendOffer, false);
+  assert.equal(state.said.length, 0); // no "Want to keep going..." re-ask
+}
+
+async function testAwaitingNameLongSentenceDoesNotMute() {
+  // Herm TASK_037 #5: a long non-name sentence while awaiting the name must NOT
+  // return false (which would leave 6 mute with the account floor held) — it
+  // re-prompts gently and keeps the name gate armed.
+  const { state, ports } = makePorts({ awaitingName: true });
+  assert.equal(
+    await turn(ports, "can you just tell me how much all of this is going to cost"),
+    true,
+  );
+  assert.equal(state.awaitingName, true); // gate stays armed
+  assert.match(state.said.at(-1) ?? "", /just your first name when you're ready/);
+}
+
 async function main() {
   await testNameAfterEmailOutOfOrder();
   await testPostSendOfferGate();
-  console.log("PASS herm-account-machine-smoke: name-after-email, no-'Love it', send consent, post-send offer");
+  await testPostSendOfferDoesNotSwallowProblem();
+  await testAwaitingNameLongSentenceDoesNotMute();
+  console.log(
+    "PASS herm-account-machine-smoke: name-after-email, no-'Love it', send consent, post-send offer, no-swallow, name-no-mute",
+  );
 }
 
 main().catch((error) => {

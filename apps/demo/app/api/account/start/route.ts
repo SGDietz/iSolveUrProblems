@@ -172,8 +172,11 @@ export async function POST(request: Request) {
               html,
             }),
           });
-          if (sendRes.ok || sendRes.status === 409 || sendRes.status === 422) {
-            emailSent = true; // 409/422 = idempotency conflict: already sent. Counts.
+          if (sendRes.ok || sendRes.status === 409) {
+            // 200 = sent; 409 = idempotency duplicate (already sent). 422 is a
+            // validation/config FAILURE, NOT proof of delivery — counting it as
+            // sent was a false-green (Herm TASK_037 #2). Treat it as a failure.
+            emailSent = true;
           } else {
             const detail = await sendRes.text();
             sendError = `Resend send failed (${sendRes.status})`;

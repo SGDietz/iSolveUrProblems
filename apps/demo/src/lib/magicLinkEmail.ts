@@ -41,7 +41,7 @@ export function buildMagicLinkEmailHtml(magicLink: string): string {
         <div class="wordmark">iSolveUrProblems</div>
         <div class="tag">Your Quicker Fixer Upper</div>
         <h1>6 Here &mdash; Your Quicker Fixer Upper &#128079;</h1>
-        <p>Tap the magic link below to finish setting up your account. Next time, I'll know it's you and we'll pick up right where we left off &#129309;</p>
+        <p>Tap the magic link below to finish setting up your account &mdash; then next time, I'll know it's you &#129309;</p>
         <a href="${magicLink}" class="btn">Finish setting up &rarr;</a>
         <div class="divider"></div>
         <p class="fine">Didn't ask to set up an account? No worries &mdash; just ignore this email.</p>
