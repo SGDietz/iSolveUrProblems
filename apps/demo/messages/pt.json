@@ -454,7 +454,10 @@
       },
       "onboardingBanner": {
         "title": "Finalize a configuração de pagamento",
-        "blurb": "Finalize o Stripe antes que os proprietários possam pagar. Enviaremos o link."
+        "blurb": "Finalize o Stripe antes que os proprietários possam pagar.",
+        "onboardingCta": "Configurar com Stripe",
+        "onboardingSubmitting": "Abrindo o Stripe…",
+        "errorGeneric": "Não foi possível iniciar. Tente novamente."
       },
       "pending": {
         "title": "Convites pendentes",

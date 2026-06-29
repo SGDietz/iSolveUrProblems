@@ -454,7 +454,10 @@
       },
       "onboardingBanner": {
         "title": "Complete payment setup",
-        "blurb": "You need to finish Stripe onboarding before homeowners can pay you. We'll email you the link."
+        "blurb": "You need to finish Stripe onboarding before homeowners can pay you.",
+        "onboardingCta": "Onboard with Stripe",
+        "onboardingSubmitting": "Opening Stripe…",
+        "errorGeneric": "Couldn't start onboarding. Try again."
       },
       "pending": {
         "title": "Pending invitations",

@@ -454,7 +454,10 @@
       },
       "onboardingBanner": {
         "title": "Zahlungs-Setup abschließen",
-        "blurb": "Beende Stripe, bevor Hausbesitzer dich bezahlen können. Wir senden den Link."
+        "blurb": "Beende Stripe, bevor Hausbesitzer dich bezahlen können.",
+        "onboardingCta": "Mit Stripe einrichten",
+        "onboardingSubmitting": "Stripe wird geöffnet…",
+        "errorGeneric": "Konnte nicht starten. Versuche es erneut."
       },
       "pending": {
         "title": "Offene Einladungen",

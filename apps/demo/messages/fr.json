@@ -454,7 +454,10 @@
       },
       "onboardingBanner": {
         "title": "Terminez la configuration",
-        "blurb": "Vous devez finaliser Stripe avant que les propriétaires puissent payer. Nous enverrons le lien."
+        "blurb": "Vous devez finaliser Stripe avant que les propriétaires puissent payer.",
+        "onboardingCta": "Configurer avec Stripe",
+        "onboardingSubmitting": "Ouverture de Stripe…",
+        "errorGeneric": "Impossible de démarrer. Réessayez."
       },
       "pending": {
         "title": "Invitations en attente",

@@ -455,7 +455,10 @@
       },
       "onboardingBanner": {
         "title": "完成收款设置",
-        "blurb": "请先完成 Stripe,屋主才能向你付款。我们会发链接给你。"
+        "blurb": "请先完成 Stripe,屋主才能向你付款。",
+        "onboardingCta": "用 Stripe 设置",
+        "onboardingSubmitting": "正在打开 Stripe…",
+        "errorGeneric": "无法开始,请重试。"
       },
       "pending": {
         "title": "待处理邀请",

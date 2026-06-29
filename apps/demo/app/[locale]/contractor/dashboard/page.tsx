@@ -13,6 +13,7 @@ import {
   type Tier,
 } from "../../../../src/lib/billing";
 import { SubscriptionPanel } from "../../../../src/components/contractor/SubscriptionPanel";
+import { ConnectOnboardButton } from "../../../../src/components/contractor/ConnectOnboardButton";
 
 export const dynamic = "force-dynamic";
 
@@ -141,6 +142,7 @@ export default async function ContractorDashboardPage({
             {t("onboardingBanner.title")}
           </p>
           <p className="text-zinc-200">{t("onboardingBanner.blurb")}</p>
+          <ConnectOnboardButton contractor_id={contractor.id} />
         </div>
       )}
 
