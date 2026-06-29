@@ -26,6 +26,7 @@ import {
   extractScope,
 } from "./slots";
 import { extractDateTime } from "../appointments/extractDateTime";
+import { parseRecurringSchedule } from "../recurring";
 import type { ClassifyContext, ClassifyResult, IntentSlots } from "./types";
 
 type Rule = {
@@ -49,7 +50,8 @@ type Rule = {
     | "draft_contract"
     | "file_dispute"
     | "place_call"
-    | "generate_estimate";
+    | "generate_estimate"
+    | "schedule_recurring";
   /** Required slot keys — if any are missing the result is "medium". */
   required: Array<keyof IntentSlots>;
 };
@@ -164,6 +166,40 @@ const RULES: readonly Rule[] = [
     build: () => ({}),
     kind: "view_appointments",
     required: [],
+  },
+  // ─── SCHEDULE_RECURRING ───────────────────────────────────────────
+  // Recurring patterns MUST be tried before the one-shot
+  // schedule_appointment rule, because "schedule the lawn mowing every
+  // Tuesday at 10am" matches both — and we want the recurring path.
+  //
+  // Vision ¶33: "autopilot, such as their grass mowed, weeds pulled..."
+  {
+    id: "schedule.recurring",
+    match: (t) =>
+      /\b(every|each|weekly|monthly|daily|recurring|each\s+(week|month|day))\b/i.test(
+        t,
+      ) &&
+      /\b(schedule|book|set\s+up|put\s+(it\s+)?on\s+(autopilot|automatic)|keep|have)\b/i.test(
+        t,
+      ),
+    build: (t) => {
+      const parsed = parseRecurringSchedule(t);
+      if (!parsed) return {};
+      // Title — best-effort first-noun extraction. "lawn mowing", "gutter check"
+      const titleMatch = t.match(
+        /\b(?:keep|have)\s+(?:my\s+|the\s+)?([a-z][\w\s]{2,40}?)(?:\s+(?:done|cut|cleaned|mowed|trimmed|every|each|weekly|monthly|daily))/i,
+      );
+      const title = titleMatch?.[1]?.trim() ?? "recurring job";
+      return {
+        recurring: {
+          title,
+          schedule: parsed.schedule,
+          matched_phrase: parsed.matched_phrase,
+        },
+      };
+    },
+    kind: "schedule_recurring",
+    required: ["recurring"],
   },
   // ─── SCHEDULE_APPOINTMENT ─────────────────────────────────────────
   // "schedule the work for tomorrow at 10", "book it for Tuesday",

@@ -32,7 +32,8 @@ export type IntentKind =
   | "draft_contract"
   | "file_dispute"
   | "place_call"
-  | "generate_estimate";
+  | "generate_estimate"
+  | "schedule_recurring";
 
 /** A reference to a specific contractor in conversation context. */
 export type ContractorRef =
@@ -79,6 +80,16 @@ export type IntentSlots = {
    * the user's utterance. Becomes the opening message of the thread.
    */
   complaint?: string;
+  /**
+   * For schedule_recurring — the recurring-schedule shape extracted from
+   * the user's utterance, plus a short title. The orchestrator hands
+   * this to the recurring_jobs row insert.
+   */
+  recurring?: {
+    title: string;
+    schedule: import("../recurring").RecurringSchedule;
+    matched_phrase: string;
+  };
 };
 
 /** Confidence buckets — chosen at classify time, used by orchestrator. */

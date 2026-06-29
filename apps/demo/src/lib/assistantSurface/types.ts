@@ -236,6 +236,24 @@ export type CallPayload = {
 };
 
 /**
+ * M4.7 — Recurring job confirmation panel. Renders the schedule's
+ * human-readable summary + the next 3 materialized instances so the
+ * homeowner can confirm the cadence is right.
+ */
+export type RecurringJobPayload = {
+  recurring_job_id: string;
+  title: string;
+  agenda: string;
+  contractor_name: string | null;
+  /** Human-readable summary like "Every Tuesday at 10:00 AM, May through October". */
+  schedule_human: string;
+  timezone: string;
+  /** Next 3 ISO UTC instances the cron will materialize. */
+  next_instances: string[];
+  status: "active" | "paused" | "ended" | "cancelled";
+};
+
+/**
  * M3.6 — Estimate panel. Renders the line-item breakdown + totals.
  */
 export type EstimateLine = {
@@ -274,6 +292,7 @@ export type SurfaceVariant =
   | { kind: "contract"; payload: ContractPayload }
   | { kind: "dispute"; payload: DisputePayload }
   | { kind: "call"; payload: CallPayload }
-  | { kind: "estimate"; payload: EstimatePayload };
+  | { kind: "estimate"; payload: EstimatePayload }
+  | { kind: "recurring"; payload: RecurringJobPayload };
 
 export type SurfaceVariantKind = SurfaceVariant["kind"];

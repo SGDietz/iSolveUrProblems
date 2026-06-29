@@ -228,7 +228,8 @@
         "contract": "Arbeitsvereinbarung",
         "dispute": "Streit-Thread",
         "call": "Anruf mit 6",
-        "estimate": "Kostenvoranschlag"
+        "estimate": "Kostenvoranschlag",
+        "recurring": "Autopilot-Job"
       },
       "contractors": {
         "empty": "Noch keine Treffer.",
@@ -349,6 +350,19 @@
           "accepted": "Angenommen",
           "declined": "Abgelehnt",
           "expired": "Abgelaufen"
+        }
+      },
+      "recurring": {
+        "title": "Autopilot-Job geplant",
+        "withLabel": "Mit",
+        "upcomingLabel": "Nächste Termine",
+        "noUpcoming": "(Keine kommenden Termine — Zeitplan möglicherweise beendet)",
+        "autopilotFootnote": "Jeder Termin löst Erinnerungen, Auftragnehmer-Bestätigung und Ausfallsicherung aus. Sag \"diese wiederkehrende Aufgabe pausieren\" zum Stoppen.",
+        "status": {
+          "active": "Aktiv",
+          "paused": "Pausiert",
+          "ended": "Beendet",
+          "cancelled": "Abgesagt"
         }
       },
       "dispute": {

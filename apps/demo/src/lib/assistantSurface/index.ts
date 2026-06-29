@@ -14,6 +14,7 @@ export type {
   CallTranscriptLine,
   EstimatePayload,
   EstimateLine,
+  RecurringJobPayload,
   SurfaceVariant,
   SurfaceVariantKind,
 } from "./types";

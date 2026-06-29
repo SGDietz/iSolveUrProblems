@@ -34,8 +34,18 @@ import {
   wrapFallback,
   wrapPickResult,
   wrapRecommendationsResult,
+  wrapRecurringScheduled,
   wrapSummaryResult,
 } from "./contextInjector";
+import {
+  createRecurringJob,
+  expandInstances,
+  type RecurringJobRow,
+} from "../recurring";
+import {
+  getActiveTierForContractor,
+  tierUnlocks,
+} from "../billing";
 import { executeBook } from "./bookHandler";
 import {
   insertContract,
@@ -79,6 +89,7 @@ import type {
   DisputePayload,
   DisputeThreadMessage,
   EstimatePayload,
+  RecurringJobPayload,
 } from "../assistantSurface";
 import type {
   ContractorCard,
@@ -124,6 +135,7 @@ export type SurfaceSnapshot = {
     | "dispute"
     | "call"
     | "estimate"
+    | "recurring"
     | null;
   /** Ordered as displayed in the drawer. Empty for non-list variants. */
   contractorIds: string[];
@@ -1557,6 +1569,178 @@ async function handleGenerateEstimate(args: {
   };
 }
 
+// ─── Recurring autopilot (M4.7) ────────────────────────────────────
+
+function humanizeSchedule(
+  row: RecurringJobRow,
+): string {
+  const sch = row.schedule;
+  const dayNames: Record<string, string> = {
+    SU: "Sunday", MO: "Monday", TU: "Tuesday", WE: "Wednesday",
+    TH: "Thursday", FR: "Friday", SA: "Saturday",
+  };
+  const monthNames = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const everyN = sch.interval > 1 ? `Every ${sch.interval} ` : "Every ";
+
+  let head = "";
+  if (sch.freq === "WEEKLY") {
+    if (sch.byday && sch.byday.length > 0) {
+      const days = sch.byday.map((d) => dayNames[d]).join(" + ");
+      head = sch.interval > 1
+        ? `${everyN}weeks on ${days}`
+        : `Every ${days}`;
+    } else {
+      head = `${everyN}week`;
+    }
+  } else if (sch.freq === "MONTHLY") {
+    if (sch.bymonthday && sch.bymonthday.length > 0) {
+      head = `${everyN}month on the ${sch.bymonthday.join(", ")}`;
+    } else {
+      head = `${everyN}month`;
+    }
+  } else {
+    head = sch.interval > 1 ? `${everyN}days` : "Every day";
+  }
+
+  const hh = sch.byhour;
+  const ampm = hh >= 12 ? "PM" : "AM";
+  const dh = ((hh + 11) % 12) + 1;
+  const mm = sch.byminute.toString().padStart(2, "0");
+  const time = `${dh}:${mm} ${ampm}`;
+
+  let tail = "";
+  if (sch.bymonth && sch.bymonth.length > 0) {
+    const first = sch.bymonth[0];
+    const last = sch.bymonth[sch.bymonth.length - 1];
+    tail = `, ${monthNames[first - 1]} through ${monthNames[last - 1]}`;
+  }
+  if (sch.until) {
+    const u = new Date(sch.until);
+    tail += `, until ${u.toLocaleDateString()}`;
+  } else if (sch.count) {
+    tail += `, ${sch.count} times`;
+  }
+
+  return `${head} at ${time}${tail}`;
+}
+
+async function handleScheduleRecurring(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+  snapshot?: SurfaceSnapshot;
+  tz?: string | null;
+}): Promise<
+  | { variant: SurfaceVariant; contextMessage: string }
+  | { contextMessage: string }
+> {
+  if (!args.user_id) {
+    return {
+      contextMessage: wrapFallback(
+        "scheduling recurring jobs requires sign-in",
+      ),
+    };
+  }
+  if (!args.slots.recurring) {
+    return {
+      contextMessage: wrapFallback(
+        "couldn't extract a recurring schedule from the request — say e.g. 'every Tuesday at 10am'",
+      ),
+    };
+  }
+
+  // Resolve contractor — same precedence as place_call:
+  //   1. explicit contractor_ref slot
+  //   2. top of the current surface (snapshot.contractorIds[0])
+  //   3. null (homeowner-only recurring — rare but allowed)
+  let contractorId: string | null = null;
+  let contractorName: string | null = null;
+  if (args.slots.contractor_ref) {
+    const resolved = await resolveContractorRef({
+      ref: args.slots.contractor_ref,
+      snapshot: args.snapshot,
+    });
+    contractorId = resolved?.id ?? null;
+    contractorName = resolved?.name ?? null;
+  } else if (args.snapshot?.contractorIds?.length) {
+    const firstId = args.snapshot.contractorIds[0];
+    const resolved = await fetchContractorById(firstId);
+    contractorId = resolved?.id ?? null;
+    contractorName = resolved?.name ?? null;
+  }
+
+  // Silver-tier gate: this contractor must be on silver+ for the
+  // homeowner to schedule recurring jobs THROUGH them. (Free/bronze
+  // contractors don't get recurring booking; the silver tier sells
+  // the autopilot capacity.)
+  if (contractorId) {
+    const tier = await getActiveTierForContractor(contractorId);
+    if (!tierUnlocks(tier, "recurring_jobs")) {
+      return {
+        contextMessage: wrapFallback(
+          `${contractorName ?? "that contractor"} is on the ${tier} plan; recurring jobs are a Silver+ feature. Pick another contractor or offer them an upgrade.`,
+        ),
+      };
+    }
+  }
+
+  const tz =
+    args.tz && typeof args.tz === "string" && args.tz.length > 0
+      ? args.tz
+      : "UTC";
+
+  const row = await createRecurringJob({
+    user_id: args.user_id,
+    contractor_id: contractorId,
+    title: args.slots.recurring.title,
+    agenda: args.slots.agenda ?? args.slots.recurring.title,
+    duration_minutes: 60,
+    timezone: tz,
+    schedule: args.slots.recurring.schedule,
+    context: {
+      source: "voice_intent",
+      matched_phrase: args.slots.recurring.matched_phrase,
+    },
+  });
+  if (!row) {
+    return {
+      contextMessage: wrapFallback(
+        "recurring job insert failed — see server logs",
+      ),
+    };
+  }
+
+  // Compute the next 3 instances so 6 can read one out + the panel
+  // shows the upcoming cadence.
+  const now = new Date();
+  const lookAhead = new Date(now.getTime() + 90 * 86_400_000); // 90d
+  const next = expandInstances({
+    schedule: row.schedule,
+    timezone: row.timezone,
+    anchor: new Date(row.active_from),
+    from: now,
+    to: lookAhead,
+  }).slice(0, 3);
+
+  const payload: RecurringJobPayload = {
+    recurring_job_id: row.id,
+    title: row.title,
+    agenda: row.agenda,
+    contractor_name: contractorName,
+    schedule_human: humanizeSchedule(row),
+    timezone: row.timezone,
+    next_instances: next,
+    status: row.status,
+  };
+
+  return {
+    variant: { kind: "recurring", payload },
+    contextMessage: wrapRecurringScheduled({ payload }),
+  };
+}
+
 // ─── Top-level orchestrator ────────────────────────────────────────
 
 export async function orchestrate(
@@ -1752,6 +1936,20 @@ export async function orchestrate(
       const r = await handleGenerateEstimate({
         user_id: input.user_id,
         snapshot: input.currentSurface,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: "variant" in r ? r.variant : undefined,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "schedule_recurring": {
+      const r = await handleScheduleRecurring({
+        slots: classification.slots,
+        user_id: input.user_id,
+        snapshot: input.currentSurface,
+        tz: input.tz,
       });
       return {
         kind: "action",

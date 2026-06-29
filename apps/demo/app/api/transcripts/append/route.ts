@@ -181,6 +181,7 @@ function parseSurfaceSnapshot(
     "dispute",
     "call",
     "estimate",
+    "recurring",
   ]);
   const kind =
     typeof r.kind === "string" && validKinds.has(r.kind)

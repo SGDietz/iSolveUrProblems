@@ -13,6 +13,7 @@ import { ContractPanel } from "./ContractPanel";
 import { DisputePanel } from "./DisputePanel";
 import { CallPanel } from "./CallPanel";
 import { EstimatePanel } from "./EstimatePanel";
+import { RecurringJobPanel } from "./RecurringJobPanel";
 
 /**
  * AssistantSurface — the right-side drawer that 6 drives during voice
@@ -125,6 +126,9 @@ export function AssistantSurface() {
           {variant.kind === "estimate" && (
             <EstimatePanel payload={variant.payload} />
           )}
+          {variant.kind === "recurring" && (
+            <RecurringJobPanel payload={variant.payload} />
+          )}
         </div>
       </div>
     </aside>
@@ -142,7 +146,8 @@ function labelForVariant(
     | "contract"
     | "dispute"
     | "call"
-    | "estimate",
+    | "estimate"
+    | "recurring",
   t: (key: string) => string,
 ): string {
   switch (kind) {
@@ -166,5 +171,7 @@ function labelForVariant(
       return t("variant.call");
     case "estimate":
       return t("variant.estimate");
+    case "recurring":
+      return t("variant.recurring");
   }
 }

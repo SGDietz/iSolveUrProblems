@@ -228,7 +228,8 @@
         "contract": "Work agreement",
         "dispute": "Dispute thread",
         "call": "Phone call with 6",
-        "estimate": "Estimate"
+        "estimate": "Estimate",
+        "recurring": "Autopilot job"
       },
       "contractors": {
         "empty": "No matches yet.",
@@ -349,6 +350,19 @@
           "accepted": "Accepted",
           "declined": "Declined",
           "expired": "Expired"
+        }
+      },
+      "recurring": {
+        "title": "Autopilot job scheduled",
+        "withLabel": "With",
+        "upcomingLabel": "Next instances",
+        "noUpcoming": "(No upcoming instances — schedule may already have ended)",
+        "autopilotFootnote": "Each instance fires reminders, contractor confirmation, and the no-show backup dispatcher. Say \"pause that recurring job\" any time to stop.",
+        "status": {
+          "active": "Active",
+          "paused": "Paused",
+          "ended": "Ended",
+          "cancelled": "Cancelled"
         }
       },
       "dispute": {

@@ -23,6 +23,7 @@ import type {
   EstimatePayload,
   PickResultPayload,
   RecommendationCard,
+  RecurringJobPayload,
   SummaryPayload,
 } from "../assistantSurface";
 
@@ -354,6 +355,37 @@ export function wrapEstimateReady(args: { payload: EstimatePayload }): string {
     `[ESTIMATE READY — not spoken by user]`,
     `Pulled ${itemCount} line item${itemCount === 1 ? "" : "s"} from the call with ${who}. Scope: ${payload.scope_summary}. Total: $${dollars} ${c}.`,
     `Respond as 6 in first person. Name the total, say it's broken down in the drawer, and offer to turn this into a contract. Two sentences max.`,
+  ].join("\n");
+}
+
+/**
+ * M4.7 — Confirm a freshly created recurring job. Brain reads back the
+ * schedule + next occurrence so the homeowner hears the autopilot
+ * cadence and can correct it if needed.
+ */
+export function wrapRecurringScheduled(args: {
+  payload: RecurringJobPayload;
+}): string {
+  const { payload } = args;
+  const next = payload.next_instances[0]
+    ? new Date(payload.next_instances[0]).toLocaleString("en-US", {
+        weekday: "long",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: payload.timezone,
+      })
+    : "(no upcoming instance — schedule may have already passed)";
+  const who = payload.contractor_name
+    ? ` with ${payload.contractor_name}`
+    : "";
+  return [
+    `[RECURRING JOB SCHEDULED — not spoken by user]`,
+    `Just set up autopilot for "${payload.title}"${who}. Cadence: ${payload.schedule_human}. Next: ${next}.`,
+    `Each instance fires reminders, contractor confirmation, and (if the contractor's a no-show) the backup dispatcher.`,
+    `Respond as 6 in first person. Confirm the autopilot is live, name the cadence and the next instance, and tell them they can say "pause the lawn mowing" any time to stop. Two sentences max.`,
   ].join("\n");
 }
 

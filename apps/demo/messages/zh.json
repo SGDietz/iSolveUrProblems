@@ -229,7 +229,8 @@
         "contract": "施工协议",
         "dispute": "争议会话",
         "call": "与 6 通话",
-        "estimate": "估价单"
+        "estimate": "估价单",
+        "recurring": "自动循环任务"
       },
       "contractors": {
         "empty": "暂无匹配。",
@@ -350,6 +351,19 @@
           "accepted": "已接受",
           "declined": "已拒绝",
           "expired": "已过期"
+        }
+      },
+      "recurring": {
+        "title": "自动循环任务已设置",
+        "withLabel": "对象:",
+        "upcomingLabel": "接下来的执行时间",
+        "noUpcoming": "(暂无后续执行 — 计划可能已结束)",
+        "autopilotFootnote": "每次执行将触发提醒、承包商确认,以及缺席时的备援派遣。说「暂停这个循环任务」可以停止。",
+        "status": {
+          "active": "进行中",
+          "paused": "已暂停",
+          "ended": "已结束",
+          "cancelled": "已取消"
         }
       },
       "dispute": {

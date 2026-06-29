@@ -197,6 +197,7 @@ const useTranscriptCapture = (
         | "dispute"
         | "call"
         | "estimate"
+        | "recurring"
         | null;
       contractorIds: string[];
       deliberation?: {
@@ -264,6 +265,11 @@ const useTranscriptCapture = (
         case "estimate":
           // Estimate panel — same as call: no contractor ID surfacing.
           return { kind: "estimate", contractorIds: [] };
+        case "recurring":
+          // Recurring job panel — no contractor ID surfacing in v1
+          // (the user already selected the contractor before the
+          // recurring intent fired).
+          return { kind: "recurring", contractorIds: [] };
       }
     };
 

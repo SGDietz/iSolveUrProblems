@@ -228,7 +228,8 @@
         "contract": "Contrat de travail",
         "dispute": "Fil de litige",
         "call": "Appel avec 6",
-        "estimate": "Devis"
+        "estimate": "Devis",
+        "recurring": "Tâche en pilote automatique"
       },
       "contractors": {
         "empty": "Aucun résultat pour l'instant.",
@@ -349,6 +350,19 @@
           "accepted": "Accepté",
           "declined": "Refusé",
           "expired": "Expiré"
+        }
+      },
+      "recurring": {
+        "title": "Tâche en pilote automatique programmée",
+        "withLabel": "Avec",
+        "upcomingLabel": "Prochaines occurrences",
+        "noUpcoming": "(Aucune occurrence à venir — le calendrier est peut-être terminé)",
+        "autopilotFootnote": "Chaque occurrence déclenche des rappels, une confirmation du prestataire et un remplaçant en cas d'absence. Dites \"pause cette tâche récurrente\" pour arrêter.",
+        "status": {
+          "active": "Actif",
+          "paused": "En pause",
+          "ended": "Terminé",
+          "cancelled": "Annulé"
         }
       },
       "dispute": {

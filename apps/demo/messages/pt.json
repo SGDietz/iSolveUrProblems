@@ -228,7 +228,8 @@
         "contract": "Contrato de trabalho",
         "dispute": "Tópico de disputa",
         "call": "Chamada com o 6",
-        "estimate": "Orçamento"
+        "estimate": "Orçamento",
+        "recurring": "Trabalho em piloto automático"
       },
       "contractors": {
         "empty": "Nenhum resultado ainda.",
@@ -349,6 +350,19 @@
           "accepted": "Aceito",
           "declined": "Recusado",
           "expired": "Expirado"
+        }
+      },
+      "recurring": {
+        "title": "Trabalho em piloto automático agendado",
+        "withLabel": "Com",
+        "upcomingLabel": "Próximas instâncias",
+        "noUpcoming": "(Sem instâncias futuras — o calendário pode ter terminado)",
+        "autopilotFootnote": "Cada instância dispara lembretes, confirmação do prestador e substituto em caso de falta. Diga \"pausar esse trabalho recorrente\" para parar.",
+        "status": {
+          "active": "Ativo",
+          "paused": "Pausado",
+          "ended": "Encerrado",
+          "cancelled": "Cancelado"
         }
       },
       "dispute": {
