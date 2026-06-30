@@ -12,6 +12,25 @@ const MAX_PROBLEM_CHARS = 300;
 const MAX_LAST_ANALYSIS_CHARS = 400;
 const SILENT_TOKEN = "[SILENT]";
 
+// Pull a safe, short category + message out of a Gemini error body so the real
+// failure reason survives back to the client (and into media_events.error). Gemini
+// returns { error: { code, status, message } }. We surface status (INVALID_ARGUMENT,
+// PERMISSION_DENIED, RESOURCE_EXHAUSTED, ...) + a truncated message. NEVER leaks the
+// API key — the key only ever lives in the request URL, never in this body.
+function geminiErrorDetail(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw);
+    const e = parsed?.error;
+    const status = typeof e?.status === "string" ? e.status : "";
+    const code = typeof e?.code === "number" ? String(e.code) : "";
+    const msg = typeof e?.message === "string" ? e.message : "";
+    const cat = status || code || "error";
+    return truncateUtf8String(`${cat}: ${msg}`.trim(), 240);
+  } catch {
+    return truncateUtf8String((raw || "").trim(), 240);
+  }
+}
+
 // Snapshot / Gallery / Video-upload mode. User deliberately captured or uploaded an image
 // and wants 6 to engage with it. Light dry humor OK. Not silent-first.
 const HUMOR_STYLE_GUIDE =
@@ -126,7 +145,10 @@ export async function POST(request: Request) {
 
     if (file.size > MAX_ANALYZE_IMAGE_BYTES) {
       return new Response(
-        JSON.stringify({ error: "Image file is too large" }),
+        JSON.stringify({
+          error: "Image file is too large",
+          details: `bytes=${file.size} max=${MAX_ANALYZE_IMAGE_BYTES}`,
+        }),
         {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -152,7 +174,10 @@ export async function POST(request: Request) {
     const mimeType = (file.type || "image/jpeg").split(";")[0].trim();
     if (!isAllowedImageMime(mimeType)) {
       return new Response(
-        JSON.stringify({ error: "Unsupported image type" }),
+        JSON.stringify({
+          error: "Unsupported image type",
+          details: `mime=${mimeType} bytes=${file.size}`,
+        }),
         {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -218,16 +243,14 @@ export async function POST(request: Request) {
       }
       promptText = promptParts.join(" ");
     } else if (q) {
-      // Snapshot/Gallery/Video: answer the user's question with light dry humor and practicality.
-      promptText = `Look at this image and answer: "${q}".
-Use 2-3 short sentences max.
-Tone: warm and direct, with at most one light dry observation if it fits naturally. No stand-up comedy.
-Also include at least one concrete observation or practical tip tied to what you see.
-Do not tell the user to point a camera, show you something on video later, or offer to look—you already see this image.`;
+      // Snapshot/Gallery/Video — DIAGNOSIS-first (2026-06-28, G): ground the answer
+      // in what's visible and flag what view would confirm it, so 6 can work the
+      // problem instead of guessing.
+      promptText = `Look at this image the user shared and answer: "${q}". Ground your answer in what's actually visible: name the object/area and its condition, the real problem if you can see it and where it is, and — if something key isn't clear — say what view would confirm it (closer, another angle, the underside, the source). 3-4 short sentences, first person, warm and direct, accurate. At most one light dry aside. Never tell the user to point a camera or that you'll look — you already have this image.`;
     } else {
-      // Snapshot/Gallery/Video with no question: short, useful description with light humor.
+      // Snapshot/Gallery/Video with no question — DIAGNOSIS-first (2026-06-28, G).
       promptText =
-        "Describe what you see in this image in 2 short sentences. Be useful and direct, with at most one light dry observation if it fits naturally. No extended jokes, no stand-up comedy. Do not tell the user to point a camera or that you will look—you already have this image.";
+        "Look at this image the user shared to show you a home-or-garden problem. Tell 6 what's going on: what the object/area is and its condition, the actual problem if it's visible (leak, crack, clog, rust, wear, a broken/loose/missing part, a wrong fit, water or damage) and where it is, and the single most useful next detail — what you still can't tell and which view would confirm it (closer, another angle, the underside, the source). 3-4 sentences, first person, warm, direct, accurate. At most one light dry aside. Never tell the user to point a camera or that you'll look — you already have this image.";
     }
 
     // Call Gemini 2.5 Flash Vision API — swapped from Grok for lower latency (~1-2s faster).
@@ -264,7 +287,9 @@ Do not tell the user to point a camera, show you something on video later, or of
             },
           ],
           generationConfig: {
-            maxOutputTokens: 150,
+            // Go-Live streaming stays tight + fast (150); the snapshot/photo
+            // DIAGNOSIS paths get room for a real read (350) (G 2026-06-28).
+            maxOutputTokens: isStreaming ? 150 : 350,
             // thinkingBudget=0 disables chain-of-thought for fastest output.
             // Flash Lite supports this (same as Flash); Pro doesn't.
             thinkingConfig: { thinkingBudget: 0 },
@@ -275,10 +300,24 @@ Do not tell the user to point a camera, show you something on video later, or of
 
     if (!res.ok) {
       const errorData = await res.text();
-      console.error("Gemini Vision API error:", errorData);
+      const detail = geminiErrorDetail(errorData);
+      console.error(
+        "Gemini Vision API error:",
+        res.status,
+        `mime=${mimeType}`,
+        `bytes=${file.size}`,
+        detail,
+      );
       return new Response(
         JSON.stringify({
           error: "Failed to analyze image",
+          // Safe, truncated diagnostics. The client folds `details` into the
+          // stored media_events.error, so the real reason survives the smoke.
+          stage: "gemini",
+          status: res.status,
+          mime: mimeType,
+          bytes: file.size,
+          details: detail,
         }),
         {
           status: res.status <= 599 ? res.status : 502,
@@ -300,12 +339,29 @@ Do not tell the user to point a camera, show you something on video later, or of
       },
     });
   } catch (error) {
-    console.error("Error analyzing image:", error);
-    return new Response(JSON.stringify({ error: "Failed to analyze image" }), {
-      status: 500,
-      headers: {
-        "Content-Type": "application/json",
+    const rawMsg = error instanceof Error ? error.message : String(error);
+    // Belt-and-suspenders: if any runtime exception text ever contains the
+    // Gemini key (it lives in the request URL), scrub it before logging/returning
+    // (Herm 2026-06-29). Normal fetch failures are just "fetch failed".
+    const safeMsg = truncateUtf8String(
+      rawMsg
+        .replaceAll(GEMINI_API_KEY || "__NO_KEY__", "[REDACTED]")
+        .replace(/([?&]key=)[^&\s)]+/gi, "$1[REDACTED]"),
+      240,
+    );
+    console.error("Error analyzing image:", safeMsg);
+    return new Response(
+      JSON.stringify({
+        error: "Failed to analyze image",
+        stage: "exception",
+        details: safeMsg,
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
       },
-    });
+    );
   }
 }

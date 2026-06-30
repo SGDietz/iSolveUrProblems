@@ -27,7 +27,128 @@ import { SessionState, AgentEventsEnum } from "@heygen/liveavatar-web-sdk";
 import { useAvatarActions } from "../liveavatar/useAvatarActions";
 import { setVideoBusy, isVideoBusy } from "../liveavatar/videoRecordingState";
 import { captureMedia } from "../lib/captureMedia";
-import { Radio, Camera, Images, Video, MicOff, Mail } from "lucide-react";
+import { Radio, Camera, Images, Video, MicOff, Mail, SwitchCamera, X } from "lucide-react";
+
+// Cap on frames sent to /api/analyze-video (matches MAX_VIDEO_FRAMES server-side).
+const MAX_CLIENT_FRAMES = 24;
+
+// Builds the context 6 receives right after he "sees" a photo/video, and drives
+// the diagnose-or-ask-for-more loop (G 2026-06-28): if vision genuinely couldn't
+// tell (INSUFFICIENT_FRAMES), 6 asks for a better capture; otherwise he gives his
+// read + next step, and asks for the ONE missing view only if a key detail is
+// still unclear — like a handyman working a problem on a video call.
+// Normalize a problem string for stale-problem comparison (whitespace + case).
+function normalizeProblem(s: string): string {
+  return s.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+// Lightweight "the user switched problems mid-analysis" detector (Herm TASK_050,
+// 2026-06-29). The pure video-record flow never updates currentProblemRef, so we
+// compare the user's POST-record words against the recorded problem (or, as a
+// fallback, the video analysis text) instead of mutating the global problem ref.
+// Bare "other"/"another" is NOT a switch cue ("the other lens too" = same problem);
+// only "another problem/issue/thing/one" counts (Herm TASK_052). A concrete object
+// mismatch still drops via the !hasSharedToken path.
+const PROBLEM_SWITCH_CUE_RE =
+  /\b(?:now|actually|different|new|instead|switch(?:ed|ing)?|not\s+(?:that|this|it)|forget\s+(?:that|this|it)|(?:another|other)\s+(?:problem|issue|thing|one))\b/i;
+
+const PROBLEM_OBJECT_RE =
+  /\b(?:drain|sink|toilet|tub|shower|pipe|faucet|leak(?:y|ing)?|clog(?:ged|ging)?|stove|oven|burner|dishwasher|fridge|washer|dryer|door|window|wall|ceiling|floor|roof|gutter|outlet|breaker|wire|light|fan|hvac|scratch(?:ed|es|ing)?|dent|crack)\b/gi;
+
+// Collapse common morphology so "scratch" vs "scratches/scratched", "leak" vs
+// "leaky/leaking", "clog" vs "clogged/clogging" don't look like new problems.
+function canonicalProblemToken(token: string): string {
+  const t = normalizeProblem(token);
+  if (t.startsWith("scratch")) return "scratch";
+  if (t.startsWith("leak")) return "leak";
+  if (t.startsWith("clog")) return "clog";
+  return t;
+}
+
+function problemTokens(text: string): Set<string> {
+  return new Set(
+    Array.from(normalizeProblem(text).matchAll(PROBLEM_OBJECT_RE), (m) =>
+      canonicalProblemToken(m[0]),
+    ),
+  );
+}
+
+function looksLikeDifferentProblem(baseline: string, utterance: string): boolean {
+  const said = normalizeProblem(utterance);
+  if (said.length < 8) return false;
+  const baseTokens = problemTokens(baseline);
+  const saidTokens = problemTokens(said);
+  if (saidTokens.size === 0) return false;
+
+  const hasNewToken = Array.from(saidTokens).some((t) => !baseTokens.has(t));
+  const hasSharedToken = Array.from(saidTokens).some((t) => baseTokens.has(t));
+  const hasSwitchCue = PROBLEM_SWITCH_CUE_RE.test(said);
+  // "the pipe below is leaking too" = adding a nearby detail to the SAME problem,
+  // not a switch. Don't drop those unless there's an explicit switch cue (Herm).
+  const looksLikeAdjacentFollowup =
+    /\b(?:too|also|below|under|behind|next to|same|that one|there too)\b/i.test(
+      said,
+    );
+
+  // Drop on explicit switch language, or on a clean concrete object mismatch
+  // that doesn't sound like the user is adding an adjacent detail.
+  return (
+    hasNewToken &&
+    (hasSwitchCue || (!hasSharedToken && !looksLikeAdjacentFollowup))
+  );
+}
+
+function buildVisionContextMessage(
+  media: "photo" | "video",
+  analysis: string,
+  frameCount?: number,
+  problem?: string,
+): string {
+  const a = (analysis || "").trim();
+  if (/^\s*INSUFFICIENT_FRAMES/i.test(a)) {
+    const what = a.replace(/^\s*INSUFFICIENT_FRAMES:?\s*/i, "").trim();
+    return `[VISION NOTE — not spoken by user] You looked at the ${media} the user just shared but couldn't make out enough to be sure${what ? ` (${what})` : ""}. Do NOT guess. In first person as 6, warmly tell them you want to see it a little better and ask for ONE specific re-shot that would help — closer, slower, a different angle, or right on the spot of the problem. 1-2 friendly sentences. Never say you're an AI or that you rely on anyone else's analysis.`;
+  }
+  const sawWhat =
+    media === "video"
+      ? `${frameCount && frameCount > 0 ? `${frameCount} still frames sampled from ` : ""}the video the user just shared`
+      : `the photo the user just shared`;
+  const problemLine = problem?.trim()
+    ? `The user recorded this for this problem: "${problem.trim()}". `
+    : "";
+  return `[VISION CONTEXT — not spoken by user] ${problemLine}You just looked at ${sawWhat}. You CAN see it directly — these are your own eyes, not someone else's report. Here is exactly what is in it: ${a}\n\nUse ONLY what is described above. Do NOT add, invent, or assume any object, change, or action that is not stated here — e.g. do not say the user removed, moved, or fixed something unless the description says so. In first person as 6: tie what you see to the problem they're working on and give your read plus the next concrete step. If a key detail is still unclear, ask for ONE specific better view (closer, another angle, the underside, where it's wet or cracked). Keep it to 1-3 natural sentences. NEVER say you can't see it, that you don't have access to the ${media}, screenshots, or frames, or that you're relying on anyone else's analysis — you looked at it yourself.`;
+}
+// Convert any browser-supported image File (incl. iOS HEIC) to a downsized JPEG
+// for upload. iPad cameras shoot HEIC + very high resolution; Gemini wants JPEG
+// and our route allowlists only jpeg/png/webp/gif. createImageBitmap decodes HEIC
+// on iOS WebKit; on ANY failure we fall back to the original file (G 2026-06-29).
+async function fileToJpegForUpload(file: File): Promise<File> {
+  try {
+    if (typeof createImageBitmap !== "function") return file;
+    const bitmap = await createImageBitmap(file, {
+      imageOrientation: "from-image",
+    });
+    const maxDim = 2000;
+    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.9),
+    );
+    if (!blob || blob.size === 0) return file;
+    return new File([blob], "photo.jpg", { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
+}
+
 import { useGoLiveStreamer } from "../lib/vision/useGoLiveStreamer";
 import { GoLivePrivacyBanner } from "./GoLivePrivacyBanner";
 import { HeaderControls } from "./HeaderControls";
@@ -189,10 +310,28 @@ const LiveAvatarSessionComponent: React.FC<{
   const { sessionRef } = useLiveAvatarContext();
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  // Native photo/video capture: silence 6 while the phone's camera is up, then
+  // restore on return. Refs (not state) so the visibilitychange handler always
+  // reads current values — no stale closure, no stuck-muted 6 (G 2026-06-29).
+  const nativeCaptureBusyRef = useRef(false);
+  const nativeCaptureWasMutedRef = useRef(false);
+  // Distinguish a CONFIRMED native capture (a file is being analyzed) from a
+  // CANCELLED one, so 6 stays cut/muted until analysis finishes, not just until
+  // the camera closes (Herm 2026-06-29).
+  const nativeCaptureHandlingFileRef = useRef(false);
+  const nativeCaptureRestoreTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraPreviewRef = useRef<HTMLVideoElement>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  // Which lens the in-app camera is showing, so the front/back flip can toggle it
+  // and the preview can mirror the front camera the way phones do (G 2026-06-28).
+  const [cameraFacing, setCameraFacing] = useState<"environment" | "user">(
+    "environment",
+  );
   const [imageAnalysis, setImageAnalysis] = useState<string | null>(null);
   const [videoAnalysis, setVideoAnalysis] = useState<string | null>(null);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
@@ -286,6 +425,34 @@ const LiveAvatarSessionComponent: React.FC<{
   const [recordedVideoBlob, setRecordedVideoBlob] = useState<Blob | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  // Per-recording id + cancel flag: a delayed buy-time / vision injection from a
+  // recording the user already exited must be ignored (Herm 2026-06-29).
+  const videoAnalysisRunIdRef = useRef(0);
+  const videoAnalysisCancelledRef = useRef(false);
+  // While a recorded video is uploading/analyzing, the MACHINE owns the turn:
+  // 6 must NOT freelance "I didn't get to see the video" before he can see it.
+  // The speak-start gate cuts any avatar line during this window EXCEPT the
+  // buy-time + final vision lines we queue ourselves — each queued line bumps
+  // the allowance, each allowed start consumes one (same source-counting pattern
+  // as the account floor). isAnalyzingVideoRef mirrors the state for the gate's
+  // event closure (Herm fix #2, 2026-06-29).
+  const isAnalyzingVideoRef = useRef(false);
+  const videoSpeakAllowanceRef = useRef(0);
+  // Snapshot of the user's problem at record-start, so a delayed video diagnosis
+  // can be DROPPED if the user has moved on to a different problem (Herm fix #2,
+  // 2026-06-29). NOTE: only fires when currentProblemRef actually changes — today
+  // it updates in the Go Live path and locks after 20s, so the pure video-record
+  // topic-switch case still needs a "new problem" detector (flagged to Herm).
+  const videoProblemAtRecordRef = useRef<string>("");
+  // Post-record user words captured DURING analysis (the handler returns early
+  // then, so they'd otherwise be lost) + a sticky flag once they clearly name a
+  // different problem. Used to drop a stale video diagnosis (Herm TASK_050).
+  const videoPostRecordUtteranceRef = useRef<string>("");
+  const videoPostRecordSwitchRef = useRef<string>("");
+  // Keep the ref in sync so the speak-start gate closure sees the live value.
+  useEffect(() => {
+    isAnalyzingVideoRef.current = isAnalyzingVideo;
+  }, [isAnalyzingVideo]);
 
   // When session fails to start (e.g. no credits), show message and don't auto-restart
   const [sessionStartError, setSessionStartError] = useState<string | null>(
@@ -435,9 +602,41 @@ const LiveAvatarSessionComponent: React.FC<{
     setIsCameraActive(false);
     setVisionMode(null);
 
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+    // Cancel any in-flight in-app recording OR analysis: supersede the run so no
+    // buy-time/vision line fires after the user left, stop the recorder, clear the
+    // busy gate, and restore the mic so 6 isn't left silenced (Herm 2026-06-29).
+    if (mediaRecorderRef.current || isRecording || isAnalyzingVideo) {
+      videoAnalysisCancelledRef.current = true;
+      videoAnalysisRunIdRef.current += 1;
+      const recorder = mediaRecorderRef.current;
+      mediaRecorderRef.current = null;
+      if (recorder) {
+        try {
+          recorder.ondataavailable = null;
+          recorder.onstop = null;
+          recorder.onerror = null;
+          if (recorder.state === "recording") recorder.stop();
+        } catch {
+          /* non-fatal */
+        }
+      }
       setIsRecording(false);
+      setIsAnalyzingVideo(false);
+      setVideoBusy(false);
+      if (mode === "FULL") {
+        try {
+          startListening();
+        } catch {
+          /* non-fatal */
+        }
+        if (isActive && !wasMutedBeforeRecordingRef.current) {
+          try {
+            unmute();
+          } catch {
+            /* non-fatal */
+          }
+        }
+      }
     }
     setRecordedVideoBlob(null);
     recordedChunksRef.current = [];
@@ -456,6 +655,7 @@ const LiveAvatarSessionComponent: React.FC<{
     // Clear analysis states (but keep videoAnalysis so avatar can still reference it)
     setImageAnalysis(null);
     setIsAnalyzingImage(false);
+    isAnalyzingVideoRef.current = false;
     setIsAnalyzingVideo(false);
     setIsProcessingCameraQuestion(false);
     // Note: videoAnalysis is NOT cleared so avatar can still reference uploaded videos
@@ -472,6 +672,11 @@ const LiveAvatarSessionComponent: React.FC<{
     fallbackImage,
     fallbackImagePreview,
     isRecording,
+    isAnalyzingVideo,
+    mode,
+    isActive,
+    startListening,
+    unmute,
   ]);
 
   // Check if we're on the home screen (no camera, no video, no uploads)
@@ -526,6 +731,32 @@ const LiveAvatarSessionComponent: React.FC<{
       return;
     }
     const onAvatarSpeakStarted = () => {
+      // (0) Video/native capture owns the turn — 6 must NOT speak over capture or
+      // analysis. Hard-cut ANY line that starts while video is busy. Suppressing
+      // silence-re-engage alone did NOT stop the TALK brain / a queued repeat from
+      // firing mid-capture (Herm 2026-06-29). videoBusy is cleared right BEFORE the
+      // post-analysis vision line is injected, so the legit "I watched it" reply
+      // still gets through.
+      if (isVideoBusy()) {
+        void interrupt();
+        lastVisionResponseTimeRef.current = Date.now();
+        return;
+      }
+      // (0a) Video uploaded and ANALYZING — videoBusy is already false (so 6 can
+      // give the buy-time line), but the TALK brain must not freelance a clueless
+      // "I didn't get to see the video" while analysis is still in flight. Allow
+      // ONLY the lines we queued (buy-time + final vision): each queued line bumps
+      // videoSpeakAllowanceRef, this start consumes one; an unallowed start is the
+      // brain answering on its own → cut it (Herm fix #2, 2026-06-29).
+      if (isAnalyzingVideoRef.current) {
+        if (videoSpeakAllowanceRef.current > 0) {
+          videoSpeakAllowanceRef.current -= 1;
+        } else {
+          void interrupt();
+        }
+        lastVisionResponseTimeRef.current = Date.now();
+        return;
+      }
       // (1) No audible output yet → cut.
       if (!audioUnlockedRef.current) {
         void interrupt();
@@ -786,16 +1017,16 @@ const LiveAvatarSessionComponent: React.FC<{
   // Arrival time of the last user fragment, so the account stitch only glues a
   // RECENT prior shard (split email / split trigger), never stale earlier speech.
   const lastUserFragmentAtRef = useRef<number>(0);
-  // 3 example problem pills (G 2026-06-27): show before 6 starts; tap anywhere
-  // to talk. Picked after mount for variety (G loves the random chaos); SSR
-  // renders the first 3 to avoid a hydration mismatch.
+  // 4 example problem pills (G 2026-06-29, was 3): show before 6 starts; tap
+  // anywhere to talk. Picked after mount for variety (G loves the random chaos);
+  // SSR renders the first 4 to avoid a hydration mismatch.
   const [promptPills, setPromptPills] = useState<string[]>(() =>
-    PROBLEM_PROMPTS.slice(0, 3),
+    PROBLEM_PROMPTS.slice(0, 4),
   );
   useEffect(() => {
     const pool = [...PROBLEM_PROMPTS];
     const picked: string[] = [];
-    while (picked.length < 3 && pool.length) {
+    while (picked.length < 4 && pool.length) {
       picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
     }
     setPromptPills(picked);
@@ -1035,10 +1266,19 @@ const LiveAvatarSessionComponent: React.FC<{
           } catch {
             // interrupt hiccup must not block the spoken line
           }
-          // Grant ONE machine speak-start allowance so AVATAR_SPEAK_STARTED can't
-          // mistake the greet for the brain and clip it (belt-and-suspenders).
-          machineSpeakStartsAllowedRef.current += 1;
-          await repeat(spoken);
+          // The account floor was just released above, so AVATAR_SPEAK_STARTED will
+          // NOT cut this greet — the source-counting cut only fires while the floor
+          // is HELD. Granting a speak-allowance here is therefore unnecessary AND
+          // harmful: the handler never consumes it (floor is false), so a +1 would
+          // survive as a STALE allowance a later account-floor window could spend on
+          // a rogue brain line (Herm review 2026-06-28 — the success path my first
+          // pass missed). Speak with NO increment, and hard-clear the allowance on
+          // BOTH success and throw so nothing stale can persist past the greet.
+          try {
+            await repeat(spoken);
+          } finally {
+            machineSpeakStartsAllowedRef.current = 0;
+          }
           accountReturnGreetedRef.current = true;
           stop();
           lastAvatarResponseRef.current = spoken;
@@ -1128,8 +1368,16 @@ const LiveAvatarSessionComponent: React.FC<{
   const startAccountSetup = useCallback(
     async (email: string): Promise<boolean> => {
       const normalizedEmail = email.trim().toLowerCase();
+      // Prefer the LIVE HeyGen SDK session id so account writes key off the SAME id
+      // the live transcript/lead-capture uses (the sync route writes lead_sessions
+      // under sessionRef.current.sessionId). dbSessionIdRef already == SDK id once
+      // CONNECTED, but reading the SDK id FIRST closes the pre-CONNECT minted-
+      // fallback divergence window that seeded a separate lead row (Herm TASK_041
+      // #1/#7).
       const sessionIdForAccount =
-        safeAccountSessionId(dbSessionIdRef.current) ?? safeAccountSessionId(mintedSessionIdRef.current);
+        safeAccountSessionId(sessionRef.current?.sessionId) ??
+        safeAccountSessionId(dbSessionIdRef.current) ??
+        safeAccountSessionId(mintedSessionIdRef.current);
       // Remember the EXACT id we send so the device-link poll queries the same row
       // (start may use the minted fallback, but the poll only knew dbSessionIdRef).
       if (sessionIdForAccount) accountLinkSessionIdRef.current = sessionIdForAccount;
@@ -1190,7 +1438,12 @@ const LiveAvatarSessionComponent: React.FC<{
         const emailSent = data?.emailSent === true;
         const fullSuccess =
           data?.fullSuccess === true || (emailSent && data?.linkRowInserted === true);
-        if (!emailSent) {
+        // Clear the 90s resend-dedupe whenever we did NOT fully succeed — not just
+        // when the email failed to send. "Email sent but link row not saved" is the
+        // degraded case where the user MUST be able to retry to get a durable,
+        // pollable link row; leaving the marker set swallows that retry as
+        // "already sent a moment ago" and strands them (Herm 2026-06-29 #5).
+        if (!fullSuccess) {
           lastAccountLinkSendRef.current = null;
         }
         const spoken = fullSuccess
@@ -1225,13 +1478,14 @@ const LiveAvatarSessionComponent: React.FC<{
           setChestEmailText("");
           setChestEmailStatus("Email Link Sent");
           setShowChestEmail(true);
-          if (chestStatusTimerRef.current) clearTimeout(chestStatusTimerRef.current);
-          chestStatusTimerRef.current = setTimeout(() => {
-            setShowChestEmail(false);
-            setChestEmailStatus(null);
-            setChestEmailText("");
+          // Keep the confirmation up until the flow naturally resets
+          // (clearAccountEmailEntry / unmount). The old 2.2s auto-hide blanked the
+          // box while 6 was still speaking the ~14s post-send line — a confusing
+          // empty box. Persist it instead (Herm TASK_041 #5).
+          if (chestStatusTimerRef.current) {
+            clearTimeout(chestStatusTimerRef.current);
             chestStatusTimerRef.current = null;
-          }, 2200);
+          }
         } else {
           if (emailSent) {
             // Sent but not persisted — never show the green; surface it loudly.
@@ -1785,6 +2039,7 @@ const LiveAvatarSessionComponent: React.FC<{
 
     // Hoisted so the catch block can also store the frame for failure audit.
     let frameFile: File | null = null;
+    let analyzeStatus: number | null = null;
     try {
       setIsAnalyzingImage(true);
       // Show "Analyzing" immediately (not "Loading")
@@ -1847,6 +2102,7 @@ const LiveAvatarSessionComponent: React.FC<{
           body: buildForm(),
         });
       }
+      analyzeStatus = response.status;
 
       if (!response.ok) {
         let errorMessage = "Failed to analyze photo";
@@ -1863,6 +2119,17 @@ const LiveAvatarSessionComponent: React.FC<{
       const data = await response.json();
       const analysis = data.analysis;
       setImageAnalysis(analysis);
+      breadcrumb("analyze_camframe_ok", {
+        source: "camera_snapshot",
+        status: analyzeStatus,
+        uploadMime: frame.type,
+        uploadBytes: frame.size,
+        // In-app frames are canvas JPEGs — no conversion. Mirror the file-picker
+        // breadcrumb schema for log-grep consistency (Herm 2026-06-29).
+        origMime: frame.type,
+        origBytes: frame.size,
+        didConvertJpeg: false,
+      });
 
       // Store a copy of this snapshot + analysis to Supabase for later audit.
       void captureMedia({
@@ -1879,13 +2146,23 @@ const LiveAvatarSessionComponent: React.FC<{
       // REVERTED from plain repeat() on 2026-04-24 — repeat() made the avatar
       // read Gemini's raw description without connecting it to the prior thread.
       if (mode === "FULL" && sessionRef.current) {
-        const contextMessage = `[IMAGE CONTEXT — not spoken by user] Vision just processed an image the user captured. You are viewing it directly. Here is what's in it: ${analysis}. Respond naturally in first person as 6, tie what you see to the ongoing conversation (especially any problem the user was trying to solve), and ask intelligent follow-up questions about the object or problem. Respond briefly (1-2 sentences). Never say you can't see it or that you're relying on someone else's analysis — you can see it directly.`;
-        sessionRef.current.message(contextMessage);
+        sessionRef.current.message(buildVisionContextMessage("photo", analysis));
       }
-
-      setIsAnalyzingImage(false);
     } catch (error) {
       console.error("Error capturing and analyzing photo:", error);
+      breadcrumb("analyze_camframe_fail", {
+        source: "camera_snapshot",
+        status: analyzeStatus,
+        uploadMime: frameFile?.type ?? null,
+        uploadBytes: frameFile?.size ?? null,
+        origMime: frameFile?.type ?? null,
+        origBytes: frameFile?.size ?? null,
+        didConvertJpeg: false,
+        msg: (error instanceof Error ? error.message : String(error)).slice(
+          0,
+          200,
+        ),
+      });
       // Capture the frame + error so we can audit failures later.
       if (frameFile) {
         void captureMedia({
@@ -1905,7 +2182,11 @@ const LiveAvatarSessionComponent: React.FC<{
           );
         }
       }
+    } finally {
+      // Always restore UI gates — a stuck isProcessingCameraQuestion can
+      // false-green / disable later camera + Go Live paths (Herm 2026-06-29).
       setIsAnalyzingImage(false);
+      setIsProcessingCameraQuestion(false);
     }
   }, [
     isCameraActive,
@@ -2387,6 +2668,31 @@ const LiveAvatarSessionComponent: React.FC<{
         console.log(
           "Recording in progress, skipping transcription - avatar should be quiet",
         );
+        return;
+      }
+
+      // Same while a recorded video is still uploading/analyzing: the MACHINE
+      // owns the turn. Skip our custom routing (account/close/vision) so a
+      // mid-analysis utterance can't trigger side-effects or a stale answer; 6's
+      // actual speech is governed by the analysis allowance gate in the
+      // AVATAR_SPEAK_STARTED handler. We deliberately do NOT interrupt() here —
+      // that could cut our own buy-time line (Herm fix #2, 2026-06-29).
+      if (isAnalyzingVideoRef.current) {
+        // Preserve the user's mid-analysis words (we return before the normal
+        // lastUserFragment capture) so the final inject can drop a stale video
+        // diagnosis if they've moved to a different problem (Herm TASK_050).
+        if (userText) {
+          const prior = videoPostRecordUtteranceRef.current;
+          const combined = `${prior} ${userText}`.trim().slice(-300);
+          videoPostRecordUtteranceRef.current = combined;
+          if (
+            videoProblemAtRecordRef.current &&
+            looksLikeDifferentProblem(videoProblemAtRecordRef.current, combined)
+          ) {
+            videoPostRecordSwitchRef.current = combined;
+          }
+        }
+        console.log("Video analysis in flight - deferring TALK routing");
         return;
       }
 
@@ -2910,22 +3216,114 @@ const LiveAvatarSessionComponent: React.FC<{
     checkCameraAvailability();
   }, [loadFallbackImage]);
 
-  const handleCameraClick = async () => {
-    // Camera now opens the DEVICE's native camera (G 2026-06-27: "open the
-    // camera on the device", no in-app vision feed). The captured photo/video
-    // routes through the same file input as Gallery; `capture="environment"`
-    // tells the phone to open the camera rather than the picker.
-    await unlockAudio();
+  // Open the in-app camera with a specific lens. getUserMedia honors facingMode
+  // reliably (unlike a native <input capture> hint, which phones ignored — opening
+  // the front camera or the gallery). Used by the Camera button (defaults to BACK)
+  // and the front/back flip; stops any live stream first so the device will grant
+  // the other lens (G 2026-06-28).
+  const startCameraWithFacing = useCallback(
+    async (facing: "environment" | "user") => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop());
+        setCameraStream(null);
+      }
+      const tryFacing = async (
+        f: "environment" | "user",
+      ): Promise<MediaStream | null> => {
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: f },
+          });
+        } catch {
+          return null;
+        }
+      };
+      const other = facing === "environment" ? "user" : "environment";
+      const stream = (await tryFacing(facing)) ?? (await tryFacing(other));
+      if (stream) {
+        const got = stream.getVideoTracks()[0]?.getSettings().facingMode;
+        const granted: "environment" | "user" =
+          got === "user" || got === "environment" ? got : facing;
+        setCameraStream(stream);
+        setCameraFacing(granted);
+        setCameraAvailable(true);
+        setIsCameraActive(true);
+      } else {
+        // Camera couldn't open (no device, OR permission denied / device busy).
+        // Make sure the static-image fallback actually has an image to show, or
+        // the user is stranded on an endless "loading" with a dead shutter
+        // (Herm 2026-06-29). Load it on demand if mount didn't preload one.
+        setCameraAvailable(false);
+        setIsCameraActive(true);
+        if (!fallbackImagePreview) {
+          try {
+            const fallbackImageFile = await loadFallbackImage();
+            setFallbackImage(fallbackImageFile);
+            setFallbackImagePreview(URL.createObjectURL(fallbackImageFile));
+          } catch (err) {
+            console.error("Error loading fallback image:", err);
+          }
+        }
+      }
+    },
+    [cameraStream, fallbackImagePreview, loadFallbackImage],
+  );
+
+  // Silence 6 BEFORE the phone's camera opens (G 2026-06-29, "no excuses"):
+  // interrupt his current speech, stop listening, and mute — so nothing he hears
+  // or says can fire while you shoot/film. The native camera then backgrounds the
+  // page (the OS pauses his audio). Restored on return by the visibilitychange
+  // effect below — stuck-proof, since the page always comes back to visible.
+  const silenceSixForCapture = () => {
     try {
       sessionRef.current?.interrupt?.();
     } catch {
-      // non-fatal
+      /* non-fatal */
     }
-    if (fileInputRef.current) {
-      fileInputRef.current.setAttribute("accept", "image/*,video/*");
-      fileInputRef.current.setAttribute("capture", "environment");
-      fileInputRef.current.click();
+    try {
+      stopListening();
+    } catch {
+      /* non-fatal */
     }
+    nativeCaptureWasMutedRef.current = isMuted;
+    if (isActive && !isMuted) {
+      try {
+        mute();
+      } catch {
+        /* non-fatal */
+      }
+    }
+    setVideoBusy(true);
+    nativeCaptureBusyRef.current = true;
+  };
+
+  // Open a NATIVE capture input (photo or video). Silence 6 FIRST, then click — and
+  // if the ref is missing or .click() throws, restore 6 immediately so a failed open
+  // can't leave him muted. Do NOT unlockAudio() here (re-arms audio mid-capture);
+  // restoreSixAfterNativeCapture re-arms it after the camera closes (Herm 2026-06-29).
+  const openNativeCapture = (input: HTMLInputElement | null) => {
+    silenceSixForCapture();
+    try {
+      if (!input) {
+        restoreSixAfterNativeCapture();
+        return;
+      }
+      input.click();
+    } catch {
+      restoreSixAfterNativeCapture();
+    }
+  };
+
+  const handleCameraClick = () => openNativeCapture(cameraInputRef.current);
+  const handleVideoClick = () => {
+    // IN-APP video recorder (G 2026-06-29): native video FROZE 6 on iOS (the OS
+    // suspends his live stream when the phone camera takes the whole screen). The
+    // in-app recorder captures INSIDE the page, so 6 never backgrounds and never
+    // freezes. Opens the live preview; the user records, 6 stays silent while
+    // filming, then buys time while the clip uploads + analyzes (see onstop).
+    setVisionMode("snapshot");
+    void startCameraWithFacing("environment");
+    void unlockAudio();
   };
 
   const handleFallbackImageChange = (
@@ -2955,21 +3353,81 @@ const LiveAvatarSessionComponent: React.FC<{
     }
   };
 
-  const handleGalleryClick = useCallback(async () => {
-    // Interrupt 6 if he's mid-speech — user is showing us something.
+  const handleGalleryClick = useCallback(() => {
+    // Gallery opens the phone's photo picker via the no-capture fileInputRef (its
+    // accept is static "image/*,video/*"; it's never mutated now that Camera has
+    // its own ref). Click SYNCHRONOUSLY inside the gesture — mobile blocks a
+    // deferred .click(); interrupt + unlock audio AFTER (Herm TASK_041 #3).
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
     try {
       sessionRef.current?.interrupt?.();
     } catch {
       // non-fatal
     }
-    await unlockAudio();
-    if (fileInputRef.current) {
-      fileInputRef.current.setAttribute("accept", "image/*,video/*");
-      // No `capture` → opens the phone's photo picker (Gallery), not the camera.
-      fileInputRef.current.removeAttribute("capture");
-      fileInputRef.current.click();
-    }
+    void unlockAudio();
   }, [unlockAudio, sessionRef]);
+
+  // Restore 6 + the mic after a native capture. Used for BOTH the cancelled path
+  // (visibilitychange below) and the confirmed path (handleFileChange, AFTER
+  // analysis). Clears videoBusy LAST so the hard speak-gate keeps 6 quiet right up
+  // until we're ready for his reply (Herm 2026-06-29).
+  const restoreSixAfterNativeCapture = useCallback(() => {
+    nativeCaptureHandlingFileRef.current = false;
+    nativeCaptureBusyRef.current = false;
+    if (nativeCaptureRestoreTimerRef.current) {
+      clearTimeout(nativeCaptureRestoreTimerRef.current);
+      nativeCaptureRestoreTimerRef.current = null;
+    }
+    try {
+      startListening();
+    } catch {
+      /* non-fatal */
+    }
+    if (isActive && !nativeCaptureWasMutedRef.current) {
+      try {
+        unmute();
+      } catch {
+        /* non-fatal */
+      }
+    }
+    setVideoBusy(false);
+    // Re-arm audio output AFTER the camera closes (a native camera can suspend the
+    // page's audio context) so 6's reply is audible — never DURING capture (Herm).
+    void unlockAudio();
+  }, [startListening, unmute, isActive, unlockAudio]);
+
+  // Schedule a restore for a CANCELLED/dumped native capture. Conservative 1500ms
+  // delay so a real (possibly large) confirmed-file `change` event has time to claim
+  // ownership (handlingFileRef) before we treat it as a cancel. Guarded by busyRef so
+  // it only acts during a capture. Listens on visibilitychange + focus + pageshow —
+  // not every browser/picker emits a clean hide/visible pair (Herm 2026-06-29).
+  const scheduleNativeCancelRestore = useCallback(() => {
+    if (!nativeCaptureBusyRef.current) return;
+    if (nativeCaptureRestoreTimerRef.current) {
+      clearTimeout(nativeCaptureRestoreTimerRef.current);
+    }
+    nativeCaptureRestoreTimerRef.current = setTimeout(() => {
+      nativeCaptureRestoreTimerRef.current = null;
+      if (nativeCaptureHandlingFileRef.current) return;
+      restoreSixAfterNativeCapture();
+    }, 1500);
+  }, [restoreSixAfterNativeCapture]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") scheduleNativeCancelRestore();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", scheduleNativeCancelRestore);
+    window.addEventListener("pageshow", scheduleNativeCancelRestore);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", scheduleNativeCancelRestore);
+      window.removeEventListener("pageshow", scheduleNativeCancelRestore);
+    };
+  }, [scheduleNativeCancelRestore]);
 
   // Record video from the live camera preview (snapshot mode only)
   const handleStartRecording = useCallback(() => {
@@ -2985,6 +3443,16 @@ const LiveAvatarSessionComponent: React.FC<{
     const stream = cameraStream;
 
     recordedChunksRef.current = [];
+    // New recording run — supersede any prior in-flight analysis so its delayed
+    // buy-time / vision injection is ignored (Herm 2026-06-29).
+    const runId = ++videoAnalysisRunIdRef.current;
+    videoAnalysisCancelledRef.current = false;
+    // Fresh recording: clear any leftover speak allowance from a prior run.
+    videoSpeakAllowanceRef.current = 0;
+    // Snapshot the problem so a late diagnosis can be dropped if the user moved on.
+    videoProblemAtRecordRef.current = currentProblemRef.current.trim();
+    videoPostRecordUtteranceRef.current = "";
+    videoPostRecordSwitchRef.current = "";
 
     let mimeType = "video/webm;codecs=vp9,opus";
     if (!MediaRecorder.isTypeSupported(mimeType)) {
@@ -3024,67 +3492,155 @@ const LiveAvatarSessionComponent: React.FC<{
       setFallbackImage(null);
       setFallbackImagePreview(null);
 
+      // Recording is OVER. 6 was silent WHILE filming. Restore the mic + un-gate
+      // him. He should BUY TIME during upload/analysis — but ONLY if analysis is
+      // still running after a beat, so a FAST clip doesn't make him talk over his
+      // own diagnosis (Herm 2026-06-29).
+      setVideoBusy(false);
       setIsAnalyzingVideo(true);
+      // Set the ref synchronously too — the sync effect only fires next render,
+      // and the analysis gate must be live the instant recording stops.
+      isAnalyzingVideoRef.current = true;
+      let buyTimeSent = false;
+      let buyTimeSentAt = 0;
+      let buyTimeTimer: ReturnType<typeof setTimeout> | null = null;
+      const isStale = () =>
+        videoAnalysisCancelledRef.current ||
+        runId !== videoAnalysisRunIdRef.current;
+      if (mode === "FULL") {
+        try {
+          startListening();
+        } catch {
+          /* non-fatal */
+        }
+        if (isActive && !wasMutedBeforeRecordingRef.current) {
+          try {
+            unmute();
+          } catch {
+            /* non-fatal */
+          }
+        }
+        buyTimeTimer = setTimeout(() => {
+          if (isStale()) return;
+          buyTimeSent = true;
+          buyTimeSentAt = Date.now();
+          // Allow exactly this queued buy-time line through the analysis gate.
+          videoSpeakAllowanceRef.current += 1;
+          try {
+            sessionRef.current?.message(
+              "[VIDEO UPLOADING — not spoken by user] The user just recorded a video to show you; it's uploading and analyzing now, which takes a few seconds. Do NOT go quiet. Warmly let them know you're getting it, and ask what they're showing you and what problem they're seeing, so you're ready the moment you can see it. Keep it to 1-2 short, natural sentences.",
+            );
+          } catch {
+            /* non-fatal */
+          }
+        }, 800);
+      }
+
       // Hoisted so catch can still store the file for failure audit.
       let recordedVideoFile: File | null = null;
       try {
         recordedVideoFile = new File([blob], "recorded-video.webm", {
           type: "video/webm",
         });
-        // 10 frames over a 15s video = 1.5s granularity, enough to catch quick
-        // actions like a finial coming off. Was 5 frames which missed fast moments.
-        const frames = await extractVideoFrames(recordedVideoFile, 10);
-
-        // Retry once on 5xx — Vercel cold starts and Gemini transient errors.
-        let response = await fetch("/api/analyze-video", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ frames }),
-        });
-        if (!response.ok && response.status >= 500) {
-          console.warn(
-            `analyze-video first attempt failed (${response.status}), retrying once...`,
-          );
-          await new Promise((r) => setTimeout(r, 800));
-          response = await fetch("/api/analyze-video", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ frames }),
-          });
-        }
-
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || "Failed to analyze video");
-        }
-
-        const data = await response.json();
+        const { analysis, frameCount } =
+          await runVideoAnalysis(recordedVideoFile);
         console.log("Video analyzed successfully");
+        if (buyTimeTimer) clearTimeout(buyTimeTimer);
 
-        setVideoAnalysis(data.analysis);
-
-        // Audit capture: recorded video + Gemini analysis.
+        // Always keep the audit row — but if the user bailed mid-analysis, do NOT
+        // push any line into the conversation (Herm 2026-06-29).
         void captureMedia({
           file: recordedVideoFile,
           source: "video_recording",
           sessionId: sessionRef.current?.sessionId ?? null,
-          geminiAnalysis: data.analysis,
-          problem: currentProblemRef.current || null,
+          geminiAnalysis: analysis,
+          // Keep the row tied to the problem the clip was recorded for.
+          problem:
+            videoProblemAtRecordRef.current ||
+            currentProblemRef.current ||
+            null,
         });
 
-        if (mode === "FULL" && sessionRef.current) {
-          // Inject the video analysis as context so the TALK brain can respond
-          // in the flow of the conversation (tying the video back to the problem
-          // the user was trying to solve). Previously used repeat() which made
-          // the avatar read Gemini's flowery description aloud without tying
-          // it to what the user had been asking about. (Fixed 2026-04-24.)
-          const contextMessage = `[VIDEO CONTEXT — not spoken by user] Vision just processed a video the user recorded. You are viewing it directly. Here is what happens in it: ${data.analysis}. Respond naturally in first person as 6, tie what you saw to the ongoing conversation (especially any problem the user was trying to solve), and ask intelligent follow-up questions about the object or problem. Respond briefly (1-2 sentences). Never say you can't see it or that you're relying on someone else's analysis — you can see it directly.`;
-          sessionRef.current.message(contextMessage);
+        if (isStale()) {
+          isAnalyzingVideoRef.current = false;
+          setIsAnalyzingVideo(false);
+          return;
         }
 
-        setIsAnalyzingVideo(false);
-        setVideoBusy(false);
+        setVideoAnalysis(analysis);
+
+        if (mode === "FULL" && sessionRef.current) {
+          // Now he can SEE it. If buy-time was sent, give it a guaranteed runway
+          // FIRST so the diagnosis can't talk over it (queued != speaking;
+          // isAvatarTalkingRef can lag) (Herm 2026-06-29). Keep isAnalyzingVideo
+          // TRUE until the (possibly delayed) inject actually runs, so a cancel/
+          // reset DURING that runway still hits the cancel branch (Herm TASK_048).
+          // Clear the gate ref synchronously too, so the one-render sync-effect
+          // lag can't cut 6's first reply to a new problem after a stale-drop
+          // (Herm TASK_051).
+          const finishRun = () => {
+            isAnalyzingVideoRef.current = false;
+            setIsAnalyzingVideo(false);
+          };
+          const problemAtRecord = videoProblemAtRecordRef.current;
+          const problemChangedSinceRecord = () => {
+            const now = currentProblemRef.current;
+            // Go Live path: currentProblemRef may have changed outright.
+            if (
+              problemAtRecord &&
+              now &&
+              normalizeProblem(now) !== normalizeProblem(problemAtRecord)
+            ) {
+              return true;
+            }
+            // Pure video-record path doesn't update currentProblemRef, so compare
+            // the user's POST-record words against the recorded problem (or the
+            // video analysis itself as a fallback baseline) (Herm TASK_050).
+            const baseline = problemAtRecord || analysis;
+            return (
+              !!videoPostRecordSwitchRef.current ||
+              looksLikeDifferentProblem(
+                baseline,
+                videoPostRecordUtteranceRef.current,
+              )
+            );
+          };
+          const injectVision = () => {
+            if (isStale() || problemChangedSinceRecord()) {
+              finishRun();
+              videoSpeakAllowanceRef.current = 0;
+              return;
+            }
+            // Allow exactly this queued vision line through the analysis gate.
+            videoSpeakAllowanceRef.current += 1;
+            try {
+              sessionRef.current?.message(
+                buildVisionContextMessage(
+                  "video",
+                  analysis,
+                  frameCount,
+                  problemAtRecord,
+                ),
+              );
+            } catch {
+              /* non-fatal */
+            } finally {
+              finishRun();
+            }
+          };
+          if (buyTimeSent) {
+            const minRunwayMs = 1800;
+            const elapsed = Date.now() - buyTimeSentAt;
+            setTimeout(injectVision, Math.max(0, minRunwayMs - elapsed));
+          } else {
+            injectVision();
+          }
+        } else {
+          isAnalyzingVideoRef.current = false;
+          setIsAnalyzingVideo(false);
+        }
       } catch (error) {
+        if (buyTimeTimer) clearTimeout(buyTimeTimer);
         console.error("Error analyzing video:", error);
         // Audit capture for failure — keep the file for debugging.
         if (recordedVideoFile) {
@@ -3092,44 +3648,77 @@ const LiveAvatarSessionComponent: React.FC<{
             file: recordedVideoFile,
             source: "video_recording",
             sessionId: sessionRef.current?.sessionId ?? null,
-            problem: currentProblemRef.current || null,
+            problem:
+              videoProblemAtRecordRef.current ||
+              currentProblemRef.current ||
+              null,
             error: error instanceof Error ? error.message : String(error),
           });
         }
-        alert("Failed to analyze video. Please try again.");
+        // Don't show a stale failure alert if the user already bailed (Herm TASK_048).
+        if (!isStale()) {
+          alert("Failed to analyze video. Please try again.");
+        }
+        isAnalyzingVideoRef.current = false;
         setIsAnalyzingVideo(false);
-        setVideoBusy(false);
       }
     };
 
+    // Own cleanup if the recorder errors mid-flight so 6 can't get left
+    // muted/gated (Herm 2026-06-29).
+    const restoreAfterRecorderFailure = () => {
+      mediaRecorder.ondataavailable = null;
+      mediaRecorder.onstop = null;
+      mediaRecorder.onerror = null;
+      if (mediaRecorderRef.current === mediaRecorder) {
+        mediaRecorderRef.current = null;
+      }
+      recordedChunksRef.current = [];
+      setVideoBusy(false);
+      isAnalyzingVideoRef.current = false;
+      setIsAnalyzingVideo(false);
+      setIsRecording(false);
+      try {
+        startListening();
+      } catch {
+        /* non-fatal */
+      }
+      if (isActive && !wasMutedBeforeRecordingRef.current) {
+        try {
+          unmute();
+        } catch {
+          /* non-fatal */
+        }
+      }
+    };
+    mediaRecorder.onerror = () => restoreAfterRecorderFailure();
     mediaRecorderRef.current = mediaRecorder;
-    mediaRecorder.start();
+    try {
+      mediaRecorder.start();
+    } catch {
+      // Recorder refused to start (browser/codec quirk) — bail cleanly.
+      restoreAfterRecorderFailure();
+      alert("Couldn't start video recording. Please try again.");
+      return;
+    }
     setIsRecording(true);
-    // Block silence re-engage signals + any avatar speech while recording.
-    // Flag stays on through analysis and is cleared in the onstop handler below.
+    // Block silence re-engage signals + avatar speech while recording (the hard
+    // gate cuts any line 6 starts). Cleared on stop.
     setVideoBusy(true);
 
-    // Auto-stop recording at 15 seconds so users don't have to remember to hit Stop
-    // and so analyze-video has a bounded input (Gemini timeout risk on very long clips).
+    // Auto-stop at 20 seconds (G 2026-06-29): long enough to show the problem,
+    // short enough for a reasonable upload + analysis turnaround. onstop owns the
+    // mic restore + 6's "buy time" line — don't restore here.
     setTimeout(() => {
       if (
         mediaRecorderRef.current &&
         mediaRecorderRef.current.state === "recording"
       ) {
-        console.log("Video: auto-stopping at 15s cap.");
+        console.log("Video: auto-stopping at 20s cap.");
         mediaRecorderRef.current.stop();
         setIsRecording(false);
-        // handleStopRecording handles mic restart — mirror the relevant cleanup here.
-        if (mode === "FULL") {
-          setTimeout(() => {
-            startListening();
-            if (isActive && isMuted && !wasMutedBeforeRecordingRef.current) {
-              unmute();
-            }
-          }, 500);
-        }
       }
-    }, 15000);
+    }, 20000);
 
     if (mode === "FULL") {
       stopListening();
@@ -3144,9 +3733,11 @@ const LiveAvatarSessionComponent: React.FC<{
     mode,
     sessionRef,
     stopListening,
+    startListening,
     isActive,
     isMuted,
     mute,
+    unmute,
     fallbackImagePreview,
     fallbackImage,
   ]);
@@ -3156,36 +3747,54 @@ const LiveAvatarSessionComponent: React.FC<{
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      // onstop owns the mic restore + 6's "buy time" line, after analysis kicks
+      // off — don't restore here (Herm 2026-06-29).
+    }
+  }, [isRecording]);
 
-      // Restart listening and restore microphone state after recording stops
-      // The video will be analyzed after recording completes (in mediaRecorder.onstop)
-      if (mode === "FULL") {
-        // Small delay to ensure recording has fully stopped
-        setTimeout(() => {
-          startListening();
-          // Restore microphone state: unmute only if it wasn't muted before recording
-          if (isActive && isMuted && !wasMutedBeforeRecordingRef.current) {
-            unmute();
-          }
-        }, 500);
+  // Cancel an in-app recording cleanly (X / exit while recording) — stop the
+  // recorder WITHOUT firing onstop (no buy-time/analysis after the user bailed),
+  // clear state, and restore the mic so 6 can't get left muted (Herm 2026-06-29).
+  const cancelInAppRecording = useCallback(() => {
+    // Supersede any in-flight analysis so its delayed buy-time/vision injection is
+    // ignored (covers BOTH "recording" and the after-stop "analyzing" phase) (Herm).
+    videoAnalysisCancelledRef.current = true;
+    videoAnalysisRunIdRef.current += 1;
+    const recorder = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+    if (recorder) {
+      try {
+        recorder.ondataavailable = null;
+        recorder.onstop = null;
+        recorder.onerror = null;
+        if (recorder.state === "recording") recorder.stop();
+      } catch {
+        /* non-fatal */
       }
     }
-  }, [isRecording, mode, startListening, isActive, isMuted, unmute]);
-
-  const handleCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      // Handle camera image
-      console.log("Camera image selected:", file);
-      // Add your camera image handling logic here
+    recordedChunksRef.current = [];
+    setIsRecording(false);
+    isAnalyzingVideoRef.current = false;
+    setIsAnalyzingVideo(false);
+    setVideoBusy(false);
+    try {
+      startListening();
+    } catch {
+      /* non-fatal */
     }
-    // Reset input
-    if (cameraInputRef.current) {
-      cameraInputRef.current.value = "";
+    if (isActive && !wasMutedBeforeRecordingRef.current) {
+      try {
+        unmute();
+      } catch {
+        /* non-fatal */
+      }
     }
-  };
+  }, [startListening, unmute, isActive]);
 
   const closeCameraPreview = useCallback(() => {
+    // If an in-app video recording is in flight, cancel it cleanly FIRST — else the
+    // X leaves 6 muted/gated and fires a bogus upload line (Herm 2026-06-29).
+    if (isRecording || isAnalyzingVideo) cancelInAppRecording();
     // Inject a state signal so the TALK brain knows Go Live is no longer on.
     // Without this, 6 keeps acting as if he can see.
     try {
@@ -3221,7 +3830,16 @@ const LiveAvatarSessionComponent: React.FC<{
       clearTimeout(processingTimeoutRef.current);
       processingTimeoutRef.current = null;
     }
-  }, [cameraStream, fallbackImagePreview, fallbackImage, mode, sessionRef]);
+  }, [
+    cameraStream,
+    fallbackImagePreview,
+    fallbackImage,
+    mode,
+    sessionRef,
+    isRecording,
+    isAnalyzingVideo,
+    cancelInAppRecording,
+  ]);
 
   // Continuous vision polling during Go Live.
   // Fires every 1.5s; Grok's [SILENT] token keeps the avatar quiet when nothing meaningful has changed.
@@ -3278,61 +3896,186 @@ const LiveAvatarSessionComponent: React.FC<{
   }, [fallbackImagePreview]);
 
   // Helper function to extract frames from video
+  // numFrames omitted → 6 picks the count from the clip length (~3 frames/sec,
+  // floor 8, cap MAX_CLIENT_FRAMES) so a 3-second clip never gets sampled down to
+  // 2 frames (G 2026-06-28). Pass an explicit count to force a denser re-sample
+  // when the first read came back INSUFFICIENT_FRAMES.
   const extractVideoFrames = async (
     videoFile: File,
-    numFrames: number = 5,
+    numFrames?: number,
   ): Promise<string[]> => {
     return new Promise((resolve, reject) => {
       const video = document.createElement("video");
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
+      const objectUrl = URL.createObjectURL(videoFile);
 
       if (!ctx) {
+        URL.revokeObjectURL(objectUrl);
         reject(new Error("Failed to get canvas context"));
         return;
       }
 
-      video.preload = "metadata";
-      video.onloadedmetadata = () => {
-        video.currentTime = 0;
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-      };
-
       const frames: string[] = [];
-      let frameCount = 0;
+      let settled = false;
 
-      video.onseeked = () => {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const frameData = canvas.toDataURL("image/jpeg", 0.8);
-        // Extract base64 data (remove data:image/jpeg;base64, prefix)
-        const base64Data = frameData.split(",")[1];
-        frames.push(base64Data);
-        frameCount++;
-
-        if (frameCount < numFrames) {
-          // Seek to next frame position
-          const nextTime =
-            (video.duration / (numFrames + 1)) * (frameCount + 1);
-          video.currentTime = nextTime;
-        } else {
-          resolve(frames);
+      const cleanup = () => {
+        try {
+          URL.revokeObjectURL(objectUrl);
+          video.onloadedmetadata = null;
+          video.onseeked = null;
+          video.onerror = null;
+          video.removeAttribute("src");
+          video.load();
+        } catch {
+          /* best-effort teardown */
         }
       };
 
-      video.onerror = () => {
-        reject(new Error("Error loading video"));
+      const finish = (err?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(safetyTimer);
+        cleanup();
+        // If we timed out but already grabbed at least one frame, use what we
+        // have rather than failing the whole capture.
+        if (err && frames.length === 0) reject(err);
+        else resolve(frames);
       };
 
-      video.src = URL.createObjectURL(videoFile);
+      // Never let a stuck <video> hang the talk flow.
+      const safetyTimer = setTimeout(
+        () => finish(new Error("Video frame extraction timed out")),
+        12000,
+      );
+
+      const startSampling = (duration: number) => {
+        // Cap frame resolution for a reasonable upload/analysis turnaround
+        // (G 2026-06-29): downscale so the longer side is <= 1280px. Plenty for
+        // Gemini to read the problem; far less data than a full 1080p+ frame.
+        const srcW = video.videoWidth || 640;
+        const srcH = video.videoHeight || 480;
+        const fScale = Math.min(1, 1280 / Math.max(srcW, srcH));
+        canvas.width = Math.max(1, Math.round(srcW * fScale));
+        canvas.height = Math.max(1, Math.round(srcH * fScale));
+        const safeDur =
+          Number.isFinite(duration) && duration > 0 ? duration : 3;
+        const target =
+          numFrames && numFrames > 0
+            ? numFrames
+            : Math.max(8, Math.min(MAX_CLIENT_FRAMES, Math.round(safeDur * 3)));
+        // Evenly-spaced INTERIOR timestamps. Never seek to 0: a seek to the
+        // current time may not fire `onseeked` (extraction would hang), and the
+        // first frame of a recording is often a black warm-up frame.
+        const times = Array.from(
+          { length: target },
+          (_, i) => (safeDur / (target + 1)) * (i + 1),
+        );
+        let idx = 0;
+
+        video.onseeked = () => {
+          if (settled) return;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const base64Data = canvas
+            .toDataURL("image/jpeg", 0.8)
+            .split(",")[1];
+          if (base64Data) frames.push(base64Data);
+          idx++;
+          if (idx < times.length) {
+            video.currentTime = times[idx];
+          } else {
+            finish();
+          }
+        };
+
+        video.currentTime = times[0];
+      };
+
+      // MediaRecorder WebM frequently reports duration=Infinity until you seek
+      // past the end — force the browser to resolve the real duration first, or
+      // we'd sample garbage/duplicate frames and starve 6's read.
+      const resolveDurationThenSample = () => {
+        if (Number.isFinite(video.duration) && video.duration > 0) {
+          startSampling(video.duration);
+          return;
+        }
+        const onDurationChange = () => {
+          if (Number.isFinite(video.duration) && video.duration > 0) {
+            video.removeEventListener("durationchange", onDurationChange);
+            startSampling(video.duration);
+          }
+        };
+        video.addEventListener("durationchange", onDurationChange);
+        // A huge seek target forces Chrome to compute the real duration.
+        video.currentTime = 1e7;
+      };
+
+      video.preload = "metadata";
+      video.muted = true;
+      video.onloadedmetadata = () => resolveDurationThenSample();
+      video.onerror = () => finish(new Error("Error loading video"));
+      video.src = objectUrl;
     });
   };
 
+  // Run a video through 6's vision with a JUDGMENT retry: first pass uses a
+  // duration-aware frame count; if the model says it genuinely can't tell
+  // (INSUFFICIENT_FRAMES) and we weren't already at the cap, re-sample at MAX and
+  // try once more — 6 "taking more screenshots" automatically (G 2026-06-28).
+  const runVideoAnalysis = async (
+    file: File,
+  ): Promise<{ analysis: string; frameCount: number }> => {
+    const callAnalyze = async (frames: string[]): Promise<string> => {
+      // Retry once on 5xx — Vercel cold starts / Gemini transient errors.
+      let res = await fetch("/api/analyze-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ frames }),
+      });
+      if (!res.ok && res.status >= 500) {
+        await new Promise((r) => setTimeout(r, 800));
+        res = await fetch("/api/analyze-video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ frames }),
+        });
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to analyze video");
+      }
+      const data = await res.json();
+      return typeof data.analysis === "string" ? data.analysis : "";
+    };
+    let frames = await extractVideoFrames(file);
+    let analysis = await callAnalyze(frames);
+    if (
+      /^\s*INSUFFICIENT_FRAMES/i.test(analysis) &&
+      frames.length < MAX_CLIENT_FRAMES
+    ) {
+      console.log("Vision: sparse coverage — re-sampling denser and retrying");
+      frames = await extractVideoFrames(file, MAX_CLIENT_FRAMES);
+      analysis = await callAnalyze(frames);
+    }
+    return { analysis, frameCount: frames.length };
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Camera (cameraInputRef) and Gallery (fileInputRef) both route here now.
+    // Capture the firing input SYNCHRONOUSLY — e.currentTarget is nulled after the
+    // first await — and reset THIS input's value so re-selecting the same file
+    // re-fires onChange.
+    const inputEl = e.currentTarget;
+    // Which picker fired — so the audit row says camera vs gallery truthfully
+    // (Herm review 2026-06-28: camera captures were mislabeled gallery_*).
+    const fromCamera =
+      inputEl === cameraInputRef.current || inputEl === videoInputRef.current;
     const file = e.target.files?.[0];
     if (!file) {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+      // Cancelled native capture that fired onChange with no file — restore 6.
+      if (fromCamera) restoreSixAfterNativeCapture();
+      if (inputEl) {
+        inputEl.value = "";
       }
       return;
     }
@@ -3342,22 +4085,66 @@ const LiveAvatarSessionComponent: React.FC<{
 
     if (!isImage && !isVideo) {
       alert("Please upload an image or video file");
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+      if (fromCamera) restoreSixAfterNativeCapture();
+      if (inputEl) {
+        inputEl.value = "";
       }
       return;
     }
 
+    if (fromCamera) {
+      // A CONFIRMED native capture is now being analyzed. Take ownership of the
+      // restore from the visibilitychange handler and keep 6 cut/muted THROUGH
+      // analysis — restored only once his vision reply is queued (Herm 2026-06-29).
+      nativeCaptureHandlingFileRef.current = true;
+      if (nativeCaptureRestoreTimerRef.current) {
+        clearTimeout(nativeCaptureRestoreTimerRef.current);
+        nativeCaptureRestoreTimerRef.current = null;
+      }
+      setVideoBusy(true);
+    }
+
     if (isImage) {
       setIsAnalyzingImage(true);
+      // Diagnostics survive even when the media_events row can't (e.g. Vercel
+      // rejects an oversized body before the route runs). breadcrumb() → server
+      // logs, non-secret only. uploadImage/didConvert are read in catch too, so
+      // declare them out here (Herm camera-observability ask, 2026-06-29).
+      const auditSource = fromCamera ? "camera_snapshot" : "gallery_image";
+      let uploadImage: File = file;
+      let didConvertJpeg = false;
+      let analyzeStatus: number | null = null;
       try {
-        const formData = new FormData();
-        formData.append("image", file, file.name || "image.jpg");
+        // iPad/iOS shoots HEIC + very high-res photos; Gemini and our route want
+        // JPEG. Convert in-browser first so analyze doesn't fail on format/size
+        // (G 2026-06-29). Falls back to the original file if conversion fails.
+        uploadImage = await fileToJpegForUpload(file);
+        didConvertJpeg =
+          uploadImage !== file && uploadImage.type === "image/jpeg";
+        // Fresh FormData per attempt (the body stream is consumed on send).
+        const buildForm = () => {
+          const fd = new FormData();
+          fd.append("image", uploadImage, uploadImage.name || "image.jpg");
+          return fd;
+        };
 
-        const response = await fetch("/api/analyze-image", {
+        // One retry on transient 5xx (Vercel cold start) — mirrors the in-app
+        // camera path, which the file-picker path was missing (2026-06-29).
+        let response = await fetch("/api/analyze-image", {
           method: "POST",
-          body: formData,
+          body: buildForm(),
         });
+        if (!response.ok && response.status >= 500) {
+          console.warn(
+            `analyze-image first attempt failed (${response.status}), retrying once...`,
+          );
+          await new Promise((r) => setTimeout(r, 800));
+          response = await fetch("/api/analyze-image", {
+            method: "POST",
+            body: buildForm(),
+          });
+        }
+        analyzeStatus = response.status;
 
         if (!response.ok) {
           let errorMessage = "Failed to analyze image";
@@ -3374,11 +4161,20 @@ const LiveAvatarSessionComponent: React.FC<{
         const data = await response.json();
         setImageAnalysis(data.analysis);
         console.log("Image analyzed successfully");
+        breadcrumb("analyze_image_ok", {
+          source: auditSource,
+          status: analyzeStatus,
+          uploadMime: uploadImage.type,
+          uploadBytes: uploadImage.size,
+          origMime: file.type,
+          origBytes: file.size,
+          didConvertJpeg,
+        });
 
         // Audit capture: gallery image + Gemini's analysis.
         void captureMedia({
           file,
-          source: "gallery_image",
+          source: fromCamera ? "camera_snapshot" : "gallery_image",
           sessionId: sessionRef.current?.sessionId ?? null,
           geminiAnalysis: data.analysis,
           problem: currentProblemRef.current || null,
@@ -3389,90 +4185,133 @@ const LiveAvatarSessionComponent: React.FC<{
         // a snapshot of a lampshade back to the user's "how do I get this off"
         // question). REVERTED from plain repeat() on 2026-04-24 — repeat() made
         // the avatar just read Gemini's description without conversational context.
+        // Camera capture: clear busy + restore the mic BEFORE injecting the vision
+        // context, or the hard speak-gate cuts 6's legit reply (Herm 2026-06-29).
+        if (fromCamera) restoreSixAfterNativeCapture();
         if (mode === "FULL" && sessionRef.current) {
-          const contextMessage = `[IMAGE CONTEXT — not spoken by user] Vision just processed an image the user captured. You are viewing it directly. Here is what's in it: ${data.analysis}. Respond naturally in first person as 6, tie what you see to the ongoing conversation (especially any problem the user was trying to solve), and ask intelligent follow-up questions about the object or problem. Respond briefly (1-2 sentences). Never say you can't see it or that you're relying on someone else's analysis — you can see it directly.`;
-          sessionRef.current.message(contextMessage);
+          sessionRef.current.message(
+            buildVisionContextMessage("photo", data.analysis, 1),
+          );
         }
       } catch (error) {
         console.error("Error analyzing image:", error);
+        breadcrumb("analyze_image_fail", {
+          source: auditSource,
+          status: analyzeStatus,
+          uploadMime: uploadImage.type,
+          uploadBytes: uploadImage.size,
+          origMime: file.type,
+          origBytes: file.size,
+          didConvertJpeg,
+          msg: (error instanceof Error ? error.message : String(error)).slice(
+            0,
+            200,
+          ),
+        });
         // Audit capture for failures — file still worth saving.
         void captureMedia({
           file,
-          source: "gallery_image",
+          source: fromCamera ? "camera_snapshot" : "gallery_image",
           sessionId: sessionRef.current?.sessionId ?? null,
           problem: currentProblemRef.current || null,
           error: error instanceof Error ? error.message : String(error),
         });
         alert("Failed to analyze image. Please try again.");
+        if (fromCamera) restoreSixAfterNativeCapture();
       } finally {
         setIsAnalyzingImage(false);
         setIsProcessingCameraQuestion(false);
       }
     } else if (isVideo) {
       setIsAnalyzingVideo(true);
+      isAnalyzingVideoRef.current = true;
+      // Gallery/native-video analysis also owns the turn via the speak gate —
+      // clear stale allowance; we bump it just before this path's vision inject.
+      videoSpeakAllowanceRef.current = 0;
+      videoProblemAtRecordRef.current = currentProblemRef.current.trim();
+      videoPostRecordUtteranceRef.current = "";
+      videoPostRecordSwitchRef.current = "";
       try {
-        // Extract frames from video
-        const frames = await extractVideoFrames(file, 5);
-
-        const response = await fetch("/api/analyze-video", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ frames }),
-        });
-
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || "Failed to analyze video");
-        }
-
-        const data = await response.json();
+        // Duration-aware frames + judgment retry (re-samples denser if 6 can't
+        // tell) — G 2026-06-28.
+        const { analysis, frameCount } = await runVideoAnalysis(file);
         console.log("Video analyzed successfully");
 
         // Store video analysis in state so it persists even after closing video button
-        setVideoAnalysis(data.analysis);
+        setVideoAnalysis(analysis);
 
-        // Audit capture: gallery video + analysis.
+        // Audit capture: gallery (or camera) video + analysis.
         void captureMedia({
           file,
-          source: "gallery_video",
+          source: fromCamera ? "video_recording" : "gallery_video",
           sessionId: sessionRef.current?.sessionId ?? null,
-          geminiAnalysis: data.analysis,
-          problem: currentProblemRef.current || null,
+          geminiAnalysis: analysis,
+          problem:
+            videoProblemAtRecordRef.current ||
+            currentProblemRef.current ||
+            null,
         });
 
-        // For FULL mode, send the analysis as context to the AI (no scripted repeat prompt)
-        if (mode === "FULL") {
-          // Speak the analysis directly via repeat() so the avatar says what it saw.
-          // Using repeat() keeps this as avatar speech (role=assistant); earlier this
-          // used sessionRef.current.message() which logged it as USER input and
-          // confused the TALK brain.
-          try {
-            await repeat(data.analysis);
-          } catch (speakError) {
-            console.error("Error speaking video analysis:", speakError);
+        // Inject as CONTEXT (not repeat()) so 6 diagnoses + works the problem
+        // instead of reading the raw analysis aloud — unified with the recorded
+        // path (G 2026-06-28).
+        // Camera capture: clear busy + restore the mic BEFORE injecting the vision
+        // context, or the hard speak-gate cuts 6's legit reply (Herm 2026-06-29).
+        if (fromCamera) restoreSixAfterNativeCapture();
+        // Same stale-switch drop guard as the in-app recorder path: if the user
+        // moved to a different problem while this clip analyzed, don't inject the
+        // old diagnosis (Herm TASK_051).
+        const problemAtRecord = videoProblemAtRecordRef.current;
+        const galleryProblemChanged = (() => {
+          const now = currentProblemRef.current;
+          if (
+            problemAtRecord &&
+            now &&
+            normalizeProblem(now) !== normalizeProblem(problemAtRecord)
+          ) {
+            return true;
           }
+          return (
+            !!videoPostRecordSwitchRef.current ||
+            looksLikeDifferentProblem(
+              problemAtRecord || analysis,
+              videoPostRecordUtteranceRef.current,
+            )
+          );
+        })();
+        if (mode === "FULL" && sessionRef.current && !galleryProblemChanged) {
+          // Allow exactly this queued vision line through the analysis gate.
+          videoSpeakAllowanceRef.current += 1;
+          sessionRef.current.message(
+            buildVisionContextMessage("video", analysis, frameCount, problemAtRecord),
+          );
+        } else if (galleryProblemChanged) {
+          videoSpeakAllowanceRef.current = 0;
         }
       } catch (error) {
         console.error("Error analyzing video:", error);
         // Audit capture for failures.
         void captureMedia({
           file,
-          source: "gallery_video",
+          source: fromCamera ? "video_recording" : "gallery_video",
           sessionId: sessionRef.current?.sessionId ?? null,
-          problem: currentProblemRef.current || null,
+          problem:
+            videoProblemAtRecordRef.current ||
+            currentProblemRef.current ||
+            null,
           error: error instanceof Error ? error.message : String(error),
         });
         alert("Failed to analyze video. Please try again.");
+        if (fromCamera) restoreSixAfterNativeCapture();
       } finally {
+        isAnalyzingVideoRef.current = false;
         setIsAnalyzingVideo(false);
       }
     }
 
     // Reset input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
+    if (inputEl) {
+      inputEl.value = "";
     }
   };
 
@@ -3543,8 +4382,8 @@ const LiveAvatarSessionComponent: React.FC<{
       {/* Pill group while talking — aiASAP-EXACT dims (w-full, px-4, h=font*1.5).
           When the email is being captured it shows as the TOP pill, REPLACING the
           top prompt (G 2026-06-27: "drop the top pillbox, put the email bar in"). */}
-      {isActive && (
-        <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.12)] md:bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.22)] -translate-x-1/2 z-40 flex w-[94%] max-w-[min(42rem,calc(var(--stage-width)*1.0))] flex-col items-center gap-[calc(var(--stage-height)*0.010)] px-2">
+      {isActive && !isCameraActive && (
+        <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.05)] md:bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.07)] -translate-x-1/2 z-40 flex w-[94%] max-w-[min(42rem,calc(var(--stage-width)*1.0))] flex-col items-center gap-[calc(var(--stage-height)*0.007)] px-2">
           {_emailBoxActive && (
             // ONE bigger, clearly-labeled email box (G 2026-06-28): "drop all
             // pill boxes, put only one up for the email, a bigger box that says
@@ -3555,13 +4394,23 @@ const LiveAvatarSessionComponent: React.FC<{
               style={{ maxWidth: "min(calc(var(--stage-width) * 0.66), 90vw)" }}
             >
               {chestEmailStatus ? (
-                <span
-                  className="flex items-center justify-center gap-2 font-black tracking-wide bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 bg-clip-text text-transparent"
-                  style={{ fontSize: `calc(${_pillFont} * 1.0)` }}
-                >
-                  {chestEmailStatus}
-                  {/\bsent\b/i.test(chestEmailStatus) ? " ✓" : ""}
-                </span>
+                <>
+                  <span
+                    className="flex items-center justify-center gap-2 font-black tracking-wide bg-gradient-to-b from-[#ffe9c2] via-[#d7a05a] to-[#9e6a35] bg-clip-text text-transparent drop-shadow-[0_2px_10px_rgba(0,0,0,0.6)]"
+                    style={{ fontSize: `calc(${_pillFont} * 1.0)` }}
+                  >
+                    {chestEmailStatus}
+                    {/\bsent\b/i.test(chestEmailStatus) ? " ✓" : ""}
+                  </span>
+                  {/\bsent\b/i.test(chestEmailStatus) ? (
+                    <span
+                      className="font-semibold text-[#f1c477]"
+                      style={{ fontSize: `calc(${_pillFont} * 0.55)` }}
+                    >
+                      Check your email and click the link
+                    </span>
+                  ) : null}
+                </>
               ) : (
                 <>
                   <span
@@ -3608,29 +4457,42 @@ const LiveAvatarSessionComponent: React.FC<{
               Hidden while collecting the email (G 2026-06-28: "drop all pill
               boxes, including camera and gallery, put only one up for the email"). */}
           {!_emailBoxActive && (
-          <div className="grid w-full grid-cols-2 gap-[calc(var(--stage-height)*0.010)] mt-[calc(var(--stage-height)*0.024)]" style={{ maxWidth: _pillMaxWidth }}>
+          <>
+          {/* Two NATIVE capture buttons side-by-side: Camera = photo, Video =
+              video. Split so Android behaves (G 2026-06-29). */}
+          <div className="grid w-full grid-cols-2 gap-[calc(var(--stage-height)*0.008)] mt-[calc(var(--stage-height)*0.012)]" style={{ maxWidth: "min(calc(var(--stage-width) * 0.60), 94vw)" }}>
             <button
               type="button"
-              onClick={async () => {
-                await unlockAudio();
-                void handleCameraClick();
-              }}
-              className="pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-3 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
-              style={{ fontSize: _pillFont, minHeight: _pillMinH }}
+              onClick={() => handleCameraClick()}
+              className="pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-4 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+              style={{ fontSize: `calc(${_pillFont} * 0.95)`, minHeight: `calc(${_pillFont} * 1.4)` }}
             >
-              <Camera className="shrink-0" style={{ width: _pillFont, height: _pillFont }} strokeWidth={2.5} aria-hidden />
+              <Camera className="shrink-0" style={{ width: `calc(${_pillFont} * 0.95)`, height: `calc(${_pillFont} * 0.95)` }} strokeWidth={2.5} aria-hidden />
               <span className="brand-grad-text">{t("camera")}</span>
             </button>
             <button
               type="button"
-              onClick={() => void handleGalleryClick()}
-              className="pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-3 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
-              style={{ fontSize: _pillFont, minHeight: _pillMinH }}
+              onClick={() => handleVideoClick()}
+              className="pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-4 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+              style={{ fontSize: `calc(${_pillFont} * 0.95)`, minHeight: `calc(${_pillFont} * 1.4)` }}
             >
-              <Images className="shrink-0" style={{ width: _pillFont, height: _pillFont }} strokeWidth={2.5} aria-hidden />
+              <Video className="shrink-0" style={{ width: `calc(${_pillFont} * 0.95)`, height: `calc(${_pillFont} * 0.95)` }} strokeWidth={2.5} aria-hidden />
+              <span className="brand-grad-text">Video</span>
+            </button>
+          </div>
+          {/* Gallery full-width below — pick an existing photo/video. */}
+          <div className="grid w-full grid-cols-1 mt-[calc(var(--stage-height)*0.012)]" style={{ maxWidth: "min(calc(var(--stage-width) * 0.60), 94vw)" }}>
+            <button
+              type="button"
+              onClick={() => void handleGalleryClick()}
+              className="pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-4 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95"
+              style={{ fontSize: `calc(${_pillFont} * 0.95)`, minHeight: `calc(${_pillFont} * 1.4)` }}
+            >
+              <Images className="shrink-0" style={{ width: `calc(${_pillFont} * 0.95)`, height: `calc(${_pillFont} * 0.95)` }} strokeWidth={2.5} aria-hidden />
               <span className="brand-grad-text">{t("gallery")}</span>
             </button>
           </div>
+          </>
           )}
         </div>
       )}
@@ -3641,15 +4503,15 @@ const LiveAvatarSessionComponent: React.FC<{
       {shouldShowBeginSurface && (
         <div className="pointer-events-none fixed left-1/2 bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.14)] md:bottom-[calc(var(--stage-bottom)+var(--stage-height)*0.22)] -translate-x-1/2 w-[94%] max-w-3xl z-40 px-3 flex flex-col items-center">
           <p className="px-1 w-full max-w-none text-balance text-center">
-            <span className="inline-flex flex-col items-center justify-center gap-1 drop-shadow-[0_10px_28px_rgba(0,0,0,0.6)]">
+            <span className="inline-flex min-h-[3.75rem] flex-col items-center justify-center gap-1 text-[#e0aa62] drop-shadow-[0_10px_28px_rgba(0,0,0,0.6)]">
               <span
-                className="flex items-center text-[calc(var(--stage-width)*0.05)] font-bold italic tracking-[0.14em] bg-gradient-to-b from-[#ffe9c2] via-[#d7a05a] to-[#9e6a35] bg-clip-text text-transparent drop-shadow-[0_2px_18px_rgba(0,0,0,0.85)]"
+                className="flex -translate-y-1.5 items-center text-[calc(var(--stage-width)*0.05)] font-bold italic tracking-[0.14em] bg-gradient-to-b from-[#ffe9c2] via-[#d7a05a] to-[#9e6a35] bg-clip-text text-transparent drop-shadow-[0_2px_18px_rgba(0,0,0,0.85)]"
                 style={{ fontFamily: '"Lora", Georgia, serif' }}
               >
                 Tap/Click ANYWHERE
               </span>
               <span
-                className="text-[calc(var(--stage-width)*0.10)] font-extrabold tracking-[-0.025em] leading-none bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 bg-clip-text text-transparent drop-shadow-[0_2px_18px_rgba(0,0,0,0.85)]"
+                className="-translate-y-1 text-[calc(var(--stage-width)*0.10)] font-extrabold tracking-[-0.025em] leading-none bg-gradient-to-b from-[#ffe9c2] via-[#d7a05a] to-[#3a2108] bg-clip-text text-transparent drop-shadow-[0_2px_18px_rgba(0,0,0,0.85)]"
                 style={{ fontFamily: '"Lora", Georgia, serif' }}
               >
                 To Talk To 6
@@ -3838,7 +4700,15 @@ const LiveAvatarSessionComponent: React.FC<{
               accept="image/*"
               capture="environment"
               className="hidden"
-              onChange={handleCameraChange}
+              onChange={handleFileChange}
+            />
+            <input
+              ref={videoInputRef}
+              type="file"
+              accept="video/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleFileChange}
             />
             <input
               ref={fileInputRef}
@@ -3905,15 +4775,48 @@ const LiveAvatarSessionComponent: React.FC<{
                 />
               </div>
             ) : (
-              // Camera video preview
+              // Camera video preview (mirror the FRONT camera the way phones do)
               <video
                 ref={cameraPreviewRef}
                 autoPlay
                 playsInline
                 className="max-h-[calc(100vh-6rem)] w-full object-contain"
+                style={{
+                  transform:
+                    cameraFacing === "user" ? "scaleX(-1)" : undefined,
+                }}
               />
             )}
           </div>
+        )}
+
+        {/* In-app camera corner controls — flip (top-left) + close (top-right),
+            standard phone-camera placement; the wordmark header is centered so the
+            corners stay clear. */}
+        {isCameraActive && (
+          <>
+            <button
+              type="button"
+              onClick={() =>
+                void startCameraWithFacing(
+                  cameraFacing === "environment" ? "user" : "environment",
+                )
+              }
+              disabled={!cameraStream || isRecording}
+              aria-label="Switch front or back camera"
+              className="fixed top-5 left-5 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-[#f1c477] backdrop-blur-sm active:scale-95 disabled:opacity-50"
+            >
+              <SwitchCamera className="h-6 w-6" strokeWidth={2.5} />
+            </button>
+            <button
+              type="button"
+              onClick={() => closeCameraPreview()}
+              aria-label="Close camera"
+              className="fixed top-5 right-5 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-[#f1c477] backdrop-blur-sm active:scale-95"
+            >
+              <X className="h-6 w-6" strokeWidth={2.5} />
+            </button>
+          </>
         )}
 
         {/* Snapshot: photo capture + optional video record (same camera session) */}

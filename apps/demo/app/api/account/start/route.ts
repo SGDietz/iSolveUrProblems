@@ -267,8 +267,26 @@ export async function POST(request: Request) {
   // that table kept re-asking for a name 6 already has. Seed it best-effort with
   // merge-duplicates; a later spoken pass uses pickBetterFullName so this won't
   // clobber a better name. Must NOT block the magic-link response.
-  if (serviceRoleKey && sessionId && fullName) {
+  let leadSeeded = false;
+  if (serviceRoleKey && sessionId) {
     try {
+      // Seed the lead_sessions row for the EXACT live session that sent the link —
+      // even when no name was captured yet. The old `&& fullName` gate skipped the
+      // write entirely on name-less sends, leaving last_prompted_field stuck on
+      // 'full_name' forever (Herm TASK_041 #7). When the name IS known, clear the
+      // ask-loop; otherwise just record email + consent and let a later spoken name
+      // fill it (pickBetterFullName means this can't clobber a better name).
+      const seedRow: Record<string, unknown> = {
+        session_id: sessionId,
+        email,
+        consent_status: "accepted",
+        updated_at: new Date().toISOString(),
+      };
+      if (fullName) {
+        seedRow.full_name = fullName;
+        seedRow.last_prompted_field = null;
+        seedRow.last_prompted_at = null;
+      }
       const seedRes = await fetch(`${supaUrl}/rest/v1/lead_sessions?on_conflict=session_id`, {
         method: "POST",
         headers: {
@@ -277,19 +295,13 @@ export async function POST(request: Request) {
           "Content-Type": "application/json",
           Prefer: "resolution=merge-duplicates,return=minimal",
         },
-        body: JSON.stringify([
-          {
-            session_id: sessionId,
-            full_name: fullName,
-            email,
-            consent_status: "accepted",
-            last_prompted_field: null,
-            last_prompted_at: null,
-            updated_at: new Date().toISOString(),
-          },
-        ]),
+        body: JSON.stringify([seedRow]),
       });
-      console.error("bc:lead-session-seeded", JSON.stringify({ ok: seedRes.ok, status: seedRes.status }));
+      leadSeeded = seedRes.ok;
+      console.error(
+        "bc:lead-session-seeded",
+        JSON.stringify({ ok: seedRes.ok, status: seedRes.status, hasName: Boolean(fullName) }),
+      );
     } catch (error) {
       console.error("lead_sessions seed threw:", error);
     }
@@ -315,6 +327,7 @@ export async function POST(request: Request) {
       ok: fullSuccess,
       emailSent: true,
       linkRowInserted,
+      leadSeeded,
       fullSuccess,
       pendingStateToken,
       ...(fullSuccess
