@@ -475,7 +475,24 @@
         "empty": "Aún no hay trabajos completados."
       },
       "nextAt": "Próximo: {when}",
-      "esignLabel": "Contrato"
+      "esignLabel": "Contrato",
+      "checklist": {
+        "title": "Lista previa a la salida",
+        "notYetBlurb": "6 preparará herramientas, materiales y confirmaciones 2 h antes de este trabajo. Generar ahora para previsualizar.",
+        "generateCta": "Generar ahora",
+        "generating": "Generando…",
+        "regenerateCta": "Regenerar",
+        "regenerating": "Regenerando…",
+        "errorGeneric": "No se pudo actualizar la lista. Intenta de nuevo.",
+        "generatedBy": "por {model}",
+        "gatedBadge": "Bronce+",
+        "gatedBlurb": "Mejora a Bronce para obtener una lista previa a la salida generada por 6 para cada trabajo.",
+        "bucket": {
+          "tool": "Herramientas",
+          "material": "Materiales",
+          "confirmation": "Confirmar antes de salir"
+        }
+      }
     },
     "subscription": {
       "title": "Tu plan:",

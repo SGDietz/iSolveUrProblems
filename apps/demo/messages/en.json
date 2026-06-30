@@ -475,7 +475,24 @@
         "empty": "No completed jobs yet."
       },
       "nextAt": "Next: {when}",
-      "esignLabel": "Contract"
+      "esignLabel": "Contract",
+      "checklist": {
+        "title": "Pre-departure checklist",
+        "notYetBlurb": "6 will draft tools, materials, and confirmations 2h before this job. Generate now to preview.",
+        "generateCta": "Generate now",
+        "generating": "Generating…",
+        "regenerateCta": "Regenerate",
+        "regenerating": "Regenerating…",
+        "errorGeneric": "Couldn't update the checklist. Try again.",
+        "generatedBy": "by {model}",
+        "gatedBadge": "Bronze+",
+        "gatedBlurb": "Upgrade to Bronze to get a 6-generated pre-departure checklist for each job.",
+        "bucket": {
+          "tool": "Tools",
+          "material": "Materials",
+          "confirmation": "Confirm before you go"
+        }
+      }
     },
     "subscription": {
       "title": "Your plan:",

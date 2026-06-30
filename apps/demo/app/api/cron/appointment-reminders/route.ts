@@ -4,10 +4,13 @@ import { verifyAdminBearer } from "../../../../src/lib/apiRouteSecurity";
 import {
   findAppointmentsDueForReminder,
   markReminderSent,
+  generateChecklist,
+  markChecklistNotified,
   type AppointmentRow,
 } from "../../../../src/lib/appointments";
 import { send } from "../../../../src/lib/notifications";
 import { getSupabaseAdminConfig } from "../../../../src/lib/supabaseAdmin";
+import { APP_PUBLIC_BASE_URL } from "../../secrets";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -71,13 +74,18 @@ async function fetchUserChannelTarget(
 
 async function fetchContractorTarget(
   contractorId: string,
-): Promise<{ email: string | null; phone: string | null; name: string }> {
+): Promise<{
+  email: string | null;
+  phone: string | null;
+  name: string;
+  category: string | null;
+}> {
   try {
     const { url, serviceRoleKey } = getSupabaseAdminConfig();
     const res = await fetch(
       `${url}/rest/v1/contractors?id=eq.${encodeURIComponent(
         contractorId,
-      )}&select=email,phone,name&limit=1`,
+      )}&select=email,phone,name,categories&limit=1`,
       {
         headers: {
           apikey: serviceRoleKey,
@@ -86,20 +94,49 @@ async function fetchContractorTarget(
         cache: "no-store",
       },
     );
-    if (!res.ok) return { email: null, phone: null, name: "contractor" };
+    if (!res.ok)
+      return { email: null, phone: null, name: "contractor", category: null };
     const rows = (await res.json()) as Array<{
       email: string | null;
       phone: string | null;
       name: string;
+      categories: string[] | null;
     }>;
     const row = rows[0];
     return {
       email: row?.email ?? null,
       phone: row?.phone ?? null,
       name: row?.name ?? "contractor",
+      category: row?.categories?.[0] ?? null,
     };
   } catch {
-    return { email: null, phone: null, name: "contractor" };
+    return { email: null, phone: null, name: "contractor", category: null };
+  }
+}
+
+async function fetchContractScope(
+  contractId: string | null,
+): Promise<string | null> {
+  if (!contractId) return null;
+  try {
+    const { url, serviceRoleKey } = getSupabaseAdminConfig();
+    const res = await fetch(
+      `${url}/rest/v1/contracts?id=eq.${encodeURIComponent(
+        contractId,
+      )}&select=scope&limit=1`,
+      {
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+        },
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return null;
+    const rows = (await res.json()) as Array<{ scope: string | null }>;
+    return rows[0]?.scope ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -215,6 +252,108 @@ async function dispatchAppointmentReminder(
   };
 }
 
+/**
+ * M4.3 — Dispatch the pre-departure checklist alongside the 2h reminder.
+ * Idempotent via appointments.checklist_notified_at. Tier-gated to
+ * bronze+ inside generateChecklist; gated calls return cleanly so the
+ * cron just skips them.
+ */
+async function dispatchChecklistIfDue(
+  appointment: AppointmentRow,
+): Promise<{
+  appointment_id: string;
+  generated: boolean;
+  notified: boolean;
+  skipped: string | null;
+}> {
+  if (appointment.checklist_notified_at) {
+    return {
+      appointment_id: appointment.id,
+      generated: false,
+      notified: false,
+      skipped: "already_notified",
+    };
+  }
+  if (!appointment.contractor_id) {
+    return {
+      appointment_id: appointment.id,
+      generated: false,
+      notified: false,
+      skipped: "no_contractor",
+    };
+  }
+
+  const contractor = await fetchContractorTarget(appointment.contractor_id);
+  const scope = await fetchContractScope(appointment.contract_id);
+
+  const result = await generateChecklist({
+    appointment_id: appointment.id,
+    contractor_id: appointment.contractor_id,
+    agenda: appointment.agenda,
+    scope,
+    category: contractor.category,
+    reason: "cron_2h",
+  });
+  if (!result.ok) {
+    // tier_gate / openai_not_configured / llm_* — all silent skips,
+    // intentionally not marked as notified so a later upgrade triggers.
+    return {
+      appointment_id: appointment.id,
+      generated: false,
+      notified: false,
+      skipped: result.reason,
+    };
+  }
+  if (result.row.items.length === 0) {
+    return {
+      appointment_id: appointment.id,
+      generated: result.generated,
+      notified: false,
+      skipped: "empty_items",
+    };
+  }
+
+  const to = contractor.email ?? contractor.phone;
+  if (!to) {
+    return {
+      appointment_id: appointment.id,
+      generated: result.generated,
+      notified: false,
+      skipped: "no_contact",
+    };
+  }
+  const channel: "email" | "sms" = contractor.email ? "email" : "sms";
+  const dashboardUrl = APP_PUBLIC_BASE_URL
+    ? `${APP_PUBLIC_BASE_URL}/en/contractor/dashboard`
+    : "/en/contractor/dashboard";
+
+  await send({
+    channel,
+    recipient: to,
+    templateId: "appointment.checklist.v1",
+    data: {
+      recipientName: contractor.name,
+      whenText: humanTime(appointment.scheduled_at, 2),
+      agenda: appointment.agenda,
+      items: result.row.items.map((i) => ({ kind: i.kind, text: i.text })),
+      dashboardUrl,
+    },
+    context: {
+      appointment_id: appointment.id,
+      role: "contractor",
+      cron_kind: "checklist_2h",
+    },
+  });
+  await markChecklistNotified({ appointment_id: appointment.id });
+
+  return {
+    appointment_id: appointment.id,
+    generated: result.generated,
+    notified: true,
+    skipped: null,
+  };
+}
+
 export async function GET(request: NextRequest) {
   if (!CRON_SECRET) return bad("CRON_SECRET not configured", 503);
   if (!verifyAdminBearer(request.headers.get("authorization"), CRON_SECRET).ok) {
@@ -229,12 +368,15 @@ export async function GET(request: NextRequest) {
     ),
   );
 
-  // 2h window
+  // 2h window — reminder dispatch AND pre-departure checklist (M4.3).
   const due2h = await findAppointmentsDueForReminder({ kind: "2h" });
   const results2h = await Promise.all(
     due2h.map((a: AppointmentRow) =>
       dispatchAppointmentReminder(a, "2h"),
     ),
+  );
+  const checklistResults = await Promise.all(
+    due2h.map((a: AppointmentRow) => dispatchChecklistIfDue(a)),
   );
 
   return NextResponse.json({
@@ -246,6 +388,10 @@ export async function GET(request: NextRequest) {
     "2h": {
       found: due2h.length,
       results: results2h,
+    },
+    checklist: {
+      considered: due2h.length,
+      results: checklistResults,
     },
   });
 }

@@ -7,6 +7,7 @@ import {
   appointmentReminder24hTemplate,
   appointmentReminder2hTemplate,
 } from "./appointment-reminder";
+import appointmentChecklistTemplate from "./appointment-checklist";
 import adminDisputeEscalationTemplate from "./admin-dispute-escalation";
 
 /**
@@ -29,6 +30,8 @@ const REGISTRY: Record<string, NotificationTemplate<never>> = {
     appointmentReminder24hTemplate as NotificationTemplate<never>,
   "appointment.reminder.2h.v1":
     appointmentReminder2hTemplate as NotificationTemplate<never>,
+  "appointment.checklist.v1":
+    appointmentChecklistTemplate as NotificationTemplate<never>,
   "admin.dispute.escalation.v1":
     adminDisputeEscalationTemplate as NotificationTemplate<never>,
 };

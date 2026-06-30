@@ -22,6 +22,8 @@ export type AppointmentRow = {
   status: AppointmentStatus;
   reminder_24h_sent_at: string | null;
   reminder_2h_sent_at: string | null;
+  /** M4.3 — set once the pre-departure checklist notification fires. */
+  checklist_notified_at: string | null;
   context: Record<string, unknown>;
   created_at: string;
   updated_at: string;

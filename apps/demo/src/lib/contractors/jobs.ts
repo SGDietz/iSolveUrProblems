@@ -27,6 +27,10 @@ export type ContractorJobView = {
   created_at: string;
   /** Most-recent upcoming appointment tied to this contract, if any. */
   next_appointment_at: string | null;
+  /** Id of that next appointment (for M4.3 checklist tile, etc.) */
+  next_appointment_id: string | null;
+  /** Agenda of that appointment, surfaced so the dashboard tile can describe it. */
+  next_appointment_agenda: string | null;
 };
 
 function adminHeaders(serviceRoleKey: string) {
@@ -76,7 +80,7 @@ export async function listContractorJobs(args: {
   apptUrl.searchParams.set("contract_id", `in.(${contractIds.join(",")})`);
   apptUrl.searchParams.set("status", "eq.scheduled");
   apptUrl.searchParams.set("scheduled_at", `gt.${new Date().toISOString()}`);
-  apptUrl.searchParams.set("select", "contract_id,scheduled_at");
+  apptUrl.searchParams.set("select", "id,contract_id,scheduled_at,agenda");
   apptUrl.searchParams.set("order", "scheduled_at.asc");
   const apptRes = await fetch(apptUrl.toString(), {
     headers: adminHeaders(serviceRoleKey),
@@ -84,31 +88,43 @@ export async function listContractorJobs(args: {
   });
   const apptRows = apptRes.ok
     ? ((await apptRes.json()) as Array<{
+        id: string;
         contract_id: string;
         scheduled_at: string;
+        agenda: string;
       }>)
     : [];
-  const nextByContract = new Map<string, string>();
+  type NextAppt = { id: string; scheduled_at: string; agenda: string };
+  const nextByContract = new Map<string, NextAppt>();
   for (const a of apptRows) {
     if (!nextByContract.has(a.contract_id)) {
-      nextByContract.set(a.contract_id, a.scheduled_at);
+      nextByContract.set(a.contract_id, {
+        id: a.id,
+        scheduled_at: a.scheduled_at,
+        agenda: a.agenda,
+      });
     }
   }
 
-  return rows.map((r) => ({
-    contract_id: r.id,
-    contract_status: r.status,
-    user_id: r.user_id,
-    category: r.category,
-    amount_cents: r.amount_cents,
-    platform_fee_cents: r.platform_fee_cents,
-    currency: r.currency,
-    scope: r.scope,
-    esign_envelope_status: r.esign_envelope_status,
-    paid_at: r.paid_at,
-    created_at: r.created_at,
-    next_appointment_at: nextByContract.get(r.id) ?? null,
-  }));
+  return rows.map((r) => {
+    const next = nextByContract.get(r.id) ?? null;
+    return {
+      contract_id: r.id,
+      contract_status: r.status,
+      user_id: r.user_id,
+      category: r.category,
+      amount_cents: r.amount_cents,
+      platform_fee_cents: r.platform_fee_cents,
+      currency: r.currency,
+      scope: r.scope,
+      esign_envelope_status: r.esign_envelope_status,
+      paid_at: r.paid_at,
+      created_at: r.created_at,
+      next_appointment_at: next?.scheduled_at ?? null,
+      next_appointment_id: next?.id ?? null,
+      next_appointment_agenda: next?.agenda ?? null,
+    };
+  });
 }
 
 export async function getContractorById(id: string): Promise<{

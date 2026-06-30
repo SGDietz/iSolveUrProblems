@@ -475,7 +475,24 @@
         "empty": "Noch keine abgeschlossenen Jobs."
       },
       "nextAt": "Nächster: {when}",
-      "esignLabel": "Vertrag"
+      "esignLabel": "Vertrag",
+      "checklist": {
+        "title": "Vorbereitungs-Checkliste",
+        "notYetBlurb": "6 listet Werkzeuge, Material und Bestätigungen 2 Std. vor dem Auftrag. Jetzt erzeugen für eine Vorschau.",
+        "generateCta": "Jetzt erzeugen",
+        "generating": "Wird erzeugt…",
+        "regenerateCta": "Neu erzeugen",
+        "regenerating": "Wird neu erzeugt…",
+        "errorGeneric": "Konnte die Checkliste nicht aktualisieren. Bitte erneut versuchen.",
+        "generatedBy": "von {model}",
+        "gatedBadge": "Bronze+",
+        "gatedBlurb": "Upgrade auf Bronze für eine von 6 erzeugte Vorbereitungs-Checkliste pro Auftrag.",
+        "bucket": {
+          "tool": "Werkzeuge",
+          "material": "Material",
+          "confirmation": "Vor der Abfahrt bestätigen"
+        }
+      }
     },
     "subscription": {
       "title": "Dein Plan:",

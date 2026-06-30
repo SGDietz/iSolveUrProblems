@@ -476,7 +476,24 @@
         "empty": "暂无已完成工作。"
       },
       "nextAt": "下次:{when}",
-      "esignLabel": "合同"
+      "esignLabel": "合同",
+      "checklist": {
+        "title": "出发前清单",
+        "notYetBlurb": "6 将在作业开始前 2 小时整理工具、材料和确认事项。立即生成可预览。",
+        "generateCta": "立即生成",
+        "generating": "生成中…",
+        "regenerateCta": "重新生成",
+        "regenerating": "重新生成中…",
+        "errorGeneric": "无法更新清单,请重试。",
+        "generatedBy": "由 {model} 生成",
+        "gatedBadge": "Bronze+",
+        "gatedBlurb": "升级到 Bronze 套餐,即可为每项作业获取 6 生成的出发前清单。",
+        "bucket": {
+          "tool": "工具",
+          "material": "材料",
+          "confirmation": "出发前确认"
+        }
+      }
     },
     "subscription": {
       "title": "当前套餐:",

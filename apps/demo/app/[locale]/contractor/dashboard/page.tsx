@@ -12,8 +12,11 @@ import {
   getActiveSubscriptionForContractor,
   type Tier,
 } from "../../../../src/lib/billing";
+import { tierUnlocks } from "../../../../src/lib/billing/tiers";
 import { SubscriptionPanel } from "../../../../src/components/contractor/SubscriptionPanel";
 import { ConnectOnboardButton } from "../../../../src/components/contractor/ConnectOnboardButton";
+import { ChecklistTile } from "../../../../src/components/contractor/ChecklistTile";
+import { listChecklistsForContractor } from "../../../../src/lib/appointments";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +104,22 @@ export default async function ContractorDashboardPage({
     (j) => j.contract_status === "paid" && j.next_appointment_at === null,
   );
 
+  // M4.3 — Load checklists for any active job's next appointment so the
+  // tile can render in initial state without an extra round-trip.
+  const activeAppointmentIds = active
+    .map((j) => j.next_appointment_id)
+    .filter((x): x is string => !!x);
+  const existingChecklists = activeAppointmentIds.length
+    ? await listChecklistsForContractor({
+        contractor_id: roleInfo.contractor_id,
+        appointment_ids: activeAppointmentIds,
+      })
+    : [];
+  const checklistByAppointmentId = new Map(
+    existingChecklists.map((c) => [c.appointment_id, c] as const),
+  );
+  const checklistGated = !tierUnlocks(currentTier, "checklist_agent");
+
   const licenseVerified =
     contractor.license_status === "active" &&
     !!contractor.license_number &&
@@ -152,7 +171,26 @@ export default async function ContractorDashboardPage({
       />
 
       <JobsSection title={t("pending.title")} blurb={t("pending.blurb")} jobs={pending} t={t} emptyLabel={t("pending.empty")} />
-      <JobsSection title={t("active.title")} blurb={t("active.blurb")} jobs={active} t={t} emptyLabel={t("active.empty")} />
+      <JobsSection
+        title={t("active.title")}
+        blurb={t("active.blurb")}
+        jobs={active}
+        t={t}
+        emptyLabel={t("active.empty")}
+        renderExtras={(j) =>
+          j.next_appointment_id && j.next_appointment_at ? (
+            <ChecklistTile
+              appointment_id={j.next_appointment_id}
+              scheduled_at={j.next_appointment_at}
+              agenda={j.next_appointment_agenda ?? ""}
+              initial_row={
+                checklistByAppointmentId.get(j.next_appointment_id) ?? null
+              }
+              gated={checklistGated}
+            />
+          ) : null
+        }
+      />
       <JobsSection title={t("completed.title")} blurb={t("completed.blurb")} jobs={completed} t={t} emptyLabel={t("completed.empty")} />
 
       <Link
@@ -183,6 +221,7 @@ function JobsSection({
   jobs,
   t,
   emptyLabel,
+  renderExtras,
 }: {
   title: string;
   blurb: string;
@@ -191,6 +230,7 @@ function JobsSection({
   // keys that exist in the namespace.
   t: (k: string, vars?: Record<string, string | number | Date>) => string;
   emptyLabel: string;
+  renderExtras?: (j: ContractorJobView) => React.ReactNode;
 }) {
   return (
     <section className="flex flex-col gap-2">
@@ -240,6 +280,7 @@ function JobsSection({
                   </span>
                 )}
               </div>
+              {renderExtras ? renderExtras(j) : null}
             </li>
           ))}
         </ul>

@@ -475,7 +475,24 @@
         "empty": "Nenhum trabalho concluído ainda."
       },
       "nextAt": "Próximo: {when}",
-      "esignLabel": "Contrato"
+      "esignLabel": "Contrato",
+      "checklist": {
+        "title": "Lista pré-saída",
+        "notYetBlurb": "6 listará ferramentas, materiais e confirmações 2 h antes deste trabalho. Gerar agora para pré-visualizar.",
+        "generateCta": "Gerar agora",
+        "generating": "Gerando…",
+        "regenerateCta": "Regenerar",
+        "regenerating": "Regenerando…",
+        "errorGeneric": "Não foi possível atualizar a lista. Tente de novo.",
+        "generatedBy": "por {model}",
+        "gatedBadge": "Bronze+",
+        "gatedBlurb": "Atualize para Bronze para receber uma lista pré-saída gerada pelo 6 em cada trabalho.",
+        "bucket": {
+          "tool": "Ferramentas",
+          "material": "Materiais",
+          "confirmation": "Confirmar antes de sair"
+        }
+      }
     },
     "subscription": {
       "title": "Seu plano:",

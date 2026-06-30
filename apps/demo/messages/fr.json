@@ -475,7 +475,24 @@
         "empty": "Aucun travail terminé pour le moment."
       },
       "nextAt": "Prochain : {when}",
-      "esignLabel": "Contrat"
+      "esignLabel": "Contrat",
+      "checklist": {
+        "title": "Check-list avant départ",
+        "notYetBlurb": "6 listera outils, matériaux et confirmations 2 h avant ce chantier. Génère maintenant pour prévisualiser.",
+        "generateCta": "Générer",
+        "generating": "Génération…",
+        "regenerateCta": "Régénérer",
+        "regenerating": "Régénération…",
+        "errorGeneric": "Impossible de mettre à jour la check-list. Réessaie.",
+        "generatedBy": "par {model}",
+        "gatedBadge": "Bronze+",
+        "gatedBlurb": "Passe à Bronze pour obtenir une check-list avant départ générée par 6 pour chaque chantier.",
+        "bucket": {
+          "tool": "Outils",
+          "material": "Matériaux",
+          "confirmation": "À confirmer avant le départ"
+        }
+      }
     },
     "subscription": {
       "title": "Votre formule :",
