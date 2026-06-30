@@ -476,6 +476,7 @@
       },
       "nextAt": "Prochain : {when}",
       "esignLabel": "Contrat",
+      "logWorkCta": "Journal du chantier →",
       "checklist": {
         "title": "Check-list avant départ",
         "notYetBlurb": "6 listera outils, matériaux et confirmations 2 h avant ce chantier. Génère maintenant pour prévisualiser.",
@@ -493,6 +494,31 @@
           "confirmation": "À confirmer avant le départ"
         }
       }
+    },
+    "jobLog": {
+      "kicker": "Journal du chantier",
+      "untitledAgenda": "Chantier sans titre",
+      "backToDashboard": "← Retour au tableau de bord",
+      "captureHeading": "Capturer",
+      "phase": {
+        "arrival": "Arrivée",
+        "in_progress": "En cours",
+        "completion": "Fin"
+      },
+      "phaseCount": "{count, plural, one {# photo} other {# photos}}",
+      "phaseEmpty": "touche pour capturer",
+      "noteHeading": "Ajouter une note",
+      "notePlaceholder": "Ce que 6 devrait savoir sur cette visite…",
+      "addNoteCta": "Ajouter la note",
+      "submitting": "Enregistrement…",
+      "timelineHeading": "Chronologie",
+      "timelineEmpty": "Rien encore — capture une photo d'arrivée pour commencer.",
+      "noteLabel": "Note",
+      "errorGeneric": "Impossible d'enregistrer. Réessaie.",
+      "tierGate": "Passe à Bronze pour enregistrer des photos sur ce chantier.",
+      "gatedTitle": "Le journal photo est une fonction payante",
+      "gatedBlurb": "Passe à Bronze et 6 garde chaque photo du chantier avec horodatage, GPS et chronologie côté client.",
+      "gatedManageCta": "Gérer l'abonnement →"
     },
     "subscription": {
       "title": "Votre formule :",

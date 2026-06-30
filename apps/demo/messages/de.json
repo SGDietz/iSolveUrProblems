@@ -476,6 +476,7 @@
       },
       "nextAt": "Nächster: {when}",
       "esignLabel": "Vertrag",
+      "logWorkCta": "Arbeit dokumentieren →",
       "checklist": {
         "title": "Vorbereitungs-Checkliste",
         "notYetBlurb": "6 listet Werkzeuge, Material und Bestätigungen 2 Std. vor dem Auftrag. Jetzt erzeugen für eine Vorschau.",
@@ -493,6 +494,31 @@
           "confirmation": "Vor der Abfahrt bestätigen"
         }
       }
+    },
+    "jobLog": {
+      "kicker": "Auftragsjournal",
+      "untitledAgenda": "Auftrag ohne Titel",
+      "backToDashboard": "← Zurück zum Dashboard",
+      "captureHeading": "Aufnehmen",
+      "phase": {
+        "arrival": "Ankunft",
+        "in_progress": "Laufend",
+        "completion": "Abschluss"
+      },
+      "phaseCount": "{count, plural, one {# Foto} other {# Fotos}}",
+      "phaseEmpty": "Tippen zum Aufnehmen",
+      "noteHeading": "Notiz hinzufügen",
+      "notePlaceholder": "Was 6 zu diesem Termin wissen sollte…",
+      "addNoteCta": "Notiz speichern",
+      "submitting": "Speichern…",
+      "timelineHeading": "Zeitleiste",
+      "timelineEmpty": "Noch nichts dokumentiert — starte mit einem Ankunftsfoto.",
+      "noteLabel": "Notiz",
+      "errorGeneric": "Speichern fehlgeschlagen. Erneut versuchen.",
+      "tierGate": "Upgrade auf Bronze, um Fotos zu diesem Auftrag zu speichern.",
+      "gatedTitle": "Foto-Journal ist ein kostenpflichtiges Feature",
+      "gatedBlurb": "Upgrade auf Bronze und 6 speichert jedes Foto zum Auftrag mit Zeitstempel, GPS und einer Zeitleiste für den Kunden.",
+      "gatedManageCta": "Abonnement verwalten →"
     },
     "subscription": {
       "title": "Dein Plan:",

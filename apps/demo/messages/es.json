@@ -476,6 +476,7 @@
       },
       "nextAt": "Próximo: {when}",
       "esignLabel": "Contrato",
+      "logWorkCta": "Registrar trabajo →",
       "checklist": {
         "title": "Lista previa a la salida",
         "notYetBlurb": "6 preparará herramientas, materiales y confirmaciones 2 h antes de este trabajo. Generar ahora para previsualizar.",
@@ -493,6 +494,31 @@
           "confirmation": "Confirmar antes de salir"
         }
       }
+    },
+    "jobLog": {
+      "kicker": "Registro del trabajo",
+      "untitledAgenda": "Trabajo sin título",
+      "backToDashboard": "← Volver al panel",
+      "captureHeading": "Capturar",
+      "phase": {
+        "arrival": "Llegada",
+        "in_progress": "En curso",
+        "completion": "Finalización"
+      },
+      "phaseCount": "{count, plural, one {# foto} other {# fotos}}",
+      "phaseEmpty": "toca para capturar",
+      "noteHeading": "Añadir nota",
+      "notePlaceholder": "Lo que 6 deba saber sobre esta visita…",
+      "addNoteCta": "Añadir nota",
+      "submitting": "Guardando…",
+      "timelineHeading": "Línea de tiempo",
+      "timelineEmpty": "Aún nada — captura una foto de llegada para empezar.",
+      "noteLabel": "Nota",
+      "errorGeneric": "No se pudo guardar. Intenta de nuevo.",
+      "tierGate": "Mejora a Bronce para registrar fotos en este trabajo.",
+      "gatedTitle": "El registro fotográfico es una función de pago",
+      "gatedBlurb": "Mejora a Bronce y 6 guarda cada foto del trabajo con marca de tiempo, GPS y línea de tiempo para el cliente.",
+      "gatedManageCta": "Gestionar suscripción →"
     },
     "subscription": {
       "title": "Tu plan:",

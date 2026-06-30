@@ -477,6 +477,7 @@
       },
       "nextAt": "下次:{when}",
       "esignLabel": "合同",
+      "logWorkCta": "记录工作 →",
       "checklist": {
         "title": "出发前清单",
         "notYetBlurb": "6 将在作业开始前 2 小时整理工具、材料和确认事项。立即生成可预览。",
@@ -494,6 +495,31 @@
           "confirmation": "出发前确认"
         }
       }
+    },
+    "jobLog": {
+      "kicker": "作业日志",
+      "untitledAgenda": "未命名作业",
+      "backToDashboard": "← 返回仪表板",
+      "captureHeading": "拍摄",
+      "phase": {
+        "arrival": "到场",
+        "in_progress": "进行中",
+        "completion": "完工"
+      },
+      "phaseCount": "{count, plural, other {# 张照片}}",
+      "phaseEmpty": "点按拍摄",
+      "noteHeading": "添加备注",
+      "notePlaceholder": "关于本次访问,6 应该知道的信息……",
+      "addNoteCta": "添加备注",
+      "submitting": "保存中…",
+      "timelineHeading": "时间线",
+      "timelineEmpty": "尚未记录任何内容——拍一张到场照片开始吧。",
+      "noteLabel": "备注",
+      "errorGeneric": "保存失败,请重试。",
+      "tierGate": "升级到 Bronze 即可为本作业记录照片。",
+      "gatedTitle": "照片日志是付费功能",
+      "gatedBlurb": "升级到 Bronze,6 会为每张作业照片记录时间戳、GPS,并向户主呈现时间线。",
+      "gatedManageCta": "管理订阅 →"
     },
     "subscription": {
       "title": "当前套餐:",

@@ -179,15 +179,23 @@ export default async function ContractorDashboardPage({
         emptyLabel={t("active.empty")}
         renderExtras={(j) =>
           j.next_appointment_id && j.next_appointment_at ? (
-            <ChecklistTile
-              appointment_id={j.next_appointment_id}
-              scheduled_at={j.next_appointment_at}
-              agenda={j.next_appointment_agenda ?? ""}
-              initial_row={
-                checklistByAppointmentId.get(j.next_appointment_id) ?? null
-              }
-              gated={checklistGated}
-            />
+            <div className="flex flex-col gap-2">
+              <ChecklistTile
+                appointment_id={j.next_appointment_id}
+                scheduled_at={j.next_appointment_at}
+                agenda={j.next_appointment_agenda ?? ""}
+                initial_row={
+                  checklistByAppointmentId.get(j.next_appointment_id) ?? null
+                }
+                gated={checklistGated}
+              />
+              <Link
+                href={`/contractor/jobs/${j.next_appointment_id}/log`}
+                className="text-xs text-amber-300 hover:text-amber-200 underline self-start"
+              >
+                {t("logWorkCta")}
+              </Link>
+            </div>
           ) : null
         }
       />

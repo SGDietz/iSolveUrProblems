@@ -476,6 +476,7 @@
       },
       "nextAt": "Next: {when}",
       "esignLabel": "Contract",
+      "logWorkCta": "Log work →",
       "checklist": {
         "title": "Pre-departure checklist",
         "notYetBlurb": "6 will draft tools, materials, and confirmations 2h before this job. Generate now to preview.",
@@ -493,6 +494,31 @@
           "confirmation": "Confirm before you go"
         }
       }
+    },
+    "jobLog": {
+      "kicker": "Job log",
+      "untitledAgenda": "Untitled job",
+      "backToDashboard": "← Back to dashboard",
+      "captureHeading": "Capture",
+      "phase": {
+        "arrival": "Arrival",
+        "in_progress": "In progress",
+        "completion": "Completion"
+      },
+      "phaseCount": "{count, plural, one {# photo} other {# photos}}",
+      "phaseEmpty": "tap to capture",
+      "noteHeading": "Add note",
+      "notePlaceholder": "Anything 6 should know about this visit…",
+      "addNoteCta": "Add note",
+      "submitting": "Saving…",
+      "timelineHeading": "Timeline",
+      "timelineEmpty": "Nothing logged yet — capture an arrival photo to start.",
+      "noteLabel": "Note",
+      "errorGeneric": "Couldn't save. Try again.",
+      "tierGate": "Upgrade to Bronze to log photos against this job.",
+      "gatedTitle": "Photo logging is a paid feature",
+      "gatedBlurb": "Upgrade to Bronze and 6 stores every photo against this job, with timestamps, GPS, and a homeowner-facing timeline.",
+      "gatedManageCta": "Manage subscription →"
     },
     "subscription": {
       "title": "Your plan:",
