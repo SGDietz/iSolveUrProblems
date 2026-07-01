@@ -477,6 +477,11 @@
       "nextAt": "Próximo: {when}",
       "esignLabel": "Contrato",
       "logWorkCta": "Registrar trabalho →",
+      "coaching": {
+        "title": "Um recado do 6",
+        "kicker": "Um recado do 6",
+        "signoff": "— 6 só envia isso quando algo real acontece. Responda STOP para silenciar."
+      },
       "checklist": {
         "title": "Lista pré-saída",
         "notYetBlurb": "6 listará ferramentas, materiais e confirmações 2 h antes deste trabalho. Gerar agora para pré-visualizar.",

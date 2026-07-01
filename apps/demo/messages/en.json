@@ -477,6 +477,11 @@
       "nextAt": "Next: {when}",
       "esignLabel": "Contract",
       "logWorkCta": "Log work →",
+      "coaching": {
+        "title": "A note from 6",
+        "kicker": "A note from 6",
+        "signoff": "— 6 only sends these when something real happens. Reply STOP to mute."
+      },
       "checklist": {
         "title": "Pre-departure checklist",
         "notYetBlurb": "6 will draft tools, materials, and confirmations 2h before this job. Generate now to preview.",

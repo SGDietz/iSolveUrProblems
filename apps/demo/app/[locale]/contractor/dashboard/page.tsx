@@ -17,6 +17,7 @@ import { SubscriptionPanel } from "../../../../src/components/contractor/Subscri
 import { ConnectOnboardButton } from "../../../../src/components/contractor/ConnectOnboardButton";
 import { ChecklistTile } from "../../../../src/components/contractor/ChecklistTile";
 import { listChecklistsForContractor } from "../../../../src/lib/appointments";
+import { getMostRecentNudgeForContractor } from "../../../../src/lib/coaching";
 
 export const dynamic = "force-dynamic";
 
@@ -80,10 +81,11 @@ export default async function ContractorDashboardPage({
     redirect(`/${locale}/for-contractors`);
   }
 
-  const [contractor, jobs, subscription] = await Promise.all([
+  const [contractor, jobs, subscription, recentNudge] = await Promise.all([
     getContractorById(roleInfo.contractor_id),
     listContractorJobs({ contractor_id: roleInfo.contractor_id, limit: 30 }),
     getActiveSubscriptionForContractor(roleInfo.contractor_id),
+    getMostRecentNudgeForContractor(roleInfo.contractor_id),
   ]);
   if (!contractor) notFound();
 
@@ -127,6 +129,17 @@ export default async function ContractorDashboardPage({
 
   const payoutReady = contractor.stripe_charges_enabled === true;
 
+  // M4.8 — surface the most recent coaching nudge if it landed within
+  // the last 14 days. Nothing to show otherwise (and we don't render a
+  // "no nudges yet" empty state — silence is the right default).
+  const FRESH_NUDGE_DAYS = 14;
+  const freshNudge =
+    recentNudge &&
+    Date.now() - new Date(recentNudge.sent_at).getTime() <
+      FRESH_NUDGE_DAYS * 24 * 60 * 60 * 1000
+      ? recentNudge
+      : null;
+
   return (
     <main className="w-full max-w-3xl flex flex-col gap-6 px-6 py-12">
       <header className="flex flex-col gap-2">
@@ -163,6 +176,29 @@ export default async function ContractorDashboardPage({
           <p className="text-zinc-200">{t("onboardingBanner.blurb")}</p>
           <ConnectOnboardButton contractor_id={contractor.id} />
         </div>
+      )}
+
+      {freshNudge && (
+        <section
+          aria-label={t("coaching.title")}
+          className="rounded-lg border border-amber-700/40 bg-gradient-to-br from-amber-950/60 to-zinc-950 p-4 flex flex-col gap-2 text-sm"
+        >
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-amber-300">
+              {t("coaching.kicker")}
+            </p>
+            <span className="text-[10px] text-zinc-500 font-mono">
+              {new Date(freshNudge.sent_at).toLocaleDateString()}
+            </span>
+          </div>
+          <h2 className="text-base font-semibold text-amber-100">
+            {freshNudge.subject}
+          </h2>
+          <p className="text-zinc-200 whitespace-pre-wrap leading-relaxed">
+            {freshNudge.body_text}
+          </p>
+          <p className="text-[11px] text-zinc-500 italic">{t("coaching.signoff")}</p>
+        </section>
       )}
 
       <SubscriptionPanel

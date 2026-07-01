@@ -477,6 +477,11 @@
       "nextAt": "Prochain : {when}",
       "esignLabel": "Contrat",
       "logWorkCta": "Journal du chantier →",
+      "coaching": {
+        "title": "Un mot de 6",
+        "kicker": "Un mot de 6",
+        "signoff": "— 6 n'envoie ça que quand il se passe vraiment quelque chose. Réponds STOP pour couper."
+      },
       "checklist": {
         "title": "Check-list avant départ",
         "notYetBlurb": "6 listera outils, matériaux et confirmations 2 h avant ce chantier. Génère maintenant pour prévisualiser.",

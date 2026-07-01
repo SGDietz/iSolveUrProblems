@@ -478,6 +478,11 @@
       "nextAt": "下次:{when}",
       "esignLabel": "合同",
       "logWorkCta": "记录工作 →",
+      "coaching": {
+        "title": "来自 6 的留言",
+        "kicker": "来自 6 的留言",
+        "signoff": "— 6 只在真有事发生时才会发。回复 STOP 可静音。"
+      },
       "checklist": {
         "title": "出发前清单",
         "notYetBlurb": "6 将在作业开始前 2 小时整理工具、材料和确认事项。立即生成可预览。",
