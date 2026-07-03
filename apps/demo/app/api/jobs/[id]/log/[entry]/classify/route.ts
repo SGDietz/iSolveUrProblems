@@ -111,6 +111,19 @@ export async function POST(
       ? body.prompt_hint.trim().slice(0, 240)
       : null;
 
+  // Dedupe: if there's a recent prediction for this entry (React
+  // strict-mode double-render, double-tap, retry storm), return it
+  // instead of spending another gpt-4o call. Fresh classify only on
+  // rows older than DEDUPE_WINDOW_MS.
+  const DEDUPE_WINDOW_MS = 30_000;
+  const existing = await getLatestCvLabelForEntry(entry.id);
+  if (
+    existing &&
+    Date.now() - new Date(existing.created_at).getTime() < DEDUPE_WINDOW_MS
+  ) {
+    return NextResponse.json({ row: existing, deduped: true });
+  }
+
   const imageUrl = await signJobLogUrl(entry.storage_path);
   if (!imageUrl) return bad("couldn't sign storage URL", 500);
 

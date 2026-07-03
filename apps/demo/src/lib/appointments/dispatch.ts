@@ -143,12 +143,19 @@ export async function markNoShowIfNew(args: {
  * M4.5 hook / dashboard-arrival hook: record that the contractor is
  * on-site. Once set, the no-show detector ignores the appointment.
  * Idempotent — only writes if the column is still null.
+ *
+ * The `source` arg is intentionally NOT persisted: PostgREST PATCH
+ * replaces jsonb columns whole, so merging a `confirmed_source` into
+ * `context` would clobber any prior reminder / reschedule metadata.
+ * Caller identity is recoverable from the caller's route logs if we
+ * ever need it.
  */
 export async function markContractorConfirmed(args: {
   appointment_id: string;
   contractor_id: string;
   source: "photo_log" | "dashboard_tap" | "voice";
 }): Promise<AppointmentRow | null> {
+  void args.source;
   const { url, serviceRoleKey } = getSupabaseAdminConfig();
   const res = await fetch(
     `${url}/rest/v1/appointments?id=eq.${encodeURIComponent(
@@ -164,7 +171,6 @@ export async function markContractorConfirmed(args: {
       },
       body: JSON.stringify({
         contractor_confirmed_at: new Date().toISOString(),
-        context: { confirmed_source: args.source },
       }),
     },
   );

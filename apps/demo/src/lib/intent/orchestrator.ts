@@ -18,6 +18,7 @@ import {
   declareNoShowAndDispatch,
   type AppointmentRow,
 } from "../appointments";
+import { TWILIO_VOICE_FROM_NUMBER } from "../../../app/api/secrets";
 import { getSupabaseAdminConfig } from "../supabaseAdmin";
 import { classifyIntent } from "./classify";
 import { DEFAULT_CENTER } from "./slots";
@@ -1607,13 +1608,12 @@ async function handleGoBetweenMode(args: {
     };
   }
 
-  const fromPhone = process.env.TWILIO_VOICE_FROM_NUMBER ?? "";
   const call = await createCall({
     user_id: args.user_id,
     contractor_id: resolved.id,
     to_user_phone: userPhone,
     to_contractor_phone: contractorPhone,
-    from_phone: fromPhone,
+    from_phone: TWILIO_VOICE_FROM_NUMBER,
     context: { source: "voice_intent", mode: "go_between" },
   });
   if (!call) {

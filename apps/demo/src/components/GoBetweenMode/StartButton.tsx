@@ -13,11 +13,18 @@ import {
  * Vision ¶15: "6 will also manage the in-person meetings as the
  * go-between, live on one or both phones."
  *
- * Rendered on the homeowner side (e.g. inside a ContractorSummary card
- * or an AppointmentCard when the contractor is on-site). Prompts for
- * the homeowner's phone number, POSTs /api/calls/go-between/start,
- * then flips the assistant surface to the CallPanel so the running
- * transcript is visible while 6 mediates.
+ * **Not yet mounted in any surface** — the M4.9 MVP ships voice-only
+ * (say "6, get on the phone with me while the plumber's here" → the
+ * intent classifier fires `go_between_mode` → 6 dials both phones).
+ * This component is a drop-in for the future button-triggered flow
+ * once we pick the entry point (candidates: ContractorSummary,
+ * AppointmentCard when contractor is on-site, or a floating CTA on
+ * the drawer). Wiring is a 1-line JSX add.
+ *
+ * Prompts for the homeowner's phone number, POSTs
+ * /api/calls/go-between/start, then flips the assistant surface to
+ * the CallPanel so the running transcript is visible while 6
+ * mediates.
  *
  * MVP: prompts for phone via native prompt() to keep the surface tiny.
  * A v2 could pre-fill from users.phone once we're threading it.

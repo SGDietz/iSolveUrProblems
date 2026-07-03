@@ -169,7 +169,9 @@ Wait for *"ready on http://localhost:3001"*.
 
 ```powershell
 # All prereq tables present?
-psql "$SUPABASE_DB_URL" -c "select table_name from information_schema.tables where table_schema='public' and table_name in ('recurring_jobs','appointment_checklists','job_log_entries','appointment_replacements','cv_labels','coaching_nudges_sent','crew_requests','contractor_billing_subscriptions') order by table_name;"
+# Point psql at your Supabase Postgres connection string — grab it from
+# Supabase Dashboard → Project Settings → Database → Connection string.
+psql "$env:DATABASE_URL" -c "select table_name from information_schema.tables where table_schema='public' and table_name in ('recurring_jobs','appointment_checklists','job_log_entries','appointment_replacements','cv_labels','coaching_nudges_sent','crew_requests','contractor_billing_subscriptions') order by table_name;"
 
 # Cron endpoints respond
 foreach ($p in @("appointment-reminders","recurring-jobs","coaching-nudges","no-show-detector")) {
@@ -452,17 +454,11 @@ Either `TWILIO_VOICE_FROM_NUMBER` isn't a verified Twilio number or `APP_PUBLIC_
 
 ## After the Rehearsal
 
-If **every checkbox above** is checked, run this in SQL to lock in the state as a demo baseline:
+If **every checkbox above** is checked, tag the passing commit so we can trace back to this exact code state if a regression ever surfaces:
 
-```sql
-insert into public.audit_log (event, payload) values (
-  'm4_exit_gate_passed',
-  jsonb_build_object(
-    'passed_at', now(),
-    'run_by',    current_user,
-    'branch',    (select current_setting('app.git_branch', true))
-  )
-);
+```powershell
+git tag -a m4-exit-gate-passed -m "M4 exit-gate rehearsal passed $(Get-Date -Format o) by $env:USERNAME"
+git push origin m4-exit-gate-passed
 ```
 
 Then:
