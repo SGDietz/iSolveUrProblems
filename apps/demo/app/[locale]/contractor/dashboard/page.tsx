@@ -18,6 +18,12 @@ import { ConnectOnboardButton } from "../../../../src/components/contractor/Conn
 import { ChecklistTile } from "../../../../src/components/contractor/ChecklistTile";
 import { listChecklistsForContractor } from "../../../../src/lib/appointments";
 import { getMostRecentNudgeForContractor } from "../../../../src/lib/coaching";
+import {
+  listOpenRequestsForContractor,
+  listResponsesForRequest,
+  listInvitationsForInvitee,
+} from "../../../../src/lib/crew";
+import { CrewMarketplaceTile } from "../../../../src/components/contractor/CrewMarketplaceTile";
 
 export const dynamic = "force-dynamic";
 
@@ -81,12 +87,15 @@ export default async function ContractorDashboardPage({
     redirect(`/${locale}/for-contractors`);
   }
 
-  const [contractor, jobs, subscription, recentNudge] = await Promise.all([
-    getContractorById(roleInfo.contractor_id),
-    listContractorJobs({ contractor_id: roleInfo.contractor_id, limit: 30 }),
-    getActiveSubscriptionForContractor(roleInfo.contractor_id),
-    getMostRecentNudgeForContractor(roleInfo.contractor_id),
-  ]);
+  const [contractor, jobs, subscription, recentNudge, outgoingRequests, incomingInvitations] =
+    await Promise.all([
+      getContractorById(roleInfo.contractor_id),
+      listContractorJobs({ contractor_id: roleInfo.contractor_id, limit: 30 }),
+      getActiveSubscriptionForContractor(roleInfo.contractor_id),
+      getMostRecentNudgeForContractor(roleInfo.contractor_id),
+      listOpenRequestsForContractor(roleInfo.contractor_id),
+      listInvitationsForInvitee(roleInfo.contractor_id),
+    ]);
   if (!contractor) notFound();
 
   const currentTier: Tier = subscription?.tier ?? "free";
@@ -121,6 +130,15 @@ export default async function ContractorDashboardPage({
     existingChecklists.map((c) => [c.appointment_id, c] as const),
   );
   const checklistGated = !tierUnlocks(currentTier, "checklist_agent");
+  const crewGated = !tierUnlocks(currentTier, "crew_marketplace");
+
+  // M4.2 — hydrate per-request response lists in parallel.
+  const outgoingWithResponses = await Promise.all(
+    outgoingRequests.map(async (r) => ({
+      request: r,
+      responses: await listResponsesForRequest(r.id),
+    })),
+  );
 
   const licenseVerified =
     contractor.license_status === "active" &&
@@ -204,6 +222,12 @@ export default async function ContractorDashboardPage({
       <SubscriptionPanel
         contractor_id={contractor.id}
         current={subscriptionCurrent}
+      />
+
+      <CrewMarketplaceTile
+        gated={crewGated}
+        initial_outgoing={outgoingWithResponses}
+        initial_incoming={incomingInvitations}
       />
 
       <JobsSection title={t("pending.title")} blurb={t("pending.blurb")} jobs={pending} t={t} emptyLabel={t("pending.empty")} />

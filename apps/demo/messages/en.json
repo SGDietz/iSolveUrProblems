@@ -482,6 +482,54 @@
         "kicker": "A note from 6",
         "signoff": "— 6 only sends these when something real happens. Reply STOP to mute."
       },
+      "crew": {
+        "title": "Crew marketplace",
+        "silverPlus": "Silver+",
+        "gatedBadge": "Silver+",
+        "gatedBlurb": "Upgrade to Silver and 6 will find you a same-day helper contractor when you're double-booked.",
+        "errorGeneric": "Something went wrong. Try again.",
+        "errorTier": "This is a Silver-tier feature.",
+        "errorAlreadyFilled": "Another contractor accepted first.",
+        "form": {
+          "category": "Trade needed",
+          "neededAt": "Needed at",
+          "radiusKm": "Radius (km)",
+          "scope": "What's the job?",
+          "scopePlaceholder": "Set 4 interior doors, ~2 hours.",
+          "submitCta": "Post to nearby helpers",
+          "submitting": "Posting…"
+        },
+        "outgoing": {
+          "title": "Your open requests",
+          "empty": "No outgoing requests right now.",
+          "status": {
+            "open": "Open",
+            "filled": "Filled",
+            "expired": "Expired",
+            "cancelled": "Cancelled"
+          },
+          "responseStatus": {
+            "invited": "Invited",
+            "accepted": "Accepted",
+            "declined": "Passed",
+            "expired": "Expired",
+            "no_response": "No response"
+          }
+        },
+        "incoming": {
+          "title": "Invitations for you",
+          "empty": "No one has invited you to help yet.",
+          "acceptCta": "Accept",
+          "declineCta": "Decline",
+          "status": {
+            "invited": "Awaiting",
+            "accepted": "Accepted",
+            "declined": "Declined",
+            "expired": "Expired",
+            "no_response": "No response"
+          }
+        }
+      },
       "checklist": {
         "title": "Pre-departure checklist",
         "notYetBlurb": "6 will draft tools, materials, and confirmations 2h before this job. Generate now to preview.",

@@ -9,6 +9,8 @@ import {
 } from "./appointment-reminder";
 import appointmentChecklistTemplate from "./appointment-checklist";
 import coachingNudgeTemplate from "./coaching-nudge";
+import crewInvitationTemplate from "./crew-invitation";
+import crewFilledTemplate from "./crew-filled";
 import adminDisputeEscalationTemplate from "./admin-dispute-escalation";
 
 /**
@@ -35,6 +37,10 @@ const REGISTRY: Record<string, NotificationTemplate<never>> = {
     appointmentChecklistTemplate as NotificationTemplate<never>,
   "coaching.nudge.v1":
     coachingNudgeTemplate as NotificationTemplate<never>,
+  "crew.invitation.v1":
+    crewInvitationTemplate as NotificationTemplate<never>,
+  "crew.filled.v1":
+    crewFilledTemplate as NotificationTemplate<never>,
   "admin.dispute.escalation.v1":
     adminDisputeEscalationTemplate as NotificationTemplate<never>,
 };

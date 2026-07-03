@@ -482,6 +482,54 @@
         "kicker": "Un mot de 6",
         "signoff": "— 6 n'envoie ça que quand il se passe vraiment quelque chose. Réponds STOP pour couper."
       },
+      "crew": {
+        "title": "Marché de renforts",
+        "silverPlus": "Silver+",
+        "gatedBadge": "Silver+",
+        "gatedBlurb": "Passe au niveau Silver et 6 te trouve un contractant de renfort le jour même quand tu es surbooké.",
+        "errorGeneric": "Quelque chose a coincé. Réessaie.",
+        "errorTier": "Fonctionnalité du niveau Silver.",
+        "errorAlreadyFilled": "Un autre contractant a accepté avant.",
+        "form": {
+          "category": "Métier recherché",
+          "neededAt": "Nécessaire à",
+          "radiusKm": "Rayon (km)",
+          "scope": "C'est quoi le chantier ?",
+          "scopePlaceholder": "Pose de 4 portes intérieures, ~2 h.",
+          "submitCta": "Envoyer aux renforts proches",
+          "submitting": "Envoi…"
+        },
+        "outgoing": {
+          "title": "Tes demandes ouvertes",
+          "empty": "Pas de demandes sortantes.",
+          "status": {
+            "open": "Ouverte",
+            "filled": "Pourvue",
+            "expired": "Expirée",
+            "cancelled": "Annulée"
+          },
+          "responseStatus": {
+            "invited": "Invité",
+            "accepted": "Accepté",
+            "declined": "Passé",
+            "expired": "Expiré",
+            "no_response": "Sans réponse"
+          }
+        },
+        "incoming": {
+          "title": "Invitations pour toi",
+          "empty": "Personne ne t'a encore invité en renfort.",
+          "acceptCta": "Accepter",
+          "declineCta": "Refuser",
+          "status": {
+            "invited": "En attente",
+            "accepted": "Accepté",
+            "declined": "Refusé",
+            "expired": "Expiré",
+            "no_response": "Sans réponse"
+          }
+        }
+      },
       "checklist": {
         "title": "Check-list avant départ",
         "notYetBlurb": "6 listera outils, matériaux et confirmations 2 h avant ce chantier. Génère maintenant pour prévisualiser.",

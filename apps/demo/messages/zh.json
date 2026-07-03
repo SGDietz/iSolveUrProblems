@@ -483,6 +483,54 @@
         "kicker": "来自 6 的留言",
         "signoff": "— 6 只在真有事发生时才会发。回复 STOP 可静音。"
       },
+      "crew": {
+        "title": "工友市场",
+        "silverPlus": "Silver+",
+        "gatedBadge": "Silver+",
+        "gatedBlurb": "升级到 Silver,当你排不开档期时,6 会为你找到当天可到场的帮手承包商。",
+        "errorGeneric": "出错了,请重试。",
+        "errorTier": "此功能属于 Silver 套餐。",
+        "errorAlreadyFilled": "已有其他承包商先接了。",
+        "form": {
+          "category": "所需工种",
+          "neededAt": "需要时间",
+          "radiusKm": "半径 (公里)",
+          "scope": "工作内容",
+          "scopePlaceholder": "安装 4 扇室内门,约 2 小时。",
+          "submitCta": "发送给附近同行",
+          "submitting": "发送中…"
+        },
+        "outgoing": {
+          "title": "你的公开请求",
+          "empty": "当前没有外发请求。",
+          "status": {
+            "open": "进行中",
+            "filled": "已成交",
+            "expired": "已过期",
+            "cancelled": "已取消"
+          },
+          "responseStatus": {
+            "invited": "已邀请",
+            "accepted": "已接受",
+            "declined": "已拒绝",
+            "expired": "已过期",
+            "no_response": "未回应"
+          }
+        },
+        "incoming": {
+          "title": "别人的邀请",
+          "empty": "还没有人邀请你帮忙。",
+          "acceptCta": "接受",
+          "declineCta": "拒绝",
+          "status": {
+            "invited": "待处理",
+            "accepted": "已接受",
+            "declined": "已拒绝",
+            "expired": "已过期",
+            "no_response": "未回应"
+          }
+        }
+      },
       "checklist": {
         "title": "出发前清单",
         "notYetBlurb": "6 将在作业开始前 2 小时整理工具、材料和确认事项。立即生成可预览。",

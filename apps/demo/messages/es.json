@@ -482,6 +482,54 @@
         "kicker": "Una nota de 6",
         "signoff": "— 6 solo envía esto cuando pasa algo real. Responde STOP para silenciarlas."
       },
+      "crew": {
+        "title": "Mercado de refuerzos",
+        "silverPlus": "Plata+",
+        "gatedBadge": "Plata+",
+        "gatedBlurb": "Mejora a Plata y 6 te buscará un contratista de refuerzo en el mismo día cuando estés doblemente reservado.",
+        "errorGeneric": "Algo salió mal. Intenta de nuevo.",
+        "errorTier": "Esta es una función del nivel Plata.",
+        "errorAlreadyFilled": "Otro contratista aceptó primero.",
+        "form": {
+          "category": "Oficio necesario",
+          "neededAt": "Necesario para",
+          "radiusKm": "Radio (km)",
+          "scope": "¿Cuál es el trabajo?",
+          "scopePlaceholder": "Colocar 4 puertas interiores, ~2 horas.",
+          "submitCta": "Enviar a colegas cercanos",
+          "submitting": "Enviando…"
+        },
+        "outgoing": {
+          "title": "Tus solicitudes abiertas",
+          "empty": "No hay solicitudes salientes ahora.",
+          "status": {
+            "open": "Abierta",
+            "filled": "Cubierta",
+            "expired": "Expirada",
+            "cancelled": "Cancelada"
+          },
+          "responseStatus": {
+            "invited": "Invitado",
+            "accepted": "Aceptó",
+            "declined": "Pasó",
+            "expired": "Expiró",
+            "no_response": "Sin respuesta"
+          }
+        },
+        "incoming": {
+          "title": "Invitaciones para ti",
+          "empty": "Nadie te ha invitado a ayudar aún.",
+          "acceptCta": "Aceptar",
+          "declineCta": "Rechazar",
+          "status": {
+            "invited": "En espera",
+            "accepted": "Aceptada",
+            "declined": "Rechazada",
+            "expired": "Expirada",
+            "no_response": "Sin respuesta"
+          }
+        }
+      },
       "checklist": {
         "title": "Lista previa a la salida",
         "notYetBlurb": "6 preparará herramientas, materiales y confirmaciones 2 h antes de este trabajo. Generar ahora para previsualizar.",

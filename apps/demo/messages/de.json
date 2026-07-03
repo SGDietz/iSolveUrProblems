@@ -482,6 +482,54 @@
         "kicker": "Eine Nachricht von 6",
         "signoff": "— 6 schickt das nur, wenn wirklich etwas passiert. STOP antworten, um stummzuschalten."
       },
+      "crew": {
+        "title": "Crew-Marktplatz",
+        "silverPlus": "Silver+",
+        "gatedBadge": "Silver+",
+        "gatedBlurb": "Upgrade auf Silver und 6 findet dir noch am selben Tag eine Aushilfe, wenn du doppelt gebucht bist.",
+        "errorGeneric": "Etwas ist schiefgelaufen. Erneut versuchen.",
+        "errorTier": "Silver-Feature.",
+        "errorAlreadyFilled": "Ein anderer Auftragnehmer hat zuerst angenommen.",
+        "form": {
+          "category": "Benötigtes Gewerk",
+          "neededAt": "Benötigt am",
+          "radiusKm": "Radius (km)",
+          "scope": "Worum geht's?",
+          "scopePlaceholder": "4 Innentüren einbauen, ~2 Std.",
+          "submitCta": "An Aushilfen in der Nähe senden",
+          "submitting": "Senden…"
+        },
+        "outgoing": {
+          "title": "Deine offenen Anfragen",
+          "empty": "Aktuell keine offenen Anfragen.",
+          "status": {
+            "open": "Offen",
+            "filled": "Vergeben",
+            "expired": "Abgelaufen",
+            "cancelled": "Storniert"
+          },
+          "responseStatus": {
+            "invited": "Eingeladen",
+            "accepted": "Angenommen",
+            "declined": "Verzichtet",
+            "expired": "Abgelaufen",
+            "no_response": "Keine Antwort"
+          }
+        },
+        "incoming": {
+          "title": "Einladungen für dich",
+          "empty": "Noch keine Aushilfe-Einladungen.",
+          "acceptCta": "Annehmen",
+          "declineCta": "Ablehnen",
+          "status": {
+            "invited": "Wartend",
+            "accepted": "Angenommen",
+            "declined": "Abgelehnt",
+            "expired": "Abgelaufen",
+            "no_response": "Keine Antwort"
+          }
+        }
+      },
       "checklist": {
         "title": "Vorbereitungs-Checkliste",
         "notYetBlurb": "6 listet Werkzeuge, Material und Bestätigungen 2 Std. vor dem Auftrag. Jetzt erzeugen für eine Vorschau.",

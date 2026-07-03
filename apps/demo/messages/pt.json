@@ -482,6 +482,54 @@
         "kicker": "Um recado do 6",
         "signoff": "— 6 só envia isso quando algo real acontece. Responda STOP para silenciar."
       },
+      "crew": {
+        "title": "Marketplace de reforços",
+        "silverPlus": "Silver+",
+        "gatedBadge": "Silver+",
+        "gatedBlurb": "Atualize para Silver e o 6 encontra um contratante de reforço no mesmo dia quando você estiver sobrecarregado.",
+        "errorGeneric": "Algo deu errado. Tente de novo.",
+        "errorTier": "Recurso do nível Silver.",
+        "errorAlreadyFilled": "Outro contratante aceitou antes.",
+        "form": {
+          "category": "Ofício necessário",
+          "neededAt": "Necessário em",
+          "radiusKm": "Raio (km)",
+          "scope": "Qual é o serviço?",
+          "scopePlaceholder": "Instalar 4 portas internas, ~2 h.",
+          "submitCta": "Enviar para reforços próximos",
+          "submitting": "Enviando…"
+        },
+        "outgoing": {
+          "title": "Suas solicitações abertas",
+          "empty": "Nenhuma solicitação em aberto.",
+          "status": {
+            "open": "Aberta",
+            "filled": "Preenchida",
+            "expired": "Expirada",
+            "cancelled": "Cancelada"
+          },
+          "responseStatus": {
+            "invited": "Convidado",
+            "accepted": "Aceitou",
+            "declined": "Passou",
+            "expired": "Expirou",
+            "no_response": "Sem resposta"
+          }
+        },
+        "incoming": {
+          "title": "Convites para você",
+          "empty": "Ninguém te convidou para ajudar ainda.",
+          "acceptCta": "Aceitar",
+          "declineCta": "Recusar",
+          "status": {
+            "invited": "Aguardando",
+            "accepted": "Aceito",
+            "declined": "Recusado",
+            "expired": "Expirado",
+            "no_response": "Sem resposta"
+          }
+        }
+      },
       "checklist": {
         "title": "Lista pré-saída",
         "notYetBlurb": "6 listará ferramentas, materiais e confirmações 2 h antes deste trabalho. Gerar agora para pré-visualizar.",
