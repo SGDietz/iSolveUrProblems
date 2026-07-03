@@ -278,7 +278,8 @@
           "scheduled": "预约已安排",
           "rescheduled": "预约已改期",
           "cancelled": "预约已取消",
-          "list": "即将到来的预约"
+          "list": "即将到来的预约",
+          "no_show": "正在寻找替补"
         },
         "status": {
           "cancelled": "已取消",

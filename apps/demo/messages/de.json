@@ -277,7 +277,8 @@
           "scheduled": "Termin vereinbart",
           "rescheduled": "Termin verschoben",
           "cancelled": "Termin abgesagt",
-          "list": "Nächste Termine"
+          "list": "Nächste Termine",
+          "no_show": "Ersatz wird gesucht"
         },
         "status": {
           "cancelled": "Abgesagt",

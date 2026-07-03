@@ -14,6 +14,8 @@ import {
   rescheduleAppointment,
   cancelAppointment,
   listUpcomingAppointments,
+  findRecentUnfulfilledAppointment,
+  declareNoShowAndDispatch,
   type AppointmentRow,
 } from "../appointments";
 import { getSupabaseAdminConfig } from "../supabaseAdmin";
@@ -32,6 +34,7 @@ import {
   wrapDraftContract,
   wrapEstimateReady,
   wrapFallback,
+  wrapNoShowDispatched,
   wrapPickResult,
   wrapRecommendationsResult,
   wrapRecurringScheduled,
@@ -867,6 +870,59 @@ async function handleCancelAppointment(args: {
       payload: { appointments: [card], intent_kind: "cancelled" },
     },
     contextMessage: wrapAppointmentCancelled({ appointment: card }),
+  };
+}
+
+/**
+ * M4.4 — Handle "they didn't show" from the homeowner. Resolves the
+ * target appointment (most recent one still in scheduled/rescheduled,
+ * within the last 4 hours), flips it to no_show, and fans out an urgent
+ * dispatch to same-day contractors nearby. Idempotent via the CAS in
+ * declareNoShowAndDispatch.
+ */
+async function handleReportNoShow(args: {
+  user_id: string | null;
+  raw_text: string;
+}): Promise<
+  | { variant: SurfaceVariant; contextMessage: string }
+  | { contextMessage: string }
+> {
+  if (!args.user_id) {
+    return { contextMessage: wrapFallback("no-show reports require sign-in") };
+  }
+  const target = await findRecentUnfulfilledAppointment({
+    user_id: args.user_id,
+  });
+  if (!target) {
+    return {
+      contextMessage: wrapFallback(
+        "no recent appointment found to flag as no-show",
+      ),
+    };
+  }
+  const result = await declareNoShowAndDispatch({
+    appointment_id: target.id,
+    trigger: "homeowner_report",
+    reasonContext: {
+      reported_by_user_id: args.user_id,
+      via: "voice_intent",
+      raw_text: args.raw_text,
+      reported_at: new Date().toISOString(),
+    },
+  });
+  const contractorName = await fetchContractorNameSafe(target.contractor_id);
+  const card = appointmentRowToCard(target, contractorName);
+  const invited_count = result.invited.filter((i) => i.delivered).length;
+  return {
+    variant: {
+      kind: "appointment",
+      payload: { appointments: [card], intent_kind: "no_show" },
+    },
+    contextMessage: wrapNoShowDispatched({
+      appointment: card,
+      invited_count,
+      skipped_reason: result.skipped_reason,
+    }),
   };
 }
 
@@ -1950,6 +2006,18 @@ export async function orchestrate(
         user_id: input.user_id,
         snapshot: input.currentSurface,
         tz: input.tz,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: "variant" in r ? r.variant : undefined,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "report_no_show": {
+      const r = await handleReportNoShow({
+        user_id: input.user_id,
+        raw_text: input.text,
       });
       return {
         kind: "action",

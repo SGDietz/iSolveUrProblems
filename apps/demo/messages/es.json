@@ -277,7 +277,8 @@
           "scheduled": "Cita agendada",
           "rescheduled": "Cita reprogramada",
           "cancelled": "Cita cancelada",
-          "list": "Próximas citas"
+          "list": "Próximas citas",
+          "no_show": "Buscando un reemplazo"
         },
         "status": {
           "cancelled": "Cancelada",

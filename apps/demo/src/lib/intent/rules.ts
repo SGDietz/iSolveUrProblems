@@ -51,7 +51,8 @@ type Rule = {
     | "file_dispute"
     | "place_call"
     | "generate_estimate"
-    | "schedule_recurring";
+    | "schedule_recurring"
+    | "report_no_show";
   /** Required slot keys — if any are missing the result is "medium". */
   required: Array<keyof IntentSlots>;
 };
@@ -136,6 +137,24 @@ const RULES: readonly Rule[] = [
       ),
     build: () => ({}),
     kind: "cancel_appointment",
+    required: [],
+  },
+  // ─── REPORT_NO_SHOW ───────────────────────────────────────────────
+  // Homeowner-driven trigger for the M4.4 backup dispatcher. Must come
+  // before reschedule (which could otherwise claim "they didn't come,
+  // move it to tomorrow") and before find_contractor (which "nobody
+  // came" could weakly hint at). No required slots — the handler
+  // resolves the target appointment from context.
+  //
+  // Vision ¶33: "If contractors don't show, 6 will get contractors that do."
+  {
+    id: "report.no_show",
+    match: (t) =>
+      /\b(no[- ]?show|didn'?t\s+show(\s+up)?|never\s+(showed|came|turned\s+up|arrived)|hasn'?t\s+shown(\s+up)?|nobody\s+(came|showed)|no\s+one\s+(came|showed)|they'?re\s+not\s+here|they\s+didn'?t\s+come|stood\s+(us|me)\s+up)\b/i.test(
+        t,
+      ),
+    build: () => ({}),
+    kind: "report_no_show",
     required: [],
   },
   // ─── RESCHEDULE_APPOINTMENT ───────────────────────────────────────

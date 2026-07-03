@@ -390,6 +390,41 @@ export function wrapRecurringScheduled(args: {
 }
 
 /**
+ * M4.4 — Confirm a homeowner-reported no-show dispatch. Brain narrates
+ * that the original contractor was flagged and a fan-out to same-day
+ * substitutes is out (or not — dispatch may skip if nobody's nearby).
+ */
+export function wrapNoShowDispatched(args: {
+  appointment: AppointmentCard;
+  invited_count: number;
+  skipped_reason?: string;
+}): string {
+  const { appointment, invited_count, skipped_reason } = args;
+  const originalWith = appointment.contractor_name
+    ? ` (${appointment.contractor_name})`
+    : "";
+  if (skipped_reason === "no_invitables") {
+    return [
+      `[NO-SHOW REPORTED — not spoken by user]`,
+      `Flagged the appointment${originalWith} scheduled ${appointment.scheduled_when_text} as a no-show, but no same-day substitutes were reachable in the area.`,
+      `Respond as 6 in first person, one short sentence. Acknowledge the no-show, say you flagged it, and offer to broaden the search or reschedule instead.`,
+    ].join("\n");
+  }
+  if (invited_count === 0) {
+    return [
+      `[NO-SHOW REPORTED — not spoken by user]`,
+      `Flagged the appointment${originalWith} scheduled ${appointment.scheduled_when_text} as a no-show. Dispatch was attempted but no invitations went out (see server logs).`,
+      `Respond as 6 in first person, one sentence. Acknowledge the report and offer to try again or reschedule.`,
+    ].join("\n");
+  }
+  return [
+    `[NO-SHOW REPORTED — not spoken by user]`,
+    `Flagged the appointment${originalWith} scheduled ${appointment.scheduled_when_text} as a no-show and invited ${invited_count} same-day substitute contractor${invited_count === 1 ? "" : "s"}. First to accept wins.`,
+    `Respond as 6 in first person, one or two sentences. Acknowledge the no-show, tell them you've dispatched ${invited_count} nearby ${invited_count === 1 ? "contractor" : "contractors"} and you'll ping them the moment someone accepts.`,
+  ].join("\n");
+}
+
+/**
  * Build a "we couldn't act on this" wrapper for when intent matched but
  * required slots were missing or backend returned nothing.
  */

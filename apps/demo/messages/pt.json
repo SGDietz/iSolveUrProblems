@@ -277,7 +277,8 @@
           "scheduled": "Agendamento marcado",
           "rescheduled": "Agendamento remarcado",
           "cancelled": "Agendamento cancelado",
-          "list": "Próximos agendamentos"
+          "list": "Próximos agendamentos",
+          "no_show": "Procurando um substituto"
         },
         "status": {
           "cancelled": "Cancelado",

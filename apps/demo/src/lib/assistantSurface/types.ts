@@ -127,7 +127,7 @@ export type AppointmentCard = {
 export type AppointmentSurfacePayload = {
   appointments: AppointmentCard[];
   /** What just happened — used by the panel header copy. */
-  intent_kind: "scheduled" | "rescheduled" | "cancelled" | "list";
+  intent_kind: "scheduled" | "rescheduled" | "cancelled" | "list" | "no_show";
 };
 
 /**

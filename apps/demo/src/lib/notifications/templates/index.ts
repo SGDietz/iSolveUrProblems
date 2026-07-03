@@ -11,6 +11,7 @@ import appointmentChecklistTemplate from "./appointment-checklist";
 import coachingNudgeTemplate from "./coaching-nudge";
 import crewInvitationTemplate from "./crew-invitation";
 import crewFilledTemplate from "./crew-filled";
+import contractorUrgentDispatchTemplate from "./contractor-urgent-dispatch";
 import adminDisputeEscalationTemplate from "./admin-dispute-escalation";
 
 /**
@@ -41,6 +42,8 @@ const REGISTRY: Record<string, NotificationTemplate<never>> = {
     crewInvitationTemplate as NotificationTemplate<never>,
   "crew.filled.v1":
     crewFilledTemplate as NotificationTemplate<never>,
+  "contractor.urgent_dispatch.v1":
+    contractorUrgentDispatchTemplate as NotificationTemplate<never>,
   "admin.dispute.escalation.v1":
     adminDisputeEscalationTemplate as NotificationTemplate<never>,
 };

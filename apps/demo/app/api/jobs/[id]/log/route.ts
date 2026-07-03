@@ -17,6 +17,7 @@ import {
   type JobLogKind,
   type JobLogPhase,
 } from "../../../../../src/lib/jobLogs";
+import { markContractorConfirmed } from "../../../../../src/lib/appointments";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -273,5 +274,15 @@ export async function POST(
       { status: 202 },
     );
   }
+
+  // M4.4 — First photo/video is a strong on-site signal; mark the
+  // contractor confirmed so the no-show detector skips this appointment.
+  // Idempotent: only writes if contractor_confirmed_at is still null.
+  await markContractorConfirmed({
+    appointment_id: id,
+    contractor_id: authz.contractor_id,
+    source: "photo_log",
+  }).catch(() => null);
+
   return NextResponse.json({ row });
 }

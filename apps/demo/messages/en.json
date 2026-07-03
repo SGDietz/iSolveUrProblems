@@ -277,7 +277,8 @@
           "scheduled": "Appointment scheduled",
           "rescheduled": "Appointment moved",
           "cancelled": "Appointment cancelled",
-          "list": "Upcoming appointments"
+          "list": "Upcoming appointments",
+          "no_show": "Dispatching a substitute"
         },
         "status": {
           "cancelled": "Cancelled",

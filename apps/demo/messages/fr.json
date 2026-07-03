@@ -277,7 +277,8 @@
           "scheduled": "Rendez-vous programmé",
           "rescheduled": "Rendez-vous reprogrammé",
           "cancelled": "Rendez-vous annulé",
-          "list": "Prochains rendez-vous"
+          "list": "Prochains rendez-vous",
+          "no_show": "Recherche d'un remplaçant"
         },
         "status": {
           "cancelled": "Annulé",

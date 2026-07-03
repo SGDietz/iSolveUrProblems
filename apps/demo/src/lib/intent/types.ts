@@ -33,7 +33,8 @@ export type IntentKind =
   | "file_dispute"
   | "place_call"
   | "generate_estimate"
-  | "schedule_recurring";
+  | "schedule_recurring"
+  | "report_no_show";
 
 /** A reference to a specific contractor in conversation context. */
 export type ContractorRef =
