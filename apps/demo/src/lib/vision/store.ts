@@ -159,3 +159,41 @@ export async function getLatestCvLabelForEntry(
   const rows = (await res.json()) as CvLabelRow[];
   return rows[0] ?? null;
 }
+
+/**
+ * Batch lookup — most recent prediction per entry across every photo
+ * on an appointment. Avoids the N+1 pattern where a 20-photo log
+ * fires 20 GETs on mount. Two queries: entry ids for the appointment,
+ * then latest cv_label per entry.
+ */
+export async function listLatestCvLabelsForAppointment(
+  appointment_id: string,
+): Promise<CvLabelRow[]> {
+  const { url, serviceRoleKey } = getSupabaseAdminConfig();
+  const entriesRes = await fetch(
+    `${url}/rest/v1/job_log_entries?appointment_id=eq.${encodeURIComponent(
+      appointment_id,
+    )}&kind=eq.photo&select=id`,
+    { headers: adminHeaders(serviceRoleKey), cache: "no-store" },
+  );
+  if (!entriesRes.ok) return [];
+  const entries = (await entriesRes.json()) as Array<{ id: string }>;
+  if (entries.length === 0) return [];
+  const idList = entries.map((e) => `"${e.id}"`).join(",");
+  const labelsRes = await fetch(
+    `${url}/rest/v1/cv_labels?job_log_entry_id=in.(${idList})&order=created_at.desc&select=*`,
+    { headers: adminHeaders(serviceRoleKey), cache: "no-store" },
+  );
+  if (!labelsRes.ok) return [];
+  const rows = (await labelsRes.json()) as CvLabelRow[];
+  // Latest-per-entry: rows are ordered by created_at desc; keep the
+  // first for each entry id.
+  const seen = new Set<string>();
+  const latest: CvLabelRow[] = [];
+  for (const r of rows) {
+    if (seen.has(r.job_log_entry_id)) continue;
+    seen.add(r.job_log_entry_id);
+    latest.push(r);
+  }
+  return latest;
+}

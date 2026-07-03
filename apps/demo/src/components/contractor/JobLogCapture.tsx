@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import type {
   JobLogEntryView,
   JobLogPhase,
 } from "../../lib/jobLogs/types";
+import type { CvLabelRow } from "../../lib/vision";
 import { CvLabelChip } from "./CvLabelChip";
 
 /**
@@ -79,6 +80,45 @@ export function JobLogCapture(props: Props) {
   const [activePhase, setActivePhase] = useState<JobLogPhase | null>(null);
   const [noteText, setNoteText] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // M4.6 — one batch fetch of cv labels for the whole appointment, so
+  // a 20-photo log doesn't fire 20 GETs on mount. `labelByEntry` is
+  // frozen from the first fetch; freshly-uploaded photos fall back to
+  // the chip's own per-entry GET (they'll have no label yet anyway).
+  const [labelByEntry, setLabelByEntry] = useState<Map<
+    string,
+    CvLabelRow | null
+  > | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/appointments/${props.appointment_id}/cv-labels`,
+        );
+        if (cancelled) return;
+        if (!res.ok) {
+          setLabelByEntry(new Map());
+          return;
+        }
+        const data = (await res.json()) as { rows: CvLabelRow[] };
+        const map = new Map<string, CvLabelRow | null>();
+        for (const r of data.rows) map.set(r.job_log_entry_id, r);
+        // Ensure every known photo entry has an explicit key — null
+        // means "checked, no label yet" so the chip renders "idle"
+        // without its own GET.
+        for (const e of props.initial_entries) {
+          if (e.kind === "photo" && !map.has(e.id)) map.set(e.id, null);
+        }
+        setLabelByEntry(map);
+      } catch {
+        if (!cancelled) setLabelByEntry(new Map());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.appointment_id, props.initial_entries]);
 
   // The single hidden file input we re-program when the contractor
   // taps a phase button. Avoids three duplicated inputs in markup.
@@ -275,6 +315,9 @@ export function JobLogCapture(props: Props) {
                     <CvLabelChip
                       appointment_id={props.appointment_id}
                       entry_id={e.id}
+                      initialLabel={
+                        labelByEntry ? (labelByEntry.get(e.id) ?? null) : undefined
+                      }
                     />
                   )}
                 </div>

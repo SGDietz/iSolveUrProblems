@@ -12,16 +12,26 @@ import type { CvLabelRow } from "../../lib/vision";
  * classify route and the chip surfaces the tier gate as a hint).
  *
  * Flow:
- *   1. On mount, GET the latest cv_label for this entry. If already
- *      confirmed, render the confirmed label with a checkmark and stop.
- *   2. If a pending prediction exists, render label + yes/no.
- *   3. If no prediction yet, render an "Identify" button.
- *   4. "No" reveals a small text input for the corrected label.
+ *   1. On mount, either hydrate from the parent-provided
+ *      `initialLabel` (batch-fetched once by JobLogCapture — avoids
+ *      the N+1 GET pattern) OR fall back to a per-entry GET.
+ *   2. If already confirmed, render the confirmed label with a
+ *      checkmark and stop.
+ *   3. If a pending prediction exists, render label + yes/no.
+ *   4. If no prediction yet, render an "Identify" button.
+ *   5. "No" reveals a small text input for the corrected label.
  */
 
 type Props = {
   appointment_id: string;
   entry_id: string;
+  /**
+   * Pre-fetched label from the parent's batch query, or null if the
+   * parent knows there's nothing for this entry. `undefined` (the
+   * default) means "parent didn't hydrate — fall back to per-entry
+   * GET on mount".
+   */
+  initialLabel?: CvLabelRow | null;
 };
 
 type Phase =
@@ -33,15 +43,27 @@ type Phase =
   | { kind: "gated" }
   | { kind: "error"; message: string };
 
+function phaseFromRow(row: CvLabelRow | null): Phase {
+  if (!row) return { kind: "idle" };
+  if (row.confirmed_label) return { kind: "confirmed", row };
+  return { kind: "predicted", row };
+}
+
 export function CvLabelChip(props: Props) {
   const t = useTranslations("contractor.jobLog.cv");
-  const [phase, setPhase] = useState<Phase>({ kind: "loading" });
+  const [phase, setPhase] = useState<Phase>(() =>
+    props.initialLabel === undefined
+      ? { kind: "loading" }
+      : phaseFromRow(props.initialLabel),
+  );
   const [busy, setBusy] = useState(false);
 
   const classifyUrl = `/api/jobs/${props.appointment_id}/log/${props.entry_id}/classify`;
   const confirmUrl = `${classifyUrl}/confirm`;
+  const shouldFetchOnMount = props.initialLabel === undefined;
 
   useEffect(() => {
+    if (!shouldFetchOnMount) return;
     let cancelled = false;
     (async () => {
       try {
@@ -56,15 +78,7 @@ export function CvLabelChip(props: Props) {
           return;
         }
         const data = (await res.json()) as { row: CvLabelRow | null };
-        if (!data.row) {
-          setPhase({ kind: "idle" });
-          return;
-        }
-        if (data.row.confirmed_label) {
-          setPhase({ kind: "confirmed", row: data.row });
-        } else {
-          setPhase({ kind: "predicted", row: data.row });
-        }
+        setPhase(phaseFromRow(data.row));
       } catch {
         if (!cancelled) setPhase({ kind: "idle" });
       }
@@ -72,7 +86,7 @@ export function CvLabelChip(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [classifyUrl]);
+  }, [classifyUrl, shouldFetchOnMount]);
 
   async function runClassify() {
     if (busy) return;

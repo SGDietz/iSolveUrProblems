@@ -9,8 +9,10 @@ import {
   isTwilioVoiceConfigured,
   patchCall,
   setCallStatus,
+  userKnowsContractor,
 } from "../../../../../src/lib/calls";
 import { getSupabaseAdminConfig } from "../../../../../src/lib/supabaseAdmin";
+import { E164_RE } from "../../../../../src/lib/phone";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -44,7 +46,6 @@ export const maxDuration = 30;
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const E164_RE = /^\+[1-9]\d{6,14}$/;
 
 function bad(msg: string, status = 400) {
   return NextResponse.json({ error: msg }, { status });
@@ -73,46 +74,6 @@ async function fetchContractorPhone(
   } catch {
     return null;
   }
-}
-
-/**
- * Nuisance-call defense: only allow starting a go-between call when
- * the homeowner has a legit prior connection to this contractor —
- * either a signed contract, a scheduled/completed appointment, or a
- * previously placed call. Without this, any signed-in user could
- * cause Twilio to dial any contractor whose row exists.
- *
- * Signals checked (any one is sufficient):
- *   - contracts row with (user_id, contractor_id)
- *   - appointments row with (user_id, contractor_id)
- *   - calls row with (user_id, contractor_id)
- */
-async function userKnowsContractor(args: {
-  user_id: string;
-  contractor_id: string;
-}): Promise<boolean> {
-  const { url, serviceRoleKey } = getSupabaseAdminConfig();
-  const headers = {
-    apikey: serviceRoleKey,
-    Authorization: `Bearer ${serviceRoleKey}`,
-  };
-  const uid = encodeURIComponent(args.user_id);
-  const cid = encodeURIComponent(args.contractor_id);
-  const paths = [
-    `contracts?user_id=eq.${uid}&contractor_id=eq.${cid}&select=id&limit=1`,
-    `appointments?user_id=eq.${uid}&contractor_id=eq.${cid}&select=id&limit=1`,
-    `calls?user_id=eq.${uid}&contractor_id=eq.${cid}&select=id&limit=1`,
-  ];
-  const results = await Promise.all(
-    paths.map((p) =>
-      fetch(`${url}/rest/v1/${p}`, { headers, cache: "no-store" })
-        .then(async (r) =>
-          r.ok ? ((await r.json()) as unknown[]).length > 0 : false,
-        )
-        .catch(() => false),
-    ),
-  );
-  return results.some(Boolean);
 }
 
 export async function POST(request: NextRequest) {

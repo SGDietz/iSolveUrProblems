@@ -19,6 +19,7 @@ import {
   type AppointmentRow,
 } from "../appointments";
 import { TWILIO_VOICE_FROM_NUMBER } from "../../../app/api/secrets";
+import { E164_RE } from "../phone";
 import { getSupabaseAdminConfig } from "../supabaseAdmin";
 import { classifyIntent } from "./classify";
 import { DEFAULT_CENTER } from "./slots";
@@ -1367,8 +1368,6 @@ async function handleFileDispute(args: {
 
 // ─── Phone call + estimate (M3.1 / M3.6) ────────────────────────────
 
-const E164_RE = /^\+[1-9]\d{6,14}$/;
-
 async function fetchUserPhone(userId: string): Promise<string | null> {
   try {
     const { url, serviceRoleKey } = getSupabaseAdminConfig();
@@ -1573,13 +1572,28 @@ async function handleGoBetweenMode(args: {
   }
   // The other party is usually the contractor whose card is on-screen
   // when the homeowner says "get on the phone with me while they're
-  // here". Fall back to an explicit contractor_ref if the surface
-  // doesn't have one.
+  // here". Fall back to snapshot.contractorIds[0] ONLY on surfaces
+  // where "the contractor on screen" has clear semantics — search
+  // results, review summaries, picks, and pickResult. Not on
+  // appointment / contract / dispute / call / estimate panels, whose
+  // stale contractor id would silently dial the wrong person.
+  const CONTRACTOR_ON_SCREEN_KINDS = new Set([
+    "contractors",
+    "summary",
+    "picks",
+    "pickResult",
+    "compare",
+  ]);
   const ref = args.slots.contractor_ref;
+  const snapshotContractorId =
+    args.snapshot &&
+    CONTRACTOR_ON_SCREEN_KINDS.has(args.snapshot.kind ?? "")
+      ? args.snapshot.contractorIds?.[0]
+      : undefined;
   const resolved = ref
     ? await resolveContractorRef({ ref, snapshot: args.snapshot })
-    : args.snapshot?.contractorIds?.[0]
-      ? await fetchContractorById(args.snapshot.contractorIds[0])
+    : snapshotContractorId
+      ? await fetchContractorById(snapshotContractorId)
       : null;
   if (!resolved) {
     return {

@@ -10,5 +10,6 @@ export {
   confirmCvLabel,
   getCvLabelById,
   getLatestCvLabelForEntry,
+  listLatestCvLabelsForAppointment,
   type CvLabelRow,
 } from "./store";

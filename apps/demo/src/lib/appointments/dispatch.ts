@@ -298,6 +298,50 @@ async function patchReplacementInvitedCount(args: {
 }
 
 /**
+ * Merge a skip reason + total_considered snapshot into the audit row's
+ * context. GET-then-PATCH so we don't clobber the eagerly-written
+ * context (original_contractor_id, category, etc.). Called only on
+ * the no_invitables short-circuit path — successful fan-outs don't
+ * need this.
+ */
+async function patchReplacementSkippedReason(args: {
+  replacement_row_id: string;
+  skipped_reason: string;
+  total_considered: number;
+}): Promise<void> {
+  const { url, serviceRoleKey } = getSupabaseAdminConfig();
+  const readRes = await fetch(
+    `${url}/rest/v1/appointment_replacements?id=eq.${encodeURIComponent(
+      args.replacement_row_id,
+    )}&select=context&limit=1`,
+    { headers: adminHeaders(serviceRoleKey), cache: "no-store" },
+  );
+  if (!readRes.ok) return;
+  const rows = (await readRes.json()) as Array<{
+    context: Record<string, unknown>;
+  }>;
+  const existing = rows[0]?.context ?? {};
+  const nextContext = {
+    ...existing,
+    skipped_reason: args.skipped_reason,
+    total_considered: args.total_considered,
+  };
+  await fetch(
+    `${url}/rest/v1/appointment_replacements?id=eq.${encodeURIComponent(
+      args.replacement_row_id,
+    )}`,
+    {
+      method: "PATCH",
+      headers: {
+        ...adminHeaders(serviceRoleKey),
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({ context: nextContext }),
+    },
+  );
+}
+
+/**
  * Main dispatch — assumes markNoShowIfNew has already succeeded (i.e.
  * the appointment is currently in status='no_show'). Runs the fan-out
  * and writes the audit trail.
@@ -356,6 +400,17 @@ export async function runBackupDispatch(args: {
     .slice(0, DISPATCH_FANOUT_N);
 
   if (finalHits.length === 0) {
+    // Persist the skip reason on the eagerly-inserted audit row so a
+    // future dashboard/query can distinguish "we tried, nobody was
+    // reachable" from "we tried and 3 were invited". Best-effort; row
+    // may be absent if insertReplacementRow failed.
+    if (replacementRow) {
+      await patchReplacementSkippedReason({
+        replacement_row_id: replacementRow.id,
+        skipped_reason: "no_invitables",
+        total_considered: search.total_considered,
+      });
+    }
     return {
       ...baseResult,
       replacement_id: replacementRow?.id ?? null,
@@ -439,6 +494,15 @@ export async function declareNoShowAndDispatch(args: {
 }): Promise<DispatchResult> {
   const flipped = await markNoShowIfNew({ appointment_id: args.appointment_id });
   if (!flipped) {
+    // We lost the CAS — another trigger got here first. Don't just
+    // discard our telemetry; append our (trigger, reasonContext) to
+    // the winning replacement row so we can see "cron detected AND
+    // homeowner also reported" in the audit trail.
+    await appendAdditionalTriggerToLatest({
+      appointment_id: args.appointment_id,
+      trigger: args.trigger,
+      reasonContext: args.reasonContext ?? {},
+    });
     return {
       appointment_id: args.appointment_id,
       replacement_id: null,
@@ -452,6 +516,61 @@ export async function declareNoShowAndDispatch(args: {
     trigger: args.trigger,
     reasonContext: args.reasonContext,
   });
+}
+
+/**
+ * Race telemetry: the losing trigger appends itself to the winning
+ * replacement row's context under `additional_triggers`. Best-effort
+ * (a missing winner row is possible if the CAS lost to a purely
+ * status-flipping path with no dispatch, though today all winners run
+ * the full dispatch and thus insert a replacement row).
+ */
+async function appendAdditionalTriggerToLatest(args: {
+  appointment_id: string;
+  trigger: DispatchTrigger;
+  reasonContext: Record<string, unknown>;
+}): Promise<void> {
+  const { url, serviceRoleKey } = getSupabaseAdminConfig();
+  const listRes = await fetch(
+    `${url}/rest/v1/appointment_replacements?original_appointment_id=eq.${encodeURIComponent(
+      args.appointment_id,
+    )}&order=created_at.desc&limit=1&select=id,context`,
+    { headers: adminHeaders(serviceRoleKey), cache: "no-store" },
+  );
+  if (!listRes.ok) return;
+  const rows = (await listRes.json()) as Array<{
+    id: string;
+    context: Record<string, unknown>;
+  }>;
+  const winner = rows[0];
+  if (!winner) return;
+  const existing = Array.isArray(winner.context?.additional_triggers)
+    ? (winner.context.additional_triggers as unknown[])
+    : [];
+  const nextContext = {
+    ...winner.context,
+    additional_triggers: [
+      ...existing,
+      {
+        trigger: args.trigger,
+        at: new Date().toISOString(),
+        ...args.reasonContext,
+      },
+    ],
+  };
+  await fetch(
+    `${url}/rest/v1/appointment_replacements?id=eq.${encodeURIComponent(
+      winner.id,
+    )}`,
+    {
+      method: "PATCH",
+      headers: {
+        ...adminHeaders(serviceRoleKey),
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({ context: nextContext }),
+    },
+  );
 }
 
 // ─── Presentation helpers ───────────────────────────────────────────

@@ -6,6 +6,7 @@ import {
   useAssistantSurface,
   type CallPayload,
 } from "../../lib/assistantSurface";
+import { E164_RE } from "../../lib/phone";
 
 /**
  * M4.9 — Start go-between mediation CTA.
@@ -51,7 +52,7 @@ export function GoBetweenStartButton({
     const phone = window.prompt(t("phonePrompt"), "+1");
     if (!phone) return;
     const trimmed = phone.trim();
-    if (!/^\+[1-9]\d{6,14}$/.test(trimmed)) {
+    if (!E164_RE.test(trimmed)) {
       setError(t("phoneInvalid"));
       return;
     }

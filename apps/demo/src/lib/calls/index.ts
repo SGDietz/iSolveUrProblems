@@ -30,3 +30,4 @@ export {
   mirrorTwilioRecordingToStorage,
   signCallRecordingUrl,
 } from "./recordings";
+export { userKnowsContractor } from "./authz";

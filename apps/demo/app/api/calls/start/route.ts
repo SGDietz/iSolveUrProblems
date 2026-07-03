@@ -9,8 +9,10 @@ import {
   isTwilioVoiceConfigured,
   patchCall,
   setCallStatus,
+  userKnowsContractor,
 } from "../../../../src/lib/calls";
 import { getSupabaseAdminConfig } from "../../../../src/lib/supabaseAdmin";
+import { E164_RE } from "../../../../src/lib/phone";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -37,7 +39,6 @@ export const maxDuration = 30;
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const E164_RE = /^\+[1-9]\d{6,14}$/;
 
 function bad(msg: string, status = 400) {
   return NextResponse.json({ error: msg }, { status });
@@ -112,6 +113,17 @@ export async function POST(request: NextRequest) {
     (typeof body.contract_id !== "string" || !UUID_RE.test(body.contract_id))
   ) {
     return bad("contract_id must be a uuid");
+  }
+
+  const knows = await userKnowsContractor({
+    user_id: userId,
+    contractor_id: body.contractor_id,
+  });
+  if (!knows) {
+    return bad(
+      "you don't have a contract, appointment, or call history with this contractor",
+      403,
+    );
   }
 
   const contractorPhone = await fetchContractorPhone(body.contractor_id);

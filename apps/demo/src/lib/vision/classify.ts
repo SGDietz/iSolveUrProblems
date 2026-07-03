@@ -65,7 +65,8 @@ export type ClassifyResult =
         | "openai_not_configured"
         | "llm_http_error"
         | "llm_parse_failed"
-        | "llm_fetch_threw";
+        | "llm_fetch_threw"
+        | "llm_refused";
       debug?: string;
     };
 
@@ -154,7 +155,28 @@ export async function classifyJobLogPhoto(
       };
     }
     const data = await res.json();
-    raw = data?.choices?.[0]?.message?.content ?? "";
+    // gpt-4o may return a structured refusal or a finish_reason of
+    // 'content_filter' when the safety layer intervenes. Surface that
+    // as its own reason so the caller can distinguish "the model
+    // failed" from "the model refused" (e.g. don't retry refusals).
+    const choice = data?.choices?.[0];
+    const refusal = choice?.message?.refusal;
+    const finishReason = choice?.finish_reason;
+    if (typeof refusal === "string" && refusal.trim().length > 0) {
+      return {
+        ok: false,
+        reason: "llm_refused",
+        debug: refusal.slice(0, 300),
+      };
+    }
+    if (finishReason === "content_filter") {
+      return {
+        ok: false,
+        reason: "llm_refused",
+        debug: `finish_reason=content_filter`,
+      };
+    }
+    raw = choice?.message?.content ?? "";
   } catch (e) {
     return {
       ok: false,

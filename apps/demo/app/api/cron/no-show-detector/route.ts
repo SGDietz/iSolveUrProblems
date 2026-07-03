@@ -40,18 +40,29 @@ export async function GET(request: NextRequest) {
   }
 
   const candidates = await findNoShowCandidates();
-  const results = await Promise.all(
-    candidates.map((appt) =>
-      declareNoShowAndDispatch({
-        appointment_id: appt.id,
-        trigger: "cron_grace_expired",
-        reasonContext: {
-          grace_minutes: appt.grace_minutes,
-          scheduled_at: appt.scheduled_at,
-        },
-      }),
-    ),
-  );
+
+  // Cap fan-out so a burst of coincident no-shows doesn't blast the
+  // email provider (each dispatch = up to DISPATCH_FANOUT_N emails).
+  // Small enough to keep the cron under maxDuration=60s; large enough
+  // to make progress across the typical 5-min cadence.
+  const CONCURRENCY = 4;
+  const results: Awaited<ReturnType<typeof declareNoShowAndDispatch>>[] = [];
+  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+    const chunk = candidates.slice(i, i + CONCURRENCY);
+    const chunkResults = await Promise.all(
+      chunk.map((appt) =>
+        declareNoShowAndDispatch({
+          appointment_id: appt.id,
+          trigger: "cron_grace_expired",
+          reasonContext: {
+            grace_minutes: appt.grace_minutes,
+            scheduled_at: appt.scheduled_at,
+          },
+        }),
+      ),
+    );
+    results.push(...chunkResults);
+  }
 
   return NextResponse.json({
     ran_at: new Date().toISOString(),
