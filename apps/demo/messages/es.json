@@ -581,7 +581,25 @@
       "tierGate": "Mejora a Bronce para registrar fotos en este trabajo.",
       "gatedTitle": "El registro fotográfico es una función de pago",
       "gatedBlurb": "Mejora a Bronce y 6 guarda cada foto del trabajo con marca de tiempo, GPS y línea de tiempo para el cliente.",
-      "gatedManageCta": "Gestionar suscripción →"
+      "gatedManageCta": "Gestionar suscripción →",
+      "cv": {
+        "loading": "Buscando etiqueta de IA…",
+        "identifyCta": "Identificar con 6",
+        "classifying": "6 está mirando…",
+        "predictedLabel": "6 cree:",
+        "confidence": {
+          "low": "confianza baja",
+          "medium": "confianza media",
+          "high": "confianza alta"
+        },
+        "yesCta": "Sí",
+        "noCta": "No",
+        "correctionPlaceholder": "p. ej. diente de león",
+        "saveCorrectionCta": "Guardar",
+        "confirmedPrefix": "Confirmado:",
+        "tierGate": "La identificación con IA es una función Gold.",
+        "errorGeneric": "No se pudo obtener la etiqueta. Intenta de nuevo."
+      }
     },
     "subscription": {
       "title": "Tu plan:",

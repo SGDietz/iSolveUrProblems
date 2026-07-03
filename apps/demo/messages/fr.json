@@ -581,7 +581,25 @@
       "tierGate": "Passe à Bronze pour enregistrer des photos sur ce chantier.",
       "gatedTitle": "Le journal photo est une fonction payante",
       "gatedBlurb": "Passe à Bronze et 6 garde chaque photo du chantier avec horodatage, GPS et chronologie côté client.",
-      "gatedManageCta": "Gérer l'abonnement →"
+      "gatedManageCta": "Gérer l'abonnement →",
+      "cv": {
+        "loading": "Recherche d'un label IA…",
+        "identifyCta": "Identifier avec 6",
+        "classifying": "6 regarde…",
+        "predictedLabel": "6 pense :",
+        "confidence": {
+          "low": "confiance faible",
+          "medium": "confiance moyenne",
+          "high": "confiance élevée"
+        },
+        "yesCta": "Oui",
+        "noCta": "Non",
+        "correctionPlaceholder": "p. ex. pissenlit",
+        "saveCorrectionCta": "Enregistrer",
+        "confirmedPrefix": "Confirmé :",
+        "tierGate": "L'identification IA est une fonction Gold.",
+        "errorGeneric": "Impossible d'obtenir le label. Réessayez."
+      }
     },
     "subscription": {
       "title": "Votre formule :",

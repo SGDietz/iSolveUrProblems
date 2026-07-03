@@ -581,7 +581,25 @@
       "tierGate": "Upgrade to Bronze to log photos against this job.",
       "gatedTitle": "Photo logging is a paid feature",
       "gatedBlurb": "Upgrade to Bronze and 6 stores every photo against this job, with timestamps, GPS, and a homeowner-facing timeline.",
-      "gatedManageCta": "Manage subscription →"
+      "gatedManageCta": "Manage subscription →",
+      "cv": {
+        "loading": "Checking for AI label…",
+        "identifyCta": "Identify with 6",
+        "classifying": "6 is looking…",
+        "predictedLabel": "6 thinks:",
+        "confidence": {
+          "low": "low confidence",
+          "medium": "medium confidence",
+          "high": "high confidence"
+        },
+        "yesCta": "Yes",
+        "noCta": "No",
+        "correctionPlaceholder": "e.g. dandelion",
+        "saveCorrectionCta": "Save",
+        "confirmedPrefix": "Confirmed:",
+        "tierGate": "AI identification is a Gold-tier feature.",
+        "errorGeneric": "Couldn't get an AI label. Try again."
+      }
     },
     "subscription": {
       "title": "Your plan:",

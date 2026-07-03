@@ -582,7 +582,25 @@
       "tierGate": "升级到 Bronze 即可为本作业记录照片。",
       "gatedTitle": "照片日志是付费功能",
       "gatedBlurb": "升级到 Bronze,6 会为每张作业照片记录时间戳、GPS,并向户主呈现时间线。",
-      "gatedManageCta": "管理订阅 →"
+      "gatedManageCta": "管理订阅 →",
+      "cv": {
+        "loading": "正在查找 AI 标签…",
+        "identifyCta": "用 6 识别",
+        "classifying": "6 正在查看…",
+        "predictedLabel": "6 认为:",
+        "confidence": {
+          "low": "低置信度",
+          "medium": "中等置信度",
+          "high": "高置信度"
+        },
+        "yesCta": "是",
+        "noCta": "否",
+        "correctionPlaceholder": "例如: 蒲公英",
+        "saveCorrectionCta": "保存",
+        "confirmedPrefix": "已确认:",
+        "tierGate": "AI 识别是 Gold 级功能。",
+        "errorGeneric": "无法获取 AI 标签,请重试。"
+      }
     },
     "subscription": {
       "title": "当前套餐:",

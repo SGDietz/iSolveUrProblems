@@ -130,6 +130,21 @@ export async function insertJobLog(
   return rows[0] ?? null;
 }
 
+export async function getJobLogEntryById(
+  id: string,
+): Promise<JobLogEntryRow | null> {
+  const { url, serviceRoleKey } = getSupabaseAdminConfig();
+  const res = await fetch(
+    `${url}/rest/v1/job_log_entries?id=eq.${encodeURIComponent(
+      id,
+    )}&select=*&limit=1`,
+    { headers: adminHeaders(serviceRoleKey), cache: "no-store" },
+  );
+  if (!res.ok) return null;
+  const rows = (await res.json()) as JobLogEntryRow[];
+  return rows[0] ?? null;
+}
+
 export async function listJobLogsForAppointment(args: {
   appointment_id: string;
 }): Promise<JobLogEntryRow[]> {

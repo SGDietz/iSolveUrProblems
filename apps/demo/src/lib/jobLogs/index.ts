@@ -11,6 +11,7 @@ export {
   extForMime,
   uploadJobLogObject,
   insertJobLog,
+  getJobLogEntryById,
   listJobLogsForAppointment,
   signJobLogUrl,
   listJobLogsWithUrls,

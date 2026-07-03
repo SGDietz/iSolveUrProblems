@@ -6,6 +6,7 @@ import type {
   JobLogEntryView,
   JobLogPhase,
 } from "../../lib/jobLogs/types";
+import { CvLabelChip } from "./CvLabelChip";
 
 /**
  * M4.5 — Mobile-first capture surface.
@@ -269,6 +270,12 @@ export function JobLogCapture(props: Props) {
                     <p className="text-sm text-zinc-200 break-words">
                       {e.caption}
                     </p>
+                  )}
+                  {e.kind === "photo" && (
+                    <CvLabelChip
+                      appointment_id={props.appointment_id}
+                      entry_id={e.id}
+                    />
                   )}
                 </div>
               </li>

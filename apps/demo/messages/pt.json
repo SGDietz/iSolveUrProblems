@@ -581,7 +581,25 @@
       "tierGate": "Atualize para Bronze para registrar fotos neste trabalho.",
       "gatedTitle": "Registro fotográfico é um recurso pago",
       "gatedBlurb": "Atualize para Bronze e o 6 guarda cada foto do trabalho com horário, GPS e linha do tempo para o cliente.",
-      "gatedManageCta": "Gerenciar assinatura →"
+      "gatedManageCta": "Gerenciar assinatura →",
+      "cv": {
+        "loading": "Buscando rótulo de IA…",
+        "identifyCta": "Identificar com 6",
+        "classifying": "6 está olhando…",
+        "predictedLabel": "6 acha:",
+        "confidence": {
+          "low": "confiança baixa",
+          "medium": "confiança média",
+          "high": "confiança alta"
+        },
+        "yesCta": "Sim",
+        "noCta": "Não",
+        "correctionPlaceholder": "por ex. dente-de-leão",
+        "saveCorrectionCta": "Salvar",
+        "confirmedPrefix": "Confirmado:",
+        "tierGate": "Identificação por IA é um recurso Gold.",
+        "errorGeneric": "Não foi possível obter o rótulo. Tente novamente."
+      }
     },
     "subscription": {
       "title": "Seu plano:",

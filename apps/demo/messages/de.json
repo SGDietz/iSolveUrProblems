@@ -581,7 +581,25 @@
       "tierGate": "Upgrade auf Bronze, um Fotos zu diesem Auftrag zu speichern.",
       "gatedTitle": "Foto-Journal ist ein kostenpflichtiges Feature",
       "gatedBlurb": "Upgrade auf Bronze und 6 speichert jedes Foto zum Auftrag mit Zeitstempel, GPS und einer Zeitleiste für den Kunden.",
-      "gatedManageCta": "Abonnement verwalten →"
+      "gatedManageCta": "Abonnement verwalten →",
+      "cv": {
+        "loading": "Suche KI-Label…",
+        "identifyCta": "Mit 6 erkennen",
+        "classifying": "6 schaut…",
+        "predictedLabel": "6 vermutet:",
+        "confidence": {
+          "low": "niedrige Konfidenz",
+          "medium": "mittlere Konfidenz",
+          "high": "hohe Konfidenz"
+        },
+        "yesCta": "Ja",
+        "noCta": "Nein",
+        "correctionPlaceholder": "z. B. Löwenzahn",
+        "saveCorrectionCta": "Speichern",
+        "confirmedPrefix": "Bestätigt:",
+        "tierGate": "KI-Erkennung ist ein Gold-Feature.",
+        "errorGeneric": "KI-Label fehlgeschlagen. Bitte erneut versuchen."
+      }
     },
     "subscription": {
       "title": "Dein Plan:",
