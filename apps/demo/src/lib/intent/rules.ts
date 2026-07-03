@@ -52,7 +52,8 @@ type Rule = {
     | "place_call"
     | "generate_estimate"
     | "schedule_recurring"
-    | "report_no_show";
+    | "report_no_show"
+    | "go_between_mode";
   /** Required slot keys — if any are missing the result is "medium". */
   required: Array<keyof IntentSlots>;
 };
@@ -241,6 +242,29 @@ const RULES: readonly Rule[] = [
     },
     kind: "schedule_appointment",
     required: ["when"],
+  },
+  // ─── GO_BETWEEN_MODE ──────────────────────────────────────────────
+  // "6, get on the phone with me while the plumber's here" / "start
+  // go-between mode" / "mediate for us". Must beat place_call because
+  // "get on the phone with me" would otherwise trip that rule's second
+  // alternate. Distinct semantics: place_call = outbound call from 6
+  // to a contractor (both parties remote). go_between_mode = 6 joins a
+  // call the homeowner and contractor are on together (both parties
+  // physically present, 6 mediates).
+  //
+  // Vision ¶15: "6 will also manage the in-person meetings as the
+  // go-between, live on one or both phones."
+  {
+    id: "go_between.mode",
+    match: (t) =>
+      /\b(go[- ]?between(\s+mode)?|mediate\s+(for\s+us|between\s+us)|be\s+the\s+go[- ]?between|jump\s+in\s+and\s+mediate|get\s+on\s+the\s+phone\s+with\s+(me|us)\s+while)\b/i.test(
+        t,
+      ),
+    build: (t) => ({
+      contractor_ref: extractContractorRef(t),
+    }),
+    kind: "go_between_mode",
+    required: [],
   },
   // ─── PLACE_CALL ───────────────────────────────────────────────────
   // "call the plumber", "get them on the phone", "phone Acme" — must

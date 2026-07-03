@@ -78,7 +78,16 @@ export function CallPanel({ payload }: { payload: CallPayload }) {
   return (
     <div className="flex flex-col gap-3 text-sm">
       <header className="flex items-baseline justify-between gap-2">
-        <h3 className="font-semibold text-emerald-300">{t("title")}</h3>
+        <div className="flex items-baseline gap-2">
+          <h3 className="font-semibold text-emerald-300">
+            {payload.mode === "go_between" ? t("titleGoBetween") : t("title")}
+          </h3>
+          {payload.mode === "go_between" && (
+            <span className="text-[10px] uppercase tracking-wide font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300">
+              {t("modeBadgeGoBetween")}
+            </span>
+          )}
+        </div>
         <span
           className={
             "text-[10px] uppercase tracking-wide font-mono " + toneClass

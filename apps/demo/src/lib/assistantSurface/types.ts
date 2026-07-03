@@ -233,6 +233,13 @@ export type CallPayload = {
   estimate_id: string | null;
   started_at: string | null;
   ended_at: string | null;
+  /**
+   * M4.9 — Distinguishes a remote 3-way (default) from a go-between
+   * mediation where the homeowner + contractor are physically together
+   * and 6 joins via one or both phones. The transcript surface renders
+   * a "shared transcript" affordance in go_between mode.
+   */
+  mode?: "remote" | "go_between";
 };
 
 /**

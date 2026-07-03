@@ -390,6 +390,26 @@ export function wrapRecurringScheduled(args: {
 }
 
 /**
+ * M4.9 — Confirm a go-between session is starting. Brain reads back
+ * that 6 is dialing both parties and coaches the homeowner on how to
+ * use it — put the phone on speaker so the contractor standing there
+ * can hear 6 mediate too.
+ */
+export function wrapGoBetweenStarted(args: {
+  payload: CallPayload;
+}): string {
+  const { payload } = args;
+  const with_ = payload.contractor_name
+    ? ` with ${payload.contractor_name}`
+    : "";
+  return [
+    `[GO-BETWEEN MODE STARTED — not spoken by user]`,
+    `Just started a mediation call${with_}. 6 will hear both sides through the phone and can speak into the conference when addressed by name. The homeowner and contractor are in the same room — the homeowner should put their phone on speaker so both sides can hear 6.`,
+    `Respond as 6 in first person, one or two sentences. Tell them the call is dialing, ask them to put you on speaker, and mention you'll chime in when addressed by name.`,
+  ].join("\n");
+}
+
+/**
  * M4.4 — Confirm a homeowner-reported no-show dispatch. Brain narrates
  * that the original contractor was flagged and a fan-out to same-day
  * substitutes is out (or not — dispatch may skip if nobody's nearby).

@@ -34,6 +34,7 @@ import {
   wrapDraftContract,
   wrapEstimateReady,
   wrapFallback,
+  wrapGoBetweenStarted,
   wrapNoShowDispatched,
   wrapPickResult,
   wrapRecommendationsResult,
@@ -1535,6 +1536,140 @@ async function handlePlaceCall(args: {
   };
 }
 
+/**
+ * M4.9 — Go-between mediation call. The homeowner + contractor are in
+ * the same room; 6 joins as a Twilio conference mediator. Reuses the
+ * M3.1 dial pipeline (createCallLeg → conference → transcription →
+ * announce) but marks context.mode='go_between' so downstream surface
+ * code, coaching-nudge dedup, and analytics can distinguish the two
+ * kinds of calls.
+ *
+ * v1 requires both phones already on file (contractor via
+ * contractor_ref, homeowner via users.phone). The invite-the-other-
+ * party-via-share-link flow is deferred to v2.
+ */
+async function handleGoBetweenMode(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+  snapshot?: SurfaceSnapshot;
+}): Promise<
+  | { variant: SurfaceVariant; contextMessage: string }
+  | { contextMessage: string }
+> {
+  if (!isTwilioVoiceConfigured()) {
+    return {
+      contextMessage: wrapFallback(
+        "go-between mode requires Twilio Voice — env vars are missing",
+      ),
+    };
+  }
+  if (!args.user_id) {
+    return {
+      contextMessage: wrapFallback(
+        "go-between mode requires sign-in — we need the homeowner's phone",
+      ),
+    };
+  }
+  // The other party is usually the contractor whose card is on-screen
+  // when the homeowner says "get on the phone with me while they're
+  // here". Fall back to an explicit contractor_ref if the surface
+  // doesn't have one.
+  const ref = args.slots.contractor_ref;
+  const resolved = ref
+    ? await resolveContractorRef({ ref, snapshot: args.snapshot })
+    : args.snapshot?.contractorIds?.[0]
+      ? await fetchContractorById(args.snapshot.contractorIds[0])
+      : null;
+  if (!resolved) {
+    return {
+      contextMessage: wrapFallback(
+        "go-between: couldn't identify which contractor is here",
+      ),
+    };
+  }
+
+  const [userPhone, contractorPhone] = await Promise.all([
+    fetchUserPhone(args.user_id),
+    fetchContractorPhone(resolved.id),
+  ]);
+  if (!userPhone || !E164_RE.test(userPhone)) {
+    return {
+      contextMessage: wrapFallback(
+        "homeowner has no E.164 phone on file — go-between needs one",
+      ),
+    };
+  }
+  if (!contractorPhone || !E164_RE.test(contractorPhone)) {
+    return {
+      contextMessage: wrapFallback(
+        `${resolved.name} has no usable phone on file — go-between can't dial them in`,
+      ),
+    };
+  }
+
+  const fromPhone = process.env.TWILIO_VOICE_FROM_NUMBER ?? "";
+  const call = await createCall({
+    user_id: args.user_id,
+    contractor_id: resolved.id,
+    to_user_phone: userPhone,
+    to_contractor_phone: contractorPhone,
+    from_phone: fromPhone,
+    context: { source: "voice_intent", mode: "go_between" },
+  });
+  if (!call) {
+    return {
+      contextMessage: wrapFallback(
+        "go-between: call row insert failed — see server logs",
+      ),
+    };
+  }
+
+  const [userLeg, contractorLeg] = await Promise.all([
+    createCallLeg({ to: userPhone, callId: call.id, participant: "user" }),
+    createCallLeg({
+      to: contractorPhone,
+      callId: call.id,
+      participant: "contractor",
+    }),
+  ]);
+  if (!userLeg.ok || !contractorLeg.ok) {
+    await setCallStatus(call.id, "failed");
+    const errMsg = [
+      !userLeg.ok ? `user: ${userLeg.error}` : "",
+      !contractorLeg.ok ? `contractor: ${contractorLeg.error}` : "",
+    ]
+      .filter(Boolean)
+      .join("; ");
+    return {
+      contextMessage: wrapFallback(`go-between dial failed: ${errMsg}`),
+    };
+  }
+  await patchCall(call.id, {
+    status: "dialing",
+    twilio_call_sid_user: userLeg.sid,
+    twilio_call_sid_contractor: contractorLeg.sid,
+  });
+
+  const payload: CallPayload = {
+    call_id: call.id,
+    status: "dialing",
+    contractor_name: resolved.name,
+    contractor_phone: contractorPhone,
+    user_phone: userPhone,
+    transcript: [],
+    recording_signed_url: null,
+    estimate_id: null,
+    started_at: null,
+    ended_at: null,
+    mode: "go_between",
+  };
+
+  return {
+    variant: { kind: "call", payload },
+    contextMessage: wrapGoBetweenStarted({ payload }),
+  };
+}
+
 async function handleGenerateEstimate(args: {
   user_id: string | null;
   snapshot?: SurfaceSnapshot;
@@ -2018,6 +2153,19 @@ export async function orchestrate(
       const r = await handleReportNoShow({
         user_id: input.user_id,
         raw_text: input.text,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: "variant" in r ? r.variant : undefined,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "go_between_mode": {
+      const r = await handleGoBetweenMode({
+        slots: classification.slots,
+        user_id: input.user_id,
+        snapshot: input.currentSurface,
       });
       return {
         kind: "action",

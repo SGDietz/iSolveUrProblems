@@ -306,6 +306,8 @@
       },
       "call": {
         "title": "Llamada en curso",
+        "titleGoBetween": "Intermediario en persona",
+        "modeBadgeGoBetween": "Intermediario",
         "contractorLabel": "Contratista",
         "contractorPhoneLabel": "Número",
         "waitingTranscript": "Esperando que comience la llamada…",
@@ -352,6 +354,13 @@
           "declined": "Rechazado",
           "expired": "Expirado"
         }
+      },
+      "goBetween": {
+        "startCta": "Iniciar llamada de intermediario",
+        "startingCta": "Marcando…",
+        "phonePrompt": "Ingresa tu número en formato E.164 (por ejemplo +14155551234). 6 los llamará a ti y al contratista para mediar.",
+        "phoneInvalid": "Ingresa un número E.164 válido (por ejemplo +14155551234).",
+        "errorGeneric": "No se pudo iniciar la llamada de intermediario."
       },
       "recurring": {
         "title": "Trabajo en piloto automático programado",

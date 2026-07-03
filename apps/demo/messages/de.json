@@ -306,6 +306,8 @@
       },
       "call": {
         "title": "Laufender Anruf",
+        "titleGoBetween": "Vermittler vor Ort",
+        "modeBadgeGoBetween": "Vermittler",
         "contractorLabel": "Auftragnehmer",
         "contractorPhoneLabel": "Nummer",
         "waitingTranscript": "Warten auf Beginn des Anrufs…",
@@ -352,6 +354,13 @@
           "declined": "Abgelehnt",
           "expired": "Abgelaufen"
         }
+      },
+      "goBetween": {
+        "startCta": "Vermittler-Anruf starten",
+        "startingCta": "Wähle…",
+        "phonePrompt": "Gib deine Telefonnummer im E.164-Format ein (z. B. +14155551234). 6 ruft dich und den Handwerker in ein Vermittlungsgespräch.",
+        "phoneInvalid": "Bitte eine gültige E.164-Nummer eingeben (z. B. +14155551234).",
+        "errorGeneric": "Vermittler-Anruf konnte nicht gestartet werden."
       },
       "recurring": {
         "title": "Autopilot-Job geplant",

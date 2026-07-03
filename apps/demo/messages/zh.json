@@ -307,6 +307,8 @@
       },
       "call": {
         "title": "通话进行中",
+        "titleGoBetween": "现场居间调解",
+        "modeBadgeGoBetween": "居间调解",
         "contractorLabel": "承包商",
         "contractorPhoneLabel": "号码",
         "waitingTranscript": "等待通话开始…",
@@ -353,6 +355,13 @@
           "declined": "已拒绝",
           "expired": "已过期"
         }
+      },
+      "goBetween": {
+        "startCta": "开始居间调解通话",
+        "startingCta": "拨号中…",
+        "phonePrompt": "请输入你的 E.164 格式电话号码（例如 +14155551234）。6 会拨打你和承包商的电话进行居间调解。",
+        "phoneInvalid": "请输入有效的 E.164 号码（例如 +14155551234）。",
+        "errorGeneric": "无法启动居间调解通话。"
       },
       "recurring": {
         "title": "自动循环任务已设置",

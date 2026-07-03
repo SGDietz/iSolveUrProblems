@@ -306,6 +306,8 @@
       },
       "call": {
         "title": "Live phone call",
+        "titleGoBetween": "In-person go-between",
+        "modeBadgeGoBetween": "Go-between",
         "contractorLabel": "Contractor",
         "contractorPhoneLabel": "Number",
         "waitingTranscript": "Waiting for the call to start…",
@@ -352,6 +354,13 @@
           "declined": "Declined",
           "expired": "Expired"
         }
+      },
+      "goBetween": {
+        "startCta": "Start go-between call",
+        "startingCta": "Dialing…",
+        "phonePrompt": "Enter your phone number in E.164 (e.g. +14155551234). 6 will dial you and the contractor into a mediation call.",
+        "phoneInvalid": "Please enter a valid E.164 number (e.g. +14155551234).",
+        "errorGeneric": "Couldn't start the go-between call."
       },
       "recurring": {
         "title": "Autopilot job scheduled",

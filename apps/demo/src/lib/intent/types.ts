@@ -34,7 +34,8 @@ export type IntentKind =
   | "place_call"
   | "generate_estimate"
   | "schedule_recurring"
-  | "report_no_show";
+  | "report_no_show"
+  | "go_between_mode";
 
 /** A reference to a specific contractor in conversation context. */
 export type ContractorRef =

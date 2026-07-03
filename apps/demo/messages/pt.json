@@ -306,6 +306,8 @@
       },
       "call": {
         "title": "Chamada ao vivo",
+        "titleGoBetween": "Mediação presencial",
+        "modeBadgeGoBetween": "Mediador",
         "contractorLabel": "Prestador",
         "contractorPhoneLabel": "Número",
         "waitingTranscript": "Aguardando o início da chamada…",
@@ -352,6 +354,13 @@
           "declined": "Recusado",
           "expired": "Expirado"
         }
+      },
+      "goBetween": {
+        "startCta": "Iniciar chamada de mediação",
+        "startingCta": "Ligando…",
+        "phonePrompt": "Digite seu número no formato E.164 (por exemplo +14155551234). 6 ligará para você e para o prestador em uma mediação.",
+        "phoneInvalid": "Digite um número E.164 válido (por exemplo +14155551234).",
+        "errorGeneric": "Não foi possível iniciar a chamada de mediação."
       },
       "recurring": {
         "title": "Trabalho em piloto automático agendado",
