@@ -220,3 +220,40 @@ export async function getAppointmentById(
   const rows = (await res.json()) as AppointmentRow[];
   return rows[0] ?? null;
 }
+
+/**
+ * M4.4 — Find the homeowner's most likely no-show target. When the
+ * homeowner says "they didn't show", the relevant appointment is one
+ * that was scheduled a little while ago (past scheduled_at) but is still
+ * in an actionable state — contractor hasn't confirmed on-site, we
+ * haven't already flipped it to no_show, and it's within the last
+ * `windowHours` hours. We look slightly into the future too (up to
+ * 15 min) so a homeowner reporting the moment the contractor is late
+ * still finds the appointment.
+ */
+export async function findRecentUnfulfilledAppointment(args: {
+  user_id: string;
+  windowHours?: number;
+}): Promise<AppointmentRow | null> {
+  const { url, serviceRoleKey } = getSupabaseAdminConfig();
+  const windowH = Math.max(1, Math.min(args.windowHours ?? 4, 24));
+  const from = new Date(Date.now() - windowH * 3_600_000).toISOString();
+  const to = new Date(Date.now() + 15 * 60_000).toISOString();
+  const qs = new URLSearchParams();
+  qs.set("user_id", `eq.${args.user_id}`);
+  qs.set("status", "in.(scheduled,rescheduled)");
+  qs.set("contractor_confirmed_at", "is.null");
+  qs.set("no_show_detected_at", "is.null");
+  qs.set("scheduled_at", `gte.${from}`);
+  qs.append("scheduled_at", `lte.${to}`);
+  qs.set("order", "scheduled_at.desc");
+  qs.set("limit", "1");
+  qs.set("select", "*");
+  const res = await fetch(`${url}/rest/v1/appointments?${qs.toString()}`, {
+    headers: adminHeaders(serviceRoleKey),
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+  const rows = (await res.json()) as AppointmentRow[];
+  return rows[0] ?? null;
+}

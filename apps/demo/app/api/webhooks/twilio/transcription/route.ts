@@ -69,15 +69,26 @@ export async function POST(request: NextRequest) {
   const callId = searchParams.get("call_id") ?? "";
   const text = (form.get("TranscriptionText") ?? "").trim();
   const trackRaw = (form.get("Track") ?? "").toLowerCase();
-  // Twilio's Track values vary by configuration. Map both standard and
-  // our custom labels (set in voice/route.ts: inboundTrackLabel="homeowner",
-  // outboundTrackLabel="conference").
-  const speaker: "user" | "contractor" =
-    trackRaw === "inbound" ||
-    trackRaw === "inbound_track" ||
-    trackRaw === "homeowner"
-      ? "user"
-      : "contractor";
+  // CONSENT REWORK 2026-07-03 (Herm TASK_096 pre-enable fix): transcription
+  // now attaches to the CONTRACTOR leg (twiml.ts: inboundTrackLabel=
+  // "contractor", outboundTrackLabel="conference"). Inbound = the
+  // contractor's own mic; the conference/outbound mix is what that leg
+  // HEARS — homeowner + 6 — so it maps to "user" for wake-word purposes,
+  // flagged as a mix in context for later analysis. Unknown tracks are
+  // dropped, never guessed.
+  const contractorTracks = new Set(["contractor", "inbound", "inbound_track"]);
+  const conferenceTracks = new Set([
+    "conference",
+    "outbound",
+    "outbound_track",
+    "homeowner", // legacy label from the pre-consent user-leg attachment
+  ]);
+  if (!contractorTracks.has(trackRaw) && !conferenceTracks.has(trackRaw)) {
+    return new NextResponse("", { status: 200 });
+  }
+  const speaker: "user" | "contractor" = contractorTracks.has(trackRaw)
+    ? "contractor"
+    : "user";
 
   if (!callId || text === "") {
     return new NextResponse("", { status: 200 });
@@ -92,7 +103,15 @@ export async function POST(request: NextRequest) {
     session_id: callId,
     speaker,
     text,
-    context: { source: "twilio_transcription", track: trackRaw },
+    context: {
+      source: "twilio_transcription",
+      track: trackRaw,
+      // The conference mix carries homeowner + 6 blended — downstream
+      // analysis must not treat it as a clean single-speaker channel.
+      track_origin: contractorTracks.has(trackRaw)
+        ? "contractor_leg_inbound"
+        : "conference_mix",
+    },
   }).catch(() => null);
 
   // 2. Mark call as in_progress on first transcript.

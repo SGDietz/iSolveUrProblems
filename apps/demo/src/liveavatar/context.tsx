@@ -21,6 +21,11 @@ import {
   useAssistantSurface,
   type SurfaceVariant,
 } from "../lib/assistantSurface";
+import {
+  ADD_OFFER_RE,
+  parseOfferedAddItems,
+  type ListIndexEntry,
+} from "../lib/lists";
 
 type LiveAvatarContextProps = {
   sessionRef: React.RefObject<LiveAvatarSession>;
@@ -159,6 +164,41 @@ const useTranscriptCapture = (
   const avatarTurnRef = useRef<string>("");
   const pendingContextMessageRef = useRef<string | null>(null);
   const isAvatarSpeakingRef = useRef<boolean>(false);
+  // 6 asked "what city or ZIP?" for a find — remember the category so the
+  // user's bare "21093" answer resumes THAT search (G smoke 2026-07-01: the
+  // answer went nowhere and the brain invented a plumber). Echoed back to
+  // the orchestrator in every snapshot while fresh; cleared when cards land
+  // or after 3 minutes.
+  const pendingFindRef = useRef<{ category: string; at: number } | null>(null);
+  const PENDING_FIND_TTL_MS = 3 * 60_000;
+  // 6 just read the user's saved list names and asked "Which one?". The
+  // orchestrator can resolve the next short answer ("first one", "house") only
+  // if the client echoes this index back in the surface snapshot. Keep it short
+  // lived so a stale menu never hijacks normal conversation minutes later.
+  const pendingListIndexRef = useRef<{
+    entries: ListIndexEntry[];
+    at: number;
+  } | null>(null);
+  const PENDING_LIST_INDEX_TTL_MS = 3 * 60_000;
+  // 6 asked "what should I put on it?" (make-list with no items). The next
+  // plain user answer becomes REAL items via the relaxed pending-answer
+  // splitter server-side (Herm TASK_094 blocker #2; G smoke #6: "a painter,
+  // a plumber, and a roofer" went nowhere while 6 claimed it was saved).
+  const pendingListAddRef = useRef<{
+    listName: string | null;
+    at: number;
+  } | null>(null);
+  const PENDING_LIST_ADD_TTL_MS = 3 * 60_000;
+  // 6 SPOKE an add-offer ("Want me to add milk?") — armed from his avatar
+  // transcript (ADD_OFFER_RE + parseOfferedAddItems). ONE-SHOT: the next
+  // user utterance either resolves it server-side (bare "yes" → real add via
+  // the todo.add_offer_yes rule) or kills it. aiASAP ITEM 4, wired per Herm
+  // TASK_070 blocker #2.
+  const pendingAddOfferRef = useRef<{
+    items: string[];
+    at: number;
+  } | null>(null);
+  const PENDING_ADD_OFFER_TTL_MS = 2 * 60_000;
 
   useEffect(() => {
     const session = sessionRef.current;
@@ -182,6 +222,56 @@ const useTranscriptCapture = (
         case "pickResult":
           store.showPickResult(variant.payload);
           break;
+        case "compare":
+          store.showCompare(variant.payload);
+          break;
+        case "appointment":
+          store.showAppointment(variant.payload);
+          break;
+        case "contract":
+          store.showContract(variant.payload);
+          break;
+        case "dispute":
+          store.showDispute(variant.payload);
+          break;
+        case "call":
+          store.showCall(variant.payload);
+          break;
+        case "estimate":
+          store.showEstimate(variant.payload);
+          break;
+        case "recurring":
+          store.showRecurring(variant.payload);
+          break;
+        case "todo": {
+          // GUEST STAGING merge (Herm TASK_106): the server is stateless for
+          // anonymous lists, so the client accumulates transient items across
+          // turns — dedupe by title, renumber, never touch persisted lists.
+          const current = store.variant;
+          if (
+            variant.payload.transient &&
+            current?.kind === "todo" &&
+            current.payload.transient &&
+            current.payload.list_id === variant.payload.list_id
+          ) {
+            const seen = new Set<string>();
+            const merged = [...current.payload.items, ...variant.payload.items]
+              .filter((item) => {
+                const key = item.title.trim().toLowerCase();
+                if (!key || seen.has(key)) return false;
+                seen.add(key);
+                return true;
+              })
+              .map((item, index) => ({ ...item, position: index + 1 }));
+            store.showTodo({ ...variant.payload, items: merged });
+          } else {
+            store.showTodo(variant.payload);
+          }
+          break;
+        }
+        case "contractorOnboarding":
+          store.showContractorOnboarding(variant.payload);
+          break;
       }
     };
 
@@ -197,15 +287,85 @@ const useTranscriptCapture = (
         | "dispute"
         | "call"
         | "estimate"
+        | "todo"
+        | "contractorOnboarding"
+        | "recurring"
         | null;
       contractorIds: string[];
       deliberation?: {
         category: string;
         constraints: Record<string, unknown>;
       };
+      pendingFind?: { category: string };
+      pendingListIndex?: { entries: ListIndexEntry[] };
+      pendingAddOffer?: { items: string[] };
+      pendingListAdd?: { listName: string | null };
     } => {
-      const variant = useAssistantSurface.getState().variant;
-      if (!variant) return { kind: null, contractorIds: [] };
+      // Pending-find rides on EVERY snapshot while fresh — including the
+      // no-variant one (nothing is on screen while 6 waits for the ZIP).
+      const pf = pendingFindRef.current;
+      if (pf && Date.now() - pf.at > PENDING_FIND_TTL_MS) {
+        pendingFindRef.current = null;
+      }
+      const pendingFind = pendingFindRef.current
+        ? { category: pendingFindRef.current.category }
+        : undefined;
+      const pli = pendingListIndexRef.current;
+      if (pli && Date.now() - pli.at > PENDING_LIST_INDEX_TTL_MS) {
+        pendingListIndexRef.current = null;
+      }
+      const pendingListIndex = pendingListIndexRef.current
+        ? { entries: pendingListIndexRef.current.entries }
+        : undefined;
+      const pao = pendingAddOfferRef.current;
+      if (pao && Date.now() - pao.at > PENDING_ADD_OFFER_TTL_MS) {
+        pendingAddOfferRef.current = null;
+      }
+      const pendingAddOffer = pendingAddOfferRef.current
+        ? { items: pendingAddOfferRef.current.items }
+        : undefined;
+      const pla = pendingListAddRef.current;
+      if (pla && Date.now() - pla.at > PENDING_LIST_ADD_TTL_MS) {
+        pendingListAddRef.current = null;
+      }
+      const pendingListAdd = pendingListAddRef.current
+        ? { listName: pendingListAddRef.current.listName }
+        : undefined;
+      // A dismissed sheet can keep its variant for exit animation, but it is
+      // not on screen. Do not let ✕/ESC ghost-steer the next classifier turn.
+      const { variant, isOpen } = useAssistantSurface.getState();
+      if (!variant || !isOpen) {
+        return {
+          kind: null,
+          contractorIds: [],
+          pendingFind,
+          pendingListIndex,
+          pendingAddOffer,
+          pendingListAdd,
+        };
+      }
+      const snap = ((): {
+        kind:
+          | "contractors"
+          | "summary"
+          | "picks"
+          | "pickResult"
+          | "compare"
+          | "appointment"
+          | "contract"
+          | "dispute"
+          | "call"
+          | "estimate"
+          | "todo"
+          | "contractorOnboarding"
+          | "recurring"
+          | null;
+        contractorIds: string[];
+        deliberation?: {
+          category: string;
+          constraints: Record<string, unknown>;
+        };
+      } => {
       switch (variant.kind) {
         case "contractors":
           return {
@@ -264,7 +424,27 @@ const useTranscriptCapture = (
         case "estimate":
           // Estimate panel — same as call: no contractor ID surfacing.
           return { kind: "estimate", contractorIds: [] };
+        case "todo":
+          // List panel — no contractor IDs; the kind lets follow-up list
+          // commands ("check off number two") resolve against what's shown.
+          return { kind: "todo", contractorIds: [] };
+        case "contractorOnboarding":
+          // Onboarding is the trade-pro signing up — no homeowner-facing
+          // contractor IDs. The kind lets "save it"/"done" resolve to save.
+          return { kind: "contractorOnboarding", contractorIds: [] };
+        case "recurring":
+          // Recurring-job panel (M4.7) — no contractor ID surfacing; the
+          // kind lets follow-ups ("pause it") resolve against the panel.
+          return { kind: "recurring", contractorIds: [] };
       }
+      })();
+      return {
+        ...snap,
+        pendingFind,
+        pendingListIndex,
+        pendingAddOffer,
+        pendingListAdd,
+      };
     };
 
     const sendOrQueueContextMessage = (msg: string) => {
@@ -296,6 +476,36 @@ const useTranscriptCapture = (
         } catch {
           tz = null;
         }
+        // "Never mind" kills the list intake HERE — the server rule bails
+        // on cancel words, so without this the stale "what should I put on
+        // it?" slot would linger until TTL (Herm TASK_095 rewrite note).
+        // Cleared BEFORE the snapshot builds so the ask dies this turn.
+        if (
+          pendingListAddRef.current &&
+          /\b(?:never\s*mind|forget\s+(?:it|that|the\s+list)|cancel(?:\s+(?:it|that|the\s+list))?|no\s+list|drop\s+it)\b/i.test(
+            trimmed,
+          )
+        ) {
+          pendingListAddRef.current = null;
+        }
+        // Machine-injected context lines ("[FIND — not spoken by user] …")
+        // must never feed the pill brain — G's ride 2026-07-04: one became
+        // latestUserText and minted pills from the machine's own prompt.
+        const isInjectedContext =
+          /^\s*\[[^\]]{0,120}not spoken by user\]/i.test(trimmed);
+        // Pill brain (aiASAP port, G smoke #7): hand the session UI this
+        // utterance so the subject pills can refresh. Fire-and-forget.
+        try {
+          if (typeof window !== "undefined" && !isInjectedContext) {
+            window.dispatchEvent(
+              new CustomEvent("isolve:user-utterance", {
+                detail: { text: trimmed },
+              }),
+            );
+          }
+        } catch {
+          /* never break transcript flow */
+        }
         const res = await fetch("/api/transcripts/append", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -307,19 +517,71 @@ const useTranscriptCapture = (
             tz,
           }),
         });
+        // ONE-SHOT: the offer rode on THIS turn's snapshot. Whether the user
+        // said yes (server resolved it into a real add) or anything else, the
+        // slot dies now — a "yeah" minutes later must never write a list.
+        pendingAddOfferRef.current = null;
         if (!res.ok) return;
         const data = (await res.json()) as {
           id?: string;
           orchestrator?: {
             kind: "action" | "none";
             variant?: SurfaceVariant;
+            dismissSurface?: boolean;
             contextMessage?: string;
+            pending?:
+              | { kind: "find"; category: string }
+              | { kind: "list_index"; entries: ListIndexEntry[] }
+              | { kind: "list_add"; listName?: string | null };
             reason?: string;
           };
         };
         const orch = data.orchestrator;
         if (orch?.kind === "action") {
-          if (orch.variant) applyVariant(orch.variant);
+          if (orch.dismissSurface) {
+            pendingFindRef.current = null;
+            pendingListIndexRef.current = null;
+            pendingAddOfferRef.current = null;
+            pendingListAddRef.current = null;
+            useAssistantSurface.getState().reset();
+          } else {
+            // Multi-turn continuations: remember "6 asked for city/ZIP for X"
+            // so the bare location answer resumes that find; a landed
+            // contractors surface means the find completed — clear it.
+            // One-shot list intake: the server just asked "what should I put
+            // on it?" — arm it; ANY other handled action means the answer was
+            // consumed (todo variant) or the user moved on — drop it.
+            if (orch.pending?.kind === "list_add") {
+              pendingListAddRef.current = {
+                listName: orch.pending.listName ?? null,
+                at: Date.now(),
+              };
+            } else {
+              pendingListAddRef.current = null;
+            }
+            if (orch.pending?.kind === "find") {
+              pendingFindRef.current = {
+                category: orch.pending.category,
+                at: Date.now(),
+              };
+              pendingListIndexRef.current = null;
+            } else if (orch.pending?.kind === "list_index") {
+              pendingListIndexRef.current = {
+                entries: orch.pending.entries,
+                at: Date.now(),
+              };
+              pendingFindRef.current = null;
+            } else if (orch.variant?.kind === "contractors") {
+              pendingFindRef.current = null;
+              pendingListIndexRef.current = null;
+            } else {
+              // Any other handled action means the user moved past the menu or
+              // the pending list pick was consumed server-side. Drop it so a
+              // later short phrase can't reopen an old list by accident.
+              pendingListIndexRef.current = null;
+            }
+            if (orch.variant) applyVariant(orch.variant);
+          }
           if (orch.contextMessage) {
             sendOrQueueContextMessage(orch.contextMessage);
           }
@@ -334,6 +596,36 @@ const useTranscriptCapture = (
       if (!sid) return;
       const trimmed = text.trim();
       if (!trimmed) return;
+      // Arm the one-shot add-offer slot from 6's OWN spoken line ("Want me
+      // to add milk and eggs?") — the next user "yes" resolves those exact
+      // items into a real add server-side (aiASAP ITEM 4, Herm TASK_070).
+      try {
+        if (ADD_OFFER_RE.test(trimmed)) {
+          const items = parseOfferedAddItems(trimmed);
+          if (items.length > 0) {
+            pendingAddOfferRef.current = { items, at: Date.now() };
+          }
+        }
+      } catch {
+        /* offer detection must never break transcript flow */
+      }
+      // 6 named a button — cue the UI shake (G smoke #7: "when 6 says
+      // gallery, it's just a quick shake, boom boom boom"). Requires a
+      // point-at-it phrasing (hit/tap/press/use … or "<name> button") so a
+      // passing mention ("the video you sent") can't fire it.
+      try {
+        const cue = trimmed.match(
+          /\b(?:hit|tap|press|use)\b[^.!?]{0,40}?\b(camera|video|gallery)\b|\b(camera|video|gallery)\s+button\b/i,
+        );
+        const target = (cue?.[1] ?? cue?.[2])?.toLowerCase();
+        if (target && typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("isolve:button-cue", { detail: { target } }),
+          );
+        }
+      } catch {
+        /* cue detection must never break transcript flow */
+      }
       try {
         await fetch("/api/transcripts/append", {
           method: "POST",

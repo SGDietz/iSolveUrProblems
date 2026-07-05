@@ -7,8 +7,15 @@ import {
   isLiveAvatarSuccessPayload,
   recordSessionStreamStarted,
 } from "../../../../../src/lib/liveavatarCredits";
+import { assertAllowedOrigin } from "../../../../../src/lib/apiRouteSecurity";
+import { checkRateLimit } from "../../../../../src/lib/rateLimit";
 
 export async function POST(request: Request) {
+  const originErr = assertAllowedOrigin(request);
+  if (originErr) return originErr;
+  const rateLimitErr = await checkRateLimit(request);
+  if (rateLimitErr) return rateLimitErr;
+
   const token = sessionTokenFromRequestAuthHeader(
     request.headers.get("Authorization"),
   );

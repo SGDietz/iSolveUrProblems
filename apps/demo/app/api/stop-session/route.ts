@@ -4,11 +4,22 @@ import {
 } from "../../../src/lib/apiRouteSecurity";
 import { API_URL } from "../secrets";
 import { recordSessionStreamStopped } from "../../../src/lib/liveavatarCredits";
+import { assertAllowedOrigin } from "../../../src/lib/apiRouteSecurity";
+import { checkRateLimit } from "../../../src/lib/rateLimit";
 
 export async function POST(request: Request) {
+  const originErr = assertAllowedOrigin(request);
+  if (originErr) return originErr;
+  const rateLimitErr = await checkRateLimit(request);
+  if (rateLimitErr) return rateLimitErr;
+
+  // NOTE: no in-app caller as of 2026-07-03 (the live path is
+  // /api/v1/sessions/stop) — patched for symmetry anyway so ANY valid stop
+  // request closes the local usage key (Herm TASK_098 D).
+  let token: string | null = null;
   try {
     const body = await request.json();
-    const token = parseSafeBearerToken(body?.session_token);
+    token = parseSafeBearerToken(body?.session_token);
 
     if (!token) {
       return new Response(
@@ -33,6 +44,8 @@ export async function POST(request: Request) {
     if (!res.ok) {
       const errorData = await res.json();
       console.error("Error stopping session:", errorData);
+      // Idempotent local accounting even on noisy upstream (Herm TASK_098 D).
+      await recordSessionStreamStopped(token).catch(() => {});
       return new Response(
         JSON.stringify({
           error: errorData.data?.message || "Failed to stop session",
@@ -62,6 +75,7 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     console.error("Error stopping session:", error);
+    if (token) await recordSessionStreamStopped(token).catch(() => {});
     return new Response(JSON.stringify({ error: "Failed to stop session" }), {
       status: 500,
       headers: {

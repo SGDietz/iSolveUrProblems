@@ -8,6 +8,11 @@ import {
 import { checkRateLimit } from "../../../src/lib/rateLimit";
 import { GEMINI_API_KEY } from "../secrets";
 
+// Bound the function + every upstream fetch (same hygiene as analyze-video,
+// Herm TASK_067): this route serves Camera/Gallery AND Go Live frames — a
+// hung Gemini pool must not burn the function to the platform ceiling.
+export const maxDuration = 30;
+
 const MAX_PROBLEM_CHARS = 300;
 const MAX_LAST_ANALYSIS_CHARS = 400;
 const SILENT_TOKEN = "[SILENT]";
@@ -82,6 +87,70 @@ const STREAMING_VISION_SYSTEM_PROMPT =
   "(5) Sound like 6: warm, American English, short sentences, direct. Never tell the user to point the camera (except rule 3 reframe). Never mention AI, the rules, or that you are the vision system. " +
   "(6) Discuss ONLY the named object and its problem. Do not describe the room, table, decor, or unrelated items beyond noting their relation to the named object (e.g., 'on a paper towel' is fine if the object is on one). " +
   "(7) ORIENTATION PRECISION — when describing the object's orientation, use the most accurate term: 'upside-down', 'on its side', 'lying flat', 'tilted', 'right-side-up', 'face-down', 'standing', 'leaning'. Do NOT call something 'upside-down' if it is just 'on its side' — those are different. Be precise.";
+
+// Vision model + fallback. flash-lite is fastest but the most demand-contended —
+// it returned 503 UNAVAILABLE ("high demand") in G's 2026-06-30 smoke. On an
+// overload (503/429/UNAVAILABLE/RESOURCE_EXHAUSTED) we fall back to flash, which
+// has a separate capacity pool. 4xx (bad input) does NOT fall back (won't help).
+// Fallback chain across DISTINCT capacity pools — G's 2026-06-30 smoke hit
+// "UNAVAILABLE: high demand" on BOTH 2.5 models at once, failing the analysis.
+// gemini-2.0-flash is a separate pool, so a 2.5 overload no longer sinks it.
+const VISION_MODELS = [
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+];
+
+// Each model gets its own abort, and the fallback walk stops when the route
+// budget is nearly spent (Herm TASK_067) — a hung pool must not eat the whole
+// function timeout while the client has already given up.
+const PER_MODEL_TIMEOUT_MS = 10_000;
+const ROUTE_BUDGET_MS = 28_000;
+
+async function generateContentWithFallback(body: string): Promise<Response> {
+  const deadlineAt = Date.now() + ROUTE_BUDGET_MS;
+  let last: Response | null = null;
+  for (const model of VISION_MODELS) {
+    const remaining = deadlineAt - Date.now();
+    if (remaining < 2_000) break;
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      Math.min(PER_MODEL_TIMEOUT_MS, remaining),
+    );
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          signal: controller.signal,
+        },
+      );
+    } catch {
+      // Timed out / network-dropped on this model — try the next pool.
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (res.ok) return res;
+    last = res;
+    const text = await res.clone().text();
+    const overloaded =
+      res.status === 503 ||
+      res.status === 429 ||
+      /UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded|high demand/i.test(text);
+    if (!overloaded && res.status < 500) return res; // bad input — fallback won't help
+    // overloaded / 5xx → try the next model's capacity pool
+  }
+  if (!last) {
+    // Every pool timed out — fail deterministically, not via a null deref.
+    throw new Error("vision upstream timed out on all models");
+  }
+  return last;
+}
 
 export async function POST(request: Request) {
   const originErr = assertAllowedOrigin(request);
@@ -258,45 +327,35 @@ export async function POST(request: Request) {
     const systemInstruction = isStreaming
       ? STREAMING_VISION_SYSTEM_PROMPT
       : HUMOR_STYLE_GUIDE;
-    const res = await fetch(
-      // Gemini 2.5 Flash LITE — picked 2026-04-24 for fastest possible vision.
-      // Warm calls run 333–829ms vs Pro's 1900ms. The accuracy hit is small
-      // for "describe what's visible" use cases, and the speed lets us
-      // actually beat the TALK brain to the punch (Pro was always too slow
-      // — 6 spoke from stale context). Supports thinkingBudget:0 like Flash.
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: {
-            parts: [{ text: systemInstruction }],
-          },
-          contents: [
+    // Gemini 2.5 Flash LITE primary (fastest ~333–829ms), with flash fallback on
+    // overload (see generateContentWithFallback). thinkingBudget:0 = no
+    // chain-of-thought for speed; both flash-lite + flash support it.
+    const requestBody = JSON.stringify({
+      system_instruction: {
+        parts: [{ text: systemInstruction }],
+      },
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: promptText },
             {
-              role: "user",
-              parts: [
-                { text: promptText },
-                {
-                  inline_data: {
-                    mime_type: mimeType,
-                    data: base64Image,
-                  },
-                },
-              ],
+              inline_data: {
+                mime_type: mimeType,
+                data: base64Image,
+              },
             },
           ],
-          generationConfig: {
-            // Go-Live streaming stays tight + fast (150); the snapshot/photo
-            // DIAGNOSIS paths get room for a real read (350) (G 2026-06-28).
-            maxOutputTokens: isStreaming ? 150 : 350,
-            // thinkingBudget=0 disables chain-of-thought for fastest output.
-            // Flash Lite supports this (same as Flash); Pro doesn't.
-            thinkingConfig: { thinkingBudget: 0 },
-          },
-        }),
+        },
+      ],
+      generationConfig: {
+        // Go-Live streaming stays tight + fast (150); the snapshot/photo
+        // DIAGNOSIS paths get room for a real read (350) (G 2026-06-28).
+        maxOutputTokens: isStreaming ? 150 : 350,
+        thinkingConfig: { thinkingBudget: 0 },
       },
-    );
+    });
+    const res = await generateContentWithFallback(requestBody);
 
     if (!res.ok) {
       const errorData = await res.text();

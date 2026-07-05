@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --max-warnings 0",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:release": "tsc -p tsconfig.test.json && node -e \"require('node:fs').writeFileSync('.test-dist/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\" && node --test tests/release.test.cjs"
   },
   "dependencies": {
     "@capacitor/camera": "^8.2.0",

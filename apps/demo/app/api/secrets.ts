@@ -43,12 +43,15 @@ export const TWILIO_WHATSAPP_FROM = process.env.TWILIO_WHATSAPP_FROM || "";
 export const FEATURE_WHATSAPP = process.env.FEATURE_WHATSAPP === "1";
 
 // Contractor data source (M2.1)
-// 'mock' (default — built-in fake data for development) or 'serpapi'
-// (when SG Dietz provides the SERPAPI_API_KEY and we add that adapter).
-export const CONTRACTOR_DATA_SOURCE = process.env.CONTRACTOR_DATA_SOURCE || "mock";
+// Real contractors or nothing (G 2026-07-02). This defaults to unset in every
+// environment so getContractorSource() fails closed unless a real provider such
+// as 'outscraper'/'serpapi' is explicitly configured.
+export const CONTRACTOR_DATA_SOURCE = process.env.CONTRACTOR_DATA_SOURCE || "";
 export const SERPAPI_API_KEY = process.env.SERPAPI_API_KEY || "";
+// Real live supply engine — Outscraper (Google Maps). Server-only key.
+export const OUTSCRAPER_API_KEY = process.env.OUTSCRAPER_API_KEY || "";
 
-// Admin operations (M2.1+) — seed contractors, override flows, etc.
+// Admin operations (M2.1+) — privileged contractor/account override flows, etc.
 // Required to call privileged /api/admin/* routes. Set via Vercel env.
 export const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
 
@@ -79,13 +82,25 @@ export const STRIPE_CONNECT_RETURN_URL =
 export const STRIPE_CONNECT_REFRESH_URL =
   process.env.STRIPE_CONNECT_REFRESH_URL || "";
 
-// Platform fee as a percentage of the gross contract amount.
-// Default 5% per Q2.5c "Walmart-model" floor.
+// Platform take, as a percentage of the gross contract amount.
+// G 2026-06-30: our margin 7% + Stripe processing 2.9% = 9.9% total, shown to
+// the payer as a breakdown so the payment rails never eat into our margin.
 const _PLATFORM_FEE_PERCENT_RAW = process.env.PLATFORM_FEE_PERCENT;
 export const PLATFORM_FEE_PERCENT =
   _PLATFORM_FEE_PERCENT_RAW && !Number.isNaN(parseFloat(_PLATFORM_FEE_PERCENT_RAW))
     ? Math.max(0, Math.min(100, parseFloat(_PLATFORM_FEE_PERCENT_RAW)))
-    : 5;
+    : 7;
+
+// Stripe card processing fee (2.9% + 30¢ per charge; we surface the % here).
+const _STRIPE_FEE_PERCENT_RAW = process.env.STRIPE_FEE_PERCENT;
+export const STRIPE_FEE_PERCENT =
+  _STRIPE_FEE_PERCENT_RAW && !Number.isNaN(parseFloat(_STRIPE_FEE_PERCENT_RAW))
+    ? Math.max(0, Math.min(100, parseFloat(_STRIPE_FEE_PERCENT_RAW)))
+    : 2.9;
+
+// What the payer sees as the total service fee (platform margin + processing).
+export const TOTAL_FEE_PERCENT =
+  Math.round((PLATFORM_FEE_PERCENT + STRIPE_FEE_PERCENT) * 100) / 100;
 
 export const PLATFORM_CURRENCY = (
   process.env.PLATFORM_CURRENCY || "usd"
@@ -134,3 +149,30 @@ export const DROPBOX_SIGN_API_KEY = process.env.DROPBOX_SIGN_API_KEY || "";
 export const DROPBOX_SIGN_CLIENT_ID = process.env.DROPBOX_SIGN_CLIENT_ID || "";
 export const DROPBOX_SIGN_WEBHOOK_SECRET =
   process.env.DROPBOX_SIGN_WEBHOOK_SECRET || "";
+
+// M4.1 — Stripe Billing (contractor subscriptions). Different product
+// from Stripe Connect (M2.5 contractor payouts); same Stripe account +
+// same STRIPE_SECRET_KEY but separate webhook secret + separate Price
+// IDs per tier. Create the products in the Stripe dashboard, then drop
+// the IDs here. Q4.1a tier pricing is directional — Bert sets the
+// final numbers before launch.
+//
+// Tier mapping:
+//   - free   → no Price ID; default tier when no active subscription
+//   - bronze → STRIPE_PRICE_BRONZE
+//   - silver → STRIPE_PRICE_SILVER
+//   - gold   → STRIPE_PRICE_GOLD
+export const STRIPE_PRICE_BRONZE = process.env.STRIPE_PRICE_BRONZE || "";
+export const STRIPE_PRICE_SILVER = process.env.STRIPE_PRICE_SILVER || "";
+export const STRIPE_PRICE_GOLD = process.env.STRIPE_PRICE_GOLD || "";
+export const STRIPE_BILLING_WEBHOOK_SECRET =
+  process.env.STRIPE_BILLING_WEBHOOK_SECRET || "";
+
+// Trial length for new subscriptions (days). 14d default per Risks
+// section of M4 build order ("v1 should include a free trial").
+const _TRIAL_DAYS_RAW = process.env.STRIPE_TRIAL_DAYS;
+export const STRIPE_TRIAL_DAYS = (() => {
+  if (!_TRIAL_DAYS_RAW) return 14;
+  const n = parseInt(_TRIAL_DAYS_RAW, 10);
+  return Number.isFinite(n) && n >= 0 && n <= 90 ? n : 14;
+})();

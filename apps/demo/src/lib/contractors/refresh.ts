@@ -1,7 +1,11 @@
 import { getSupabaseAdminConfig } from "../supabaseAdmin";
 import { dedupeInBatch } from "./dedupe";
 import { getContractorSource } from "./sources";
-import type { RawContractor, RawContractorReview } from "./sources/types";
+import type {
+  ContractorSourceAdapter,
+  RawContractor,
+  RawContractorReview,
+} from "./sources/types";
 
 /**
  * Refresh orchestrator — pulls contractors from the active source for a
@@ -49,7 +53,24 @@ export async function refreshContractors(args: {
   radiusKm: number;
   limit?: number;
 }): Promise<RefreshResult> {
-  const adapter = getContractorSource();
+  // Fail closed in prod: getContractorSource throws when no real source is
+  // configured. Turn that into a clean error result instead of an uncaught 500
+  // (G's reality doctrine — never silently seed fake pros).
+  let adapter: ContractorSourceAdapter;
+  try {
+    adapter = getContractorSource();
+  } catch (e) {
+    return {
+      source: process.env.CONTRACTOR_DATA_SOURCE ?? "unset",
+      category: args.category,
+      fetched: 0,
+      upserted_contractors: 0,
+      upserted_reviews: 0,
+      errors: [
+        e instanceof Error ? e.message : "contractor source not configured",
+      ],
+    };
+  }
   const result: RefreshResult = {
     source: adapter.name,
     category: args.category,

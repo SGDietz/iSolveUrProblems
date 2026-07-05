@@ -2,8 +2,11 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
+import { notFound } from "next/navigation";
 
-const DEFAULT_CENTER = { lat: 30.2672, lng: -97.7431 }; // Austin TX — matches the seed default
+// No default coords (G's reality doctrine 2026-06-30): the search must use
+// the user's real location or nothing — never a prefilled Austin center.
+// Empty inputs hit the existing locationRequired guard on submit.
 
 type Hit = {
   id: string;
@@ -114,7 +117,24 @@ function priceTierGlyph(tier: number | null): string {
   return "$".repeat(Math.min(4, Math.max(1, tier)));
 }
 
-export default function SearchClient({
+export default function SearchClient(props: {
+  categories: string[];
+  initialCategory: string | null;
+}) {
+  // Domain guard mirrors the server production guard (hook-free wrapper, same
+  // belt-and-suspenders as dev/cards + dev/surface): this debug surface's bare
+  // tel:/pick/hire controls must never reach the real domain even if env
+  // mirroring changes later (Herm TASK_090).
+  const onProdDomain =
+    typeof window !== "undefined" &&
+    /(^|\.)isolveurproblems\.ai$/i.test(window.location.hostname);
+  if (process.env.NEXT_PUBLIC_VERCEL_ENV === "production" || onProdDomain) {
+    notFound();
+  }
+  return <SearchClientInner {...props} />;
+}
+
+function SearchClientInner({
   categories,
   initialCategory,
 }: {
@@ -126,8 +146,8 @@ export default function SearchClient({
   const [category, setCategory] = useState<string>(
     initialCategory ?? categories[0],
   );
-  const [lat, setLat] = useState<string>(String(DEFAULT_CENTER.lat));
-  const [lng, setLng] = useState<string>(String(DEFAULT_CENTER.lng));
+  const [lat, setLat] = useState<string>("");
+  const [lng, setLng] = useState<string>("");
   const [radiusKm, setRadiusKm] = useState<string>("25");
   const [minRating, setMinRating] = useState<string>("4.5");
   const [maxPriceTier, setMaxPriceTier] = useState<string>("");

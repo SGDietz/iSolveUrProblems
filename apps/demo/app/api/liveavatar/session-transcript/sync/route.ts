@@ -7,6 +7,7 @@ import {
 import { checkRateLimit } from "../../../../../src/lib/rateLimit";
 import { persistUserUtteranceLeadCapture } from "../../../../../src/lib/leadCaptureFromUserText";
 import { getSupabaseAdminConfig } from "../../../../../src/lib/supabaseAdmin";
+import { getUserId } from "../../../../../src/lib/auth/getUser";
 import { API_KEY, API_URL } from "../../../secrets";
 
 /** Skip lead extraction for long context lines mis-tagged as user or internal prompts. */

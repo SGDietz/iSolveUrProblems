@@ -8,6 +8,8 @@
 
 # testing
 /coverage
+# release-test compile output (npm run test:release)
+/.test-dist/
 
 # next.js
 /.next/

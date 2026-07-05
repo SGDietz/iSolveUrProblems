@@ -1,6 +1,7 @@
 import {
   assertAllowedOrigin,
   isSafeTranscriptionSessionId,
+  MAX_TRANSCRIPTION_SESSION_ID_CHARS,
   truncateUtf8String,
 } from "../../../../src/lib/apiRouteSecurity";
 import { checkRateLimit } from "../../../../src/lib/rateLimit";
@@ -69,7 +70,7 @@ export async function POST(request: Request) {
         : null;
     const rawSessionId =
       typeof body.sessionId === "string"
-        ? truncateUtf8String(body.sessionId.trim(), 128)
+        ? truncateUtf8String(body.sessionId.trim(), MAX_TRANSCRIPTION_SESSION_ID_CHARS)
         : null;
     sessionId = isSafeTranscriptionSessionId(rawSessionId) ? rawSessionId : null;
     lists = Array.isArray(body.lists) ? body.lists.slice(0, 50) : [];

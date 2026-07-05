@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { assertAllowedOrigin } from "../../../../../src/lib/apiRouteSecurity";
 import { checkRateLimit } from "../../../../../src/lib/rateLimit";
+import { getSupabaseAdminConfig } from "../../../../../src/lib/supabaseAdmin";
 import {
   getContractorSummary,
   getContractorWithReviews,
@@ -72,6 +73,39 @@ function isUuid(s: string): boolean {
   );
 }
 
+// Live Outscraper cards fall back to their provider place_id as the card id
+// when the DB-UUID rehydration misses the persist window (liveFind's 2.5s
+// bound). Same shape rule as apiRouteSecurity's session ids: bounded, no
+// control chars, URL-safe punctuation only.
+const SAFE_SOURCE_ID = /^[a-zA-Z0-9_\-:.]{4,200}$/;
+
+/** Resolve a non-UUID (place_id) card id to the persisted row's DB UUID —
+ * mirrors the orchestrator's fetchContractorById fallback (Herm ship-blocker
+ * 2026-07-02: this route hard-rejected non-UUIDs, so summary could fail on
+ * the persistence-timeout path). Null = no persisted row (or no DB). */
+async function resolveSourceIdToUuid(sourceId: string): Promise<string | null> {
+  try {
+    const { url, serviceRoleKey } = getSupabaseAdminConfig();
+    const qs = new URLSearchParams();
+    qs.set("select", "id");
+    qs.set("source", "eq.outscraper_live");
+    qs.set("source_id", `eq.${sourceId}`);
+    qs.set("limit", "1");
+    const res = await fetch(`${url}/rest/v1/contractors?${qs.toString()}`, {
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as Array<{ id: string }>;
+    return rows[0]?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
@@ -81,15 +115,28 @@ export async function POST(
   const rateLimitErr = await checkRateLimit(request);
   if (rateLimitErr) return rateLimitErr;
 
-  const { id } = await context.params;
+  let { id } = await context.params;
   if (!isUuid(id)) {
-    return NextResponse.json(
-      {
-        error: "That contractor link doesn't look right.",
-        debug: `received id '${id}' did not match UUID regex`,
-      },
-      { status: 400 },
-    );
+    if (!SAFE_SOURCE_ID.test(id)) {
+      return NextResponse.json(
+        {
+          error: "That contractor link doesn't look right.",
+          debug: `received id did not match UUID or source-id shape`,
+        },
+        { status: 400 },
+      );
+    }
+    const resolved = await resolveSourceIdToUuid(id);
+    if (!resolved) {
+      return NextResponse.json(
+        {
+          error: "We couldn't find that contractor.",
+          debug: `no persisted contractor row for source_id card id`,
+        },
+        { status: 404 },
+      );
+    }
+    id = resolved;
   }
 
   let existing;

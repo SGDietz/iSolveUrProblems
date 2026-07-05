@@ -178,14 +178,14 @@
     },
     "picker": {
       "pickThis": "Diesen wählen",
-      "notifying": "Wird benachrichtigt…",
-      "confirm": "Wenn du diesen Handwerker wählst, sendet 6 ihm eine Zusage-Nachricht und allen anderen Kandidaten eine freundliche Notiz mit Tipps. Fortfahren?",
+      "notifying": "Saving your pick…",
+      "confirm": "Save this pick? Automatic notifications aren't live yet — you can call them right after.",
       "signInRequired": "Melde dich an, um einen Handwerker zu wählen.",
-      "error": "Benachrichtigungen konnten nicht gesendet werden",
-      "title": "6 hat die Kandidaten benachrichtigt",
+      "error": "Couldn't save the pick",
+      "title": "Your pick is saved",
       "summary": "{sent} gesendet · {failed} fehlgeschlagen",
       "winnerLabel": "Gewinner",
-      "losersLabel": "{count, plural, =1 {Ein weiterer benachrichtigt} other {# weitere benachrichtigt}}",
+      "losersLabel": "{count, plural, =1 {Other candidate shown} other {# other candidates shown}}",
       "delivered": "zugestellt",
       "failed": "fehlgeschlagen"
     },
@@ -201,8 +201,8 @@
         "kicker": "iSolveUrProblems · Bezahlung",
         "titleSuccess": "Zahlung erhalten",
         "titleCanceled": "Zahlung abgebrochen",
-        "subtitlePaid": "6 hat die Zahlung bestätigt. Der Handwerker wurde benachrichtigt und wir bringen euch in Kontakt.",
-        "subtitleProcessing": "Danke — Stripe schließt die Zahlung ab. 6 benachrichtigt den Handwerker, sobald sie bestätigt ist.",
+        "subtitlePaid": "Payment confirmed on our side. Call them with the button below to connect.",
+        "subtitleProcessing": "Payment confirmed on our side. Call them with the button below to connect.",
         "subtitleCanceled": "Es wurde nichts abgebucht. Du kannst jemand anderen wählen oder später zurückkommen.",
         "contractId": "Vertrag",
         "category": "Kategorie",
@@ -228,7 +228,19 @@
         "contract": "Arbeitsvereinbarung",
         "dispute": "Streit-Thread",
         "call": "Anruf mit 6",
-        "estimate": "Kostenvoranschlag"
+        "estimate": "Kostenvoranschlag",
+        "todo": "Deine Liste",
+        "contractorOnboarding": "Handwerker-Anmeldung",
+        "recurring": "Autopilot-Job"
+      },
+      "todo": {
+        "openCount": "{count} offen",
+        "empty": "Diese Liste ist leer.",
+        "summaryAdded": "Hinzugefügt: {items}",
+        "summaryCompleted": "Abgehakt: {items}",
+        "summaryRemoved": "Entfernt: {items}",
+        "summaryCleared": "{count} Einträge gelöscht",
+        "summaryAlready": "Schon auf der Liste: {items}"
       },
       "contractors": {
         "empty": "Noch keine Treffer.",
@@ -238,7 +250,18 @@
           "sameDay": "Same-day",
           "locallyOwned": "Lokal"
         },
-        "website": "Website"
+        "website": "Website",
+        "callConsent": {
+          "title": "{name} anrufen?",
+          "body": "Dieser Anruf geht von deinem eigenen Telefon aus. Du bist der Anrufer.",
+          "sixSays": "Kurzer Hinweis von 6: Ich kann noch nicht mit ans Telefon — das Reden übernimmst du. Ich bleibe mit den Notizen genau hier, während du anrufst. Wenn ein Anrufbeantworter rangeht, sprich die Nachricht selbst auf. Erzähl mir danach, wie es lief.",
+          "confirm": "Ja, jetzt anrufen",
+          "cancel": "Noch nicht"
+        },
+        "cta": {
+          "call": "Anrufen: {phone}",
+          "email": "E-Mail senden"
+        }
       },
       "summary": {
         "fresh": "Neu",
@@ -276,7 +299,8 @@
           "scheduled": "Termin vereinbart",
           "rescheduled": "Termin verschoben",
           "cancelled": "Termin abgesagt",
-          "list": "Nächste Termine"
+          "list": "Nächste Termine",
+          "no_show": "Ersatz wird gesucht"
         },
         "status": {
           "cancelled": "Abgesagt",
@@ -326,7 +350,9 @@
           "contractor": "Auftragnehmer",
           "six": "6",
           "system": "System"
-        }
+        },
+        "titleGoBetween": "Vermittler vor Ort",
+        "modeBadgeGoBetween": "Vermittler"
       },
       "estimate": {
         "title": "Sprach-Kostenvoranschlag",
@@ -386,6 +412,26 @@
           "escalated": "Dieser Streit wurde an einen menschlichen Admin übergeben. Sie melden sich bei dir.",
           "closed": "Dieser Streit ist geschlossen."
         }
+      },
+      "goBetween": {
+        "startCta": "Vermittler-Anruf starten",
+        "startingCta": "Wird gewählt…",
+        "phonePrompt": "Gib deine Telefonnummer im E.164-Format ein (z. B. +14155551234). 6 ruft dich und den Handwerker in ein Vermittlungsgespräch.",
+        "phoneInvalid": "Bitte eine gültige E.164-Nummer eingeben (z. B. +14155551234).",
+        "errorGeneric": "Vermittler-Anruf konnte nicht gestartet werden."
+      },
+      "recurring": {
+        "title": "Autopilot-Job geplant",
+        "withLabel": "Mit",
+        "upcomingLabel": "Nächste Termine",
+        "noUpcoming": "(Keine kommenden Termine — Zeitplan möglicherweise beendet)",
+        "autopilotFootnote": "Jeder Termin löst Erinnerungen, Auftragnehmer-Bestätigung und Ausfallsicherung aus. Sag \"diese wiederkehrende Aufgabe pausieren\" zum Stoppen.",
+        "status": {
+          "active": "Aktiv",
+          "paused": "Pausiert",
+          "ended": "Beendet",
+          "cancelled": "Abgesagt"
+        }
       }
     }
   },
@@ -409,6 +455,228 @@
       "pt": "Português",
       "de": "Deutsch",
       "zh": "中文"
+    }
+  },
+  "forContractors": {
+    "kicker": "iSolveUrProblems · Für Auftragnehmer",
+    "hero": {
+      "title": "Führe dein Geschäft mit 6 an deiner Seite.",
+      "blurb": "Gefilterte Leads, fertige Verträge, schnelle Auszahlungen. 6 erledigt den Papierkram — du machst die Arbeit."
+    },
+    "benefit": {
+      "leads": "Leads von Hausbesitzern — zahlst nur, wenn du den Job gewinnst",
+      "contracts": "Verträge in Minuten entworfen und unterschrieben",
+      "payouts": "Stripe-Auszahlungen netto, schnell auf dem Konto",
+      "recurring": "Wiederkehrende Jobs im Autopilot — wöchentliches Mähen, Dachrinnen im Herbst",
+      "crew": "Finde Subunternehmer bei Doppelbuchungen"
+    },
+    "cta": {
+      "signIn": "Anmelden oder Konto erstellen",
+      "signInBlurb": "Magic-Link-Login. Wir senden einen Einmal-Link per E-Mail — kein Passwort."
+    },
+    "already": {
+      "title": "Willkommen zurück",
+      "blurb": "Dein Auftragnehmer-Konto ist aktiv. Zurück zum Dashboard.",
+      "goCta": "Dashboard öffnen"
+    },
+    "claim": {
+      "title": "Profil beanspruchen",
+      "blurb": "Gib deine Lizenznummer ein. Wir prüfen sie bei der Behörde und verknüpfen dein Konto.",
+      "privacyFootnote": "Deine Lizenznummer wird nicht veröffentlicht. Nur für die einmalige Verifizierung + das Lizenz-Verifiziert-Abzeichen.",
+      "stateLabel": "Bundesstaat",
+      "licenseLabel": "Lizenznummer",
+      "licensePlaceholder": "z.B. 1234567",
+      "licenseHelper": "California CSLB-Nummer. Weitere Staaten in Kürze.",
+      "submitCta": "Prüfen und beanspruchen",
+      "submitting": "Prüfen…",
+      "errorGeneric": "Verifizierung fehlgeschlagen. Nummer prüfen und erneut versuchen.",
+      "pending": {
+        "title": "Fast geschafft — Prüfung ausstehend",
+        "blurb": "Profil gefunden, menschliche Bestätigung nötig. Wir melden uns innerhalb 1 Werktags.",
+        "reasonsLabel": "Signale"
+      }
+    }
+  },
+  "contractor": {
+    "dashboard": {
+      "kicker": "Auftragnehmer-Dashboard",
+      "backHome": "← Zurück zu 6",
+      "badge": {
+        "licenseVerified": "Lizenziert · {state} {license}",
+        "payoutReady": "Auszahlung bereit",
+        "payoutPending": "Auszahlung ausstehend — Stripe abschließen"
+      },
+      "onboardingBanner": {
+        "title": "Zahlungs-Setup abschließen",
+        "blurb": "Beende Stripe, bevor Hausbesitzer dich bezahlen können.",
+        "onboardingCta": "Mit Stripe einrichten",
+        "onboardingSubmitting": "Stripe wird geöffnet…",
+        "errorGeneric": "Konnte nicht starten. Versuche es erneut."
+      },
+      "pending": {
+        "title": "Offene Einladungen",
+        "blurb": "Hausbesitzer, die dich gewählt haben — annehmen oder ablehnen",
+        "empty": "Keine offenen Einladungen."
+      },
+      "active": {
+        "title": "Aktive Jobs",
+        "blurb": "Bezahlt und anstehend",
+        "empty": "Keine aktiven Jobs."
+      },
+      "completed": {
+        "title": "Abgeschlossen",
+        "blurb": "Frühere Jobs",
+        "empty": "Noch keine abgeschlossenen Jobs."
+      },
+      "nextAt": "Nächster: {when}",
+      "esignLabel": "Vertrag",
+      "logWorkCta": "Arbeit dokumentieren →",
+      "coaching": {
+        "title": "Eine Nachricht von 6",
+        "kicker": "Eine Nachricht von 6",
+        "signoff": "— 6 schickt das nur, wenn wirklich etwas passiert. STOP antworten, um stummzuschalten."
+      },
+      "crew": {
+        "title": "Crew-Marktplatz",
+        "silverPlus": "Silver+",
+        "gatedBadge": "Silver+",
+        "gatedBlurb": "Upgrade auf Silver und 6 findet dir noch am selben Tag eine Aushilfe, wenn du doppelt gebucht bist.",
+        "errorGeneric": "Etwas ist schiefgelaufen. Erneut versuchen.",
+        "errorTier": "Silver-Feature.",
+        "errorAlreadyFilled": "Ein anderer Auftragnehmer hat zuerst angenommen.",
+        "form": {
+          "category": "Benötigtes Gewerk",
+          "neededAt": "Benötigt am",
+          "radiusKm": "Radius (km)",
+          "scope": "Worum geht's?",
+          "scopePlaceholder": "4 Innentüren einbauen, ~2 Std.",
+          "submitCta": "An Aushilfen in der Nähe senden",
+          "submitting": "Senden…"
+        },
+        "outgoing": {
+          "title": "Deine offenen Anfragen",
+          "empty": "Aktuell keine offenen Anfragen.",
+          "status": {
+            "open": "Offen",
+            "filled": "Vergeben",
+            "expired": "Abgelaufen",
+            "cancelled": "Storniert"
+          },
+          "responseStatus": {
+            "invited": "Eingeladen",
+            "accepted": "Angenommen",
+            "declined": "Verzichtet",
+            "expired": "Abgelaufen",
+            "no_response": "Keine Antwort"
+          }
+        },
+        "incoming": {
+          "title": "Einladungen für dich",
+          "empty": "Noch keine Aushilfe-Einladungen.",
+          "acceptCta": "Annehmen",
+          "declineCta": "Ablehnen",
+          "status": {
+            "invited": "Wartend",
+            "accepted": "Angenommen",
+            "declined": "Abgelehnt",
+            "expired": "Abgelaufen",
+            "no_response": "Keine Antwort"
+          }
+        }
+      },
+      "checklist": {
+        "title": "Vorbereitungs-Checkliste",
+        "notYetBlurb": "6 listet Werkzeuge, Material und Bestätigungen 2 Std. vor dem Auftrag. Jetzt erzeugen für eine Vorschau.",
+        "generateCta": "Jetzt erzeugen",
+        "generating": "Wird erzeugt…",
+        "regenerateCta": "Neu erzeugen",
+        "regenerating": "Wird neu erzeugt…",
+        "errorGeneric": "Konnte die Checkliste nicht aktualisieren. Bitte erneut versuchen.",
+        "generatedBy": "von {model}",
+        "gatedBadge": "Bronze+",
+        "gatedBlurb": "Upgrade auf Bronze für eine von 6 erzeugte Vorbereitungs-Checkliste pro Auftrag.",
+        "bucket": {
+          "tool": "Werkzeuge",
+          "material": "Material",
+          "confirmation": "Vor der Abfahrt bestätigen"
+        }
+      }
+    },
+    "jobLog": {
+      "kicker": "Auftragsjournal",
+      "untitledAgenda": "Auftrag ohne Titel",
+      "backToDashboard": "← Zurück zum Dashboard",
+      "captureHeading": "Aufnehmen",
+      "phase": {
+        "arrival": "Ankunft",
+        "in_progress": "Laufend",
+        "completion": "Abschluss"
+      },
+      "phaseCount": "{count, plural, one {# Foto} other {# Fotos}}",
+      "phaseEmpty": "Tippen zum Aufnehmen",
+      "noteHeading": "Notiz hinzufügen",
+      "notePlaceholder": "Was 6 zu diesem Termin wissen sollte…",
+      "addNoteCta": "Notiz speichern",
+      "submitting": "Speichern…",
+      "timelineHeading": "Zeitleiste",
+      "timelineEmpty": "Noch nichts dokumentiert — starte mit einem Ankunftsfoto.",
+      "noteLabel": "Notiz",
+      "errorGeneric": "Speichern fehlgeschlagen. Erneut versuchen.",
+      "tierGate": "Upgrade auf Bronze, um Fotos zu diesem Auftrag zu speichern.",
+      "gatedTitle": "Foto-Journal ist ein kostenpflichtiges Feature",
+      "gatedBlurb": "Upgrade auf Bronze und 6 speichert jedes Foto zum Auftrag mit Zeitstempel, GPS und einer Zeitleiste für den Kunden.",
+      "gatedManageCta": "Abonnement verwalten →",
+      "cv": {
+        "loading": "Suche KI-Label…",
+        "identifyCta": "Mit 6 erkennen",
+        "classifying": "6 schaut…",
+        "predictedLabel": "6 vermutet:",
+        "confidence": {
+          "low": "niedrige Konfidenz",
+          "medium": "mittlere Konfidenz",
+          "high": "hohe Konfidenz"
+        },
+        "yesCta": "Ja",
+        "noCta": "Nein",
+        "correctionPlaceholder": "z. B. Löwenzahn",
+        "saveCorrectionCta": "Speichern",
+        "confirmedPrefix": "Bestätigt:",
+        "tierGate": "KI-Erkennung ist ein Gold-Feature.",
+        "errorGeneric": "KI-Label fehlgeschlagen. Bitte erneut versuchen."
+      }
+    },
+    "subscription": {
+      "title": "Dein Plan:",
+      "tier": {
+        "free": "Kostenlos",
+        "bronze": "Bronze",
+        "silver": "Silber",
+        "gold": "Gold"
+      },
+      "tierBlurb": {
+        "bronze": "Same-day-Priorität · Checklisten · Foto-Log",
+        "silver": "Bronze + Team-Marktplatz · Backup · Wiederkehrend",
+        "gold": "Silber + KI-Labeling · Coaching · Highlight-Slots"
+      },
+      "status": {
+        "trialing": "Testphase",
+        "active": "Aktiv",
+        "past_due": "Zahlung fehlgeschlagen",
+        "canceled": "Gekündigt",
+        "incomplete": "Setup unvollständig",
+        "incomplete_expired": "Setup abgelaufen",
+        "unpaid": "Unbezahlt",
+        "paused": "Pausiert",
+        "none": "—"
+      },
+      "trialUntil": "Gratis-Testphase bis {date}",
+      "renewsOn": "Verlängerung am {date}",
+      "cancelsOn": "Kündigt am {date}",
+      "upgradeBlurb": "Upgrade für Team-Marktplatz, wiederkehrende Jobs, KI-Labeling und mehr.",
+      "manageCta": "Abo verwalten",
+      "cancelCta": "Kündigen",
+      "cancelConfirm": "Am Ende der Abrechnungsperiode kündigen? Du behältst Zugriff bis dahin.",
+      "errorGeneric": "Etwas ist schiefgelaufen. Versuche es erneut."
     }
   }
 }

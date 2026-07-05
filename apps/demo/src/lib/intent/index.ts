@@ -17,6 +17,5 @@ export {
   wrapContractorsResult,
   wrapSummaryResult,
   wrapRecommendationsResult,
-  wrapPickResult,
   wrapFallback,
 } from "./contextInjector";

@@ -83,7 +83,14 @@ class DropboxSignProvider implements EsignProvider {
     form.set("title", input.title.slice(0, 240));
     form.set("subject", input.title.slice(0, 200));
     form.set("message", input.body.slice(0, 2000));
-    form.set("test_mode", "1"); // sandbox-safe; flip when going prod-prod
+    // Sandbox everywhere EXCEPT real production (Herm TASK_072 #2): a
+    // test_mode envelope is NOT a legally binding signature, so shipping it
+    // on the live domain would be fake e-sign with a real vendor. Same prod
+    // detection as getEsignProvider(): Vercel sets VERCEL_ENV="production"
+    // only on the production deploy.
+    if (process.env.VERCEL_ENV !== "production") {
+      form.set("test_mode", "1");
+    }
     form.set("metadata[contract_id]", input.contract_id);
     if (useEmbedded) {
       form.set("client_id", DROPBOX_SIGN_CLIENT_ID);

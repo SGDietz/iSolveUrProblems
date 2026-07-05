@@ -7,12 +7,15 @@ import type {
   ComparePayload,
   ContractPayload,
   ContractorCard,
+  ContractorOnboardingPayload,
   DisputePayload,
   EstimatePayload,
   PickResultPayload,
   RecommendationCard,
+  RecurringJobPayload,
   SummaryPayload,
   SurfaceVariant,
+  TodoPayload,
 } from "./types";
 
 /**
@@ -51,6 +54,9 @@ type AssistantSurfaceState = {
   showDispute: (payload: DisputePayload) => void;
   showCall: (payload: CallPayload) => void;
   showEstimate: (payload: EstimatePayload) => void;
+  showRecurring: (payload: RecurringJobPayload) => void;
+  showTodo: (payload: TodoPayload) => void;
+  showContractorOnboarding: (payload: ContractorOnboardingPayload) => void;
   dismiss: () => void;
   /** Hard reset — clears the variant entirely (vs just hiding it). */
   reset: () => void;
@@ -120,6 +126,24 @@ export const useAssistantSurface = create<AssistantSurfaceState>((set) => ({
       isOpen: true,
     }),
 
+  showRecurring: (payload) =>
+    set({
+      variant: { kind: "recurring", payload },
+      isOpen: true,
+    }),
+
+  showTodo: (payload) =>
+    set({
+      variant: { kind: "todo", payload },
+      isOpen: true,
+    }),
+
+  showContractorOnboarding: (payload) =>
+    set({
+      variant: { kind: "contractorOnboarding", payload },
+      isOpen: true,
+    }),
+
   dismiss: () => set({ isOpen: false }),
 
   reset: () => set({ variant: null, isOpen: false }),
@@ -158,6 +182,12 @@ if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
       useAssistantSurface.getState().showCall(payload),
     showEstimate: (payload: EstimatePayload) =>
       useAssistantSurface.getState().showEstimate(payload),
+    showRecurring: (payload: RecurringJobPayload) =>
+      useAssistantSurface.getState().showRecurring(payload),
+    showTodo: (payload: TodoPayload) =>
+      useAssistantSurface.getState().showTodo(payload),
+    showContractorOnboarding: (payload: ContractorOnboardingPayload) =>
+      useAssistantSurface.getState().showContractorOnboarding(payload),
     dismiss: () => useAssistantSurface.getState().dismiss(),
     reset: () => useAssistantSurface.getState().reset(),
   };

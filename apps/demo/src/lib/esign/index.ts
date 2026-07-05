@@ -30,8 +30,18 @@ const REGISTRY: Record<string, EsignProvider> = {
 export function getEsignProvider(): EsignProvider {
   const choice = (process.env.ESIGN_PROVIDER ?? "mock").toLowerCase();
   const provider = REGISTRY[choice];
-  if (provider && provider.isConfigured) return provider;
-  // Fall back to mock so dev never breaks waiting on vendor keys.
+  if (provider && provider.isConfigured && choice !== "mock") return provider;
+  // PRODUCTION fails CLOSED (Herm release blocker #6): a simulated e-sign
+  // envelope presented to a real user is fake data — the reality doctrine
+  // applies to signatures too. Real provider configured or a loud error;
+  // the orchestrator/routes surface it honestly instead of pretending.
+  if (process.env.VERCEL_ENV === "production") {
+    throw new Error(
+      "No real e-sign provider configured. Refusing the mock signer in production — real signatures or nothing.",
+    );
+  }
+  // Dev/preview keep the mock so contract-flow WIRING stays testable without
+  // vendor keys (the flow itself is simulated and says so in dev).
   return mockEsignProvider;
 }
 

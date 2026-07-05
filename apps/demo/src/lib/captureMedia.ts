@@ -45,11 +45,42 @@ export async function captureMedia(args: CaptureMediaArgs): Promise<void> {
     });
     if (!res.ok) {
       // Don't throw — media capture is diagnostic, it must never block the
-      // user-visible flow. Just log and continue.
+      // user-visible flow. Just log + breadcrumb and continue.
       console.warn("captureMedia: non-OK response", res.status);
+      mediaCaptureBreadcrumb("media_capture_fail", {
+        source: args.source,
+        status: res.status,
+        bytes: args.file instanceof File ? args.file.size : null,
+        sessionId: args.sessionId ? String(args.sessionId).slice(0, 8) : null,
+      });
     }
   } catch (err) {
     console.warn("captureMedia: request failed", err);
+    mediaCaptureBreadcrumb("media_capture_error", {
+      source: args.source,
+      status: null,
+      bytes: args.file instanceof File ? args.file.size : null,
+      msg: (err instanceof Error ? err.message : String(err)).slice(0, 160),
+      sessionId: args.sessionId ? String(args.sessionId).slice(0, 8) : null,
+    });
+  }
+}
+
+// Server-visible breadcrumb (Vercel fn logs) so a missing media_events row is
+// explainable instead of silently lost (Herm 2026-06-30). Non-secret only.
+function mediaCaptureBreadcrumb(
+  step: string,
+  extra: Record<string, unknown>,
+): void {
+  try {
+    void fetch("/api/diag-account", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ step: `bc:${step}`, ...extra }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // best-effort; never throw from instrumentation
   }
 }
 

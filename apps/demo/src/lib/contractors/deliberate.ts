@@ -1,6 +1,5 @@
 import { recallFacts } from "../memory";
 import { recommendContractors } from "./recommend";
-import { DEFAULT_CENTER } from "../intent/slots";
 import type {
   ComparePayload,
   RecommendationCard,
@@ -36,7 +35,12 @@ export type DeliberateConstraints = {
 export type DeliberateInput = {
   user_id: string | null;
   category: string;
-  near?: { lat: number; lng: number };
+  /** REQUIRED — the caller must resolve a real ranking center (user coords or
+   *  inferred from the visible list) or ask for city/ZIP. No Austin fail-open. */
+  near: { lat: number; lng: number };
+  /** False when the center was inferred from the visible list, not the user's
+   *  own coords — then we never speak a distance. */
+  distance_known?: boolean;
   constraints: DeliberateConstraints;
   /**
    * Optional — the picks the user is currently looking at. Used to pick
@@ -81,7 +85,11 @@ function buildHeadlines(picks: RecommendationCard[]): string[] {
     ) {
       bits.push(`higher rated (${self.rating_avg.toFixed(1)})`);
     }
-    if (self.distance_km < other.distance_km - 0.5) {
+    if (
+      self.distance_km > 0 &&
+      other.distance_km > 0 &&
+      self.distance_km < other.distance_km - 0.5
+    ) {
       bits.push(`closer (${self.distance_km.toFixed(1)} km)`);
     }
     if (self.locally_owned && !other.locally_owned) {
@@ -131,7 +139,7 @@ function renderActiveConstraints(c: DeliberateConstraints): string[] {
 export async function deliberate(
   input: DeliberateInput,
 ): Promise<DeliberateResult> {
-  const near = input.near ?? DEFAULT_CENTER;
+  const near = input.near;
   const c = input.constraints;
 
   // Pull memory preferences (M1.2) — best-effort, never blocks.
@@ -153,6 +161,7 @@ export async function deliberate(
 
   const rec = await recommendContractors({
     userId: input.user_id,
+    distance_known: input.distance_known,
     searchInput: {
       category: input.category,
       near,

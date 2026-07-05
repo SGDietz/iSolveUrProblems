@@ -31,6 +31,10 @@ export type ContractorSearchInput = {
   locally_owned?: boolean;
   /** Hard-filter to same-day-capable only. */
   same_day?: boolean;
+  /** Restrict to these source values (real-source allow-list). */
+  sources?: string[];
+  /** Exclude these source values (e.g. mock/seed). */
+  exclude_sources?: string[];
   /** Optional cap on returned rows (default 20). */
   limit?: number;
 };
@@ -131,84 +135,113 @@ export async function searchContractors(
     };
   }
 
-  const bbox = buildBbox(input.near, radius_km);
-  const qs = new URLSearchParams();
-  qs.set("select", "*");
-  // Category match — PostgREST `cs` (contains) operator on text[].
-  qs.append("categories", `cs.{${input.category}}`);
-  qs.append("lat", `gte.${bbox.latMin}`);
-  qs.append("lat", `lte.${bbox.latMax}`);
-  qs.append("lng", `gte.${bbox.lngMin}`);
-  qs.append("lng", `lte.${bbox.lngMax}`);
-  if (typeof input.min_rating === "number") {
-    qs.append("rating_avg", `gte.${input.min_rating}`);
-  }
-  if (typeof input.max_price_tier === "number") {
-    qs.append("price_tier", `lte.${input.max_price_tier}`);
-  }
-  if (input.locally_owned === true) {
-    qs.append("locally_owned", "is.true");
-  }
-  if (input.same_day === true) {
-    qs.append("same_day_flag", "is.true");
-  }
-  // Fetch a generous slice; we score + cap in JS.
-  qs.append("limit", String(PG_PREFETCH_HARD_CAP));
-  qs.append("order", "rating_avg.desc.nullslast");
+  // Core query + score for a given radius. Pulled out so we can sweep the
+  // radius outward when the asked circle comes back empty (see below).
+  const runAtRadius = async (
+    r: number,
+  ): Promise<{
+    hits: ContractorSearchHit[];
+    considered: number;
+    error?: string;
+  }> => {
+    const bbox = buildBbox(input.near, r);
+    const qs = new URLSearchParams();
+    qs.set("select", "*");
+    // Category match — PostgREST `cs` (contains) operator on text[].
+    qs.append("categories", `cs.{${input.category}}`);
+    qs.append("lat", `gte.${bbox.latMin}`);
+    qs.append("lat", `lte.${bbox.latMax}`);
+    qs.append("lng", `gte.${bbox.lngMin}`);
+    qs.append("lng", `lte.${bbox.lngMax}`);
+    if (typeof input.min_rating === "number") {
+      qs.append("rating_avg", `gte.${input.min_rating}`);
+    }
+    if (typeof input.max_price_tier === "number") {
+      qs.append("price_tier", `lte.${input.max_price_tier}`);
+    }
+    if (input.locally_owned === true) {
+      qs.append("locally_owned", "is.true");
+    }
+    if (input.same_day === true) {
+      qs.append("same_day_flag", "is.true");
+    }
+    // Source gating. Allow-list wins when set; mock/seed are excluded
+    // UNCONDITIONALLY — every environment, no escape hatch (G 2026-07-02:
+    // real data only, forever; the mock rows + adapter are gone, this filter
+    // is the belt-and-suspenders if any fake row ever sneaks back in).
+    // PostgREST AND's repeated column filters.
+    if (input.sources?.length) {
+      qs.append("source", `in.(${input.sources.join(",")})`);
+    }
+    const excluded = new Set(input.exclude_sources ?? []);
+    excluded.add("mock");
+    excluded.add("seed");
+    qs.append("source", `not.in.(${[...excluded].join(",")})`);
+    // Fetch a generous slice; we score + cap in JS.
+    qs.append("limit", String(PG_PREFETCH_HARD_CAP));
+    qs.append("order", "rating_avg.desc.nullslast");
 
-  let rows: ContractorRow[];
-  try {
-    const res = await fetch(`${url}/rest/v1/contractors?${qs.toString()}`, {
-      headers: {
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
-      },
-      // Search is read-only and idempotent — let edge cache it briefly.
-      cache: "no-store",
-    });
-    if (!res.ok) {
+    let rows: ContractorRow[];
+    try {
+      const res = await fetch(`${url}/rest/v1/contractors?${qs.toString()}`, {
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+        },
+        // Search is read-only and idempotent — let edge cache it briefly.
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        return {
+          hits: [],
+          considered: 0,
+          error: `supabase ${res.status}: ${await res.text()}`,
+        };
+      }
+      rows = (await res.json()) as ContractorRow[];
+    } catch (e) {
       return {
         hits: [],
-        total_considered: 0,
-        filters_applied: filters,
-        error: `supabase ${res.status}: ${await res.text()}`,
+        considered: 0,
+        error: `fetch failed: ${e instanceof Error ? e.message : "unknown"}`,
       };
     }
-    rows = (await res.json()) as ContractorRow[];
-  } catch (e) {
-    return {
-      hits: [],
-      total_considered: 0,
-      filters_applied: filters,
-      error: `fetch failed: ${e instanceof Error ? e.message : "unknown"}`,
-    };
-  }
 
-  // Score every row by precise Haversine distance and composite score,
-  // drop ones outside the true circular radius (bbox is square), sort,
-  // and cap.
-  const scored: ContractorSearchHit[] = [];
-  for (const row of rows) {
-    if (row.lat == null || row.lng == null) continue;
-    const distance_km = haversineKm(input.near, {
-      lat: row.lat,
-      lng: row.lng,
-    });
-    if (distance_km > radius_km) continue;
-    const score = scoreHit({
-      distance_km,
-      rating_avg: row.rating_avg,
-      rating_count: row.rating_count,
-      radius_km,
-    });
-    scored.push({ ...row, distance_km, score });
-  }
+    // Score every row by precise Haversine distance and composite score,
+    // drop ones outside the true circular radius (bbox is square), sort.
+    const scored: ContractorSearchHit[] = [];
+    for (const row of rows) {
+      if (row.lat == null || row.lng == null) continue;
+      const distance_km = haversineKm(input.near, {
+        lat: row.lat,
+        lng: row.lng,
+      });
+      if (distance_km > r) continue;
+      const score = scoreHit({
+        distance_km,
+        rating_avg: row.rating_avg,
+        rating_count: row.rating_count,
+        radius_km: r,
+      });
+      scored.push({ ...row, distance_km, score });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return { hits: scored, considered: rows.length };
+  };
 
-  scored.sort((a, b) => b.score - a.score);
+  // NATIONAL fallback REMOVED for release (Herm ship-blocker 2026-07-02): the
+  // silent sweep out to 5000 km let far-away DB pros ride into results and
+  // recommendations without a "not local" label, and its non-empty result
+  // suppressed the live Outscraper fallback (which only runs when the DB
+  // comes back empty). Empty at the asked radius now returns empty — callers
+  // fall through to the live find or speak the honest no-results copy. If a
+  // labeled wide search ever comes back, it must be explicit and say so.
+  const run = await runAtRadius(radius_km);
 
   return {
-    hits: scored.slice(0, limit),
-    total_considered: rows.length,
+    hits: run.hits.slice(0, limit),
+    total_considered: run.considered,
     filters_applied: filters,
+    error: run.error,
   };
 }

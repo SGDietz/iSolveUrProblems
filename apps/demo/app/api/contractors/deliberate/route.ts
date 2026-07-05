@@ -16,7 +16,7 @@ export const maxDuration = 30;
  * Body:
  *   {
  *     category: string,                       // required
- *     near?: { lat: number, lng: number },    // default Austin
+ *     near: { lat: number, lng: number },     // required (no default center)
  *     constraints?: {
  *       locally_owned?: boolean,
  *       same_day?: boolean,
@@ -71,6 +71,11 @@ export async function POST(request: NextRequest) {
     typeof (body.near as { lng?: unknown }).lng === "number"
       ? (body.near as { lat: number; lng: number })
       : undefined;
+  // No default center — the caller must supply a real ranking center (reality
+  // doctrine: never rank near Austin/default).
+  if (!near) {
+    return bad("near { lat, lng } is required");
+  }
 
   const constraintsRaw =
     typeof body.constraints === "object" && body.constraints !== null

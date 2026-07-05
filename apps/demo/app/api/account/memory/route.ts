@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getUserId } from "../../../../src/lib/auth/getUser";
 import { getSupabaseAdminConfig } from "../../../../src/lib/supabaseAdmin";
 import type { MemoryFactKind } from "../../../../src/lib/memory/types";
+import { assertAllowedOrigin } from "../../../../src/lib/apiRouteSecurity";
+import { checkRateLimit } from "../../../../src/lib/rateLimit";
 
 const MAX_RETURN = 200;
 
@@ -65,6 +67,11 @@ export async function GET() {
  *        (no id)     → delete all of the user's facts
  */
 export async function DELETE(request: NextRequest) {
+  const originErr = assertAllowedOrigin(request);
+  if (originErr) return originErr;
+  const rateLimitErr = await checkRateLimit(request);
+  if (rateLimitErr) return rateLimitErr;
+
   const userId = await getUserId();
   if (!userId) {
     return NextResponse.json({ error: "not authenticated" }, { status: 401 });

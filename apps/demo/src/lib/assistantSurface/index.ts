@@ -14,6 +14,12 @@ export type {
   CallTranscriptLine,
   EstimatePayload,
   EstimateLine,
+  RecurringJobPayload,
+  TodoPayload,
+  TodoSurfaceItem,
+  ContractorOnboardingDraft,
+  ContractorOnboardingField,
+  ContractorOnboardingPayload,
   SurfaceVariant,
   SurfaceVariantKind,
 } from "./types";

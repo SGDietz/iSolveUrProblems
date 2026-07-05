@@ -1,5 +1,6 @@
 "use client";
 
+import { notFound } from "next/navigation";
 import { useAssistantSurface } from "../../../../src/lib/assistantSurface";
 
 const mockHits = [
@@ -97,11 +98,38 @@ const mockPickResult = {
   total_failed: 2,
 };
 
+const mockTodo = {
+  list_id: "dev-chest-list",
+  list_title: "House list",
+  transient: true,
+  persistence_note: "Not saved in dev sandbox.",
+  changed: { added: ["painter", "plumber", "roofer"] },
+  items: [
+    { id: "dev-1", title: "painter", position: 1 },
+    { id: "dev-2", title: "plumber", position: 2 },
+    { id: "dev-3", title: "roofer", position: 3 },
+  ],
+};
+
 export default function DevSurfaceClient() {
+  // DEV-ONLY (G 2026-07-02: no fake data anywhere real users can see) —
+  // canned sample payloads must never render on a production deployment.
+  // Same belt-and-suspenders lock as dev/cards.
+  const onProdDomain =
+    typeof window !== "undefined" &&
+    /(^|\.)isolveurproblems\.ai$/i.test(window.location.hostname);
+  if (process.env.NEXT_PUBLIC_VERCEL_ENV === "production" || onProdDomain) {
+    notFound();
+  }
+  return <DevSurfaceInner />;
+}
+
+function DevSurfaceInner() {
   const showContractors = useAssistantSurface((s) => s.showContractors);
   const showSummary = useAssistantSurface((s) => s.showSummary);
   const showRecommendations = useAssistantSurface((s) => s.showRecommendations);
   const showPickResult = useAssistantSurface((s) => s.showPickResult);
+  const showTodo = useAssistantSurface((s) => s.showTodo);
   const dismiss = useAssistantSurface((s) => s.dismiss);
   const reset = useAssistantSurface((s) => s.reset);
 
@@ -160,6 +188,13 @@ export default function DevSurfaceClient() {
           className="rounded-md bg-amber-400 text-zinc-900 px-4 py-2 text-sm font-medium hover:bg-amber-300"
         >
           4. Show pick result (1 win, 2 lose with vendor failures)
+        </button>
+        <button
+          type="button"
+          onClick={() => showTodo(mockTodo)}
+          className="rounded-md bg-amber-400 text-zinc-900 px-4 py-2 text-sm font-medium hover:bg-amber-300"
+        >
+          5. Show todo chest box (bottom half of 6)
         </button>
 
         <div className="flex gap-3 pt-2">

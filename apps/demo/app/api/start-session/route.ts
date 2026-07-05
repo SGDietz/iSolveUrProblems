@@ -6,6 +6,8 @@ import {
   CONTEXT_ID,
   LANGUAGE,
 } from "../secrets";
+import { assertAllowedOrigin } from "../../../src/lib/apiRouteSecurity";
+import { checkRateLimit } from "../../../src/lib/rateLimit";
 import { assertCanMintSessionToken } from "../../../src/lib/liveavatarCredits";
 import { getUserId } from "../../../src/lib/auth/getUser";
 import { getSupabaseServer } from "../../../src/lib/auth/supabaseServer";
@@ -104,6 +106,13 @@ async function buildDynamicVariables(): Promise<Record<string, string>> {
 }
 
 export async function POST(request: Request) {
+  // This route MINTS a paid avatar session — the most expensive call in the
+  // app. Origin + rate-limit guards (Herm release blocker #7) sit in front
+  // of the credit gate so an off-site script can't drain credits.
+  const originErr = assertAllowedOrigin(request);
+  if (originErr) return originErr;
+  const rateLimitErr = await checkRateLimit(request);
+  if (rateLimitErr) return rateLimitErr;
   const gate = await assertCanMintSessionToken();
   if (!gate.ok) {
     return new Response(JSON.stringify({ error: gate.message }), {

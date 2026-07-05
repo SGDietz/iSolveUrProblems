@@ -6,16 +6,18 @@ import {
 } from "../../../app/api/secrets";
 
 /**
- * M3.1 — Twilio Voice REST wrapper.
+ * M3.1 — Twilio Voice REST wrapper. DORMANT behind FEATURE_AI_CONFERENCE_CALLS.
  *
- * Vercel-compatible audio pipeline:
- *   - Twilio dials homeowner + contractor + a third "6" leg into a Conference
- *   - The 6 leg's TwiML stays silent (just `<Pause>` looping) until our
- *     orchestrator wants 6 to speak, at which point we update the active
- *     call's TwiML via REST to inject `<Say>` text. Twilio's TTS pipes
- *     into the conference live, no WebSocket needed.
+ * Vercel-compatible audio pipeline (as actually built — Herm TASK_094 fixed
+ * this doc: there is NO third "6" call leg):
+ *   - Twilio dials TWO human legs (homeowner + contractor) into a Conference.
+ *   - 6 "speaks" via the Conference Announce helper below: Twilio
+ *     plays TTS INSIDE the room to all participants — no third leg, no
+ *     WebSocket needed.
  *   - `<Start><Transcription>` on the conference posts every transcript
  *     chunk to our /api/webhooks/twilio/transcription HTTP endpoint.
+ *     MUST become consent-gated before the feature ever enables (MD
+ *     all-party consent — see the calls/start route gate).
  *
  * All Twilio responses come back as JSON when we hit `.json` endpoints.
  */

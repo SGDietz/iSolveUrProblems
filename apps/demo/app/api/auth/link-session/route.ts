@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getUserId } from "../../../../src/lib/auth/getUser";
 import { getSupabaseAdminConfig } from "../../../../src/lib/supabaseAdmin";
+import { assertAllowedOrigin } from "../../../../src/lib/apiRouteSecurity";
+import { checkRateLimit } from "../../../../src/lib/rateLimit";
 
 /**
  * Re-key anonymous rows to the authenticated user.
@@ -26,6 +28,11 @@ function isSafeSessionId(s: unknown): s is string {
 }
 
 export async function POST(request: NextRequest) {
+  const originErr = assertAllowedOrigin(request);
+  if (originErr) return originErr;
+  const rateLimitErr = await checkRateLimit(request);
+  if (rateLimitErr) return rateLimitErr;
+
   const userId = await getUserId();
   if (!userId) {
     return NextResponse.json({ error: "not authenticated" }, { status: 401 });

@@ -22,6 +22,29 @@
     --stage-bottom: var(--stage-top);
   }
 }
+/* iPad Safari: 100vh is the LARGE viewport (browser chrome collapsed). A tab
+   opened from a mail magic link carries full chrome (tab strip + URL bar), so
+   the visible area is SHORTER than 100vh — the vh-centered stage then hangs
+   below the fold and 6 renders lower (G iPad report 2026-07-01). dvh tracks
+   the real visible height as chrome shows/hides. Same values, only the unit
+   changes; identical on desktop where chrome is static. The vh block above
+   stays as the fallback for engines without dvh (pre-15.4 iOS).
+   NOTE: a plain duplicate declaration is NOT a safe fallback for custom
+   properties (an unsupported unit poisons at use-time, not parse-time), so
+   this must live behind @supports. */
+@supports (height: 100dvh) {
+  :root {
+    --stage-height: min(100dvh, calc(100vw * 16 / 9));
+    --stage-bottom: calc(100dvh - var(--stage-height));
+  }
+  @media (min-width: 768px) {
+    :root {
+      --stage-height: min(94dvh, 80rem);
+      --stage-top: calc((100dvh - var(--stage-height)) / 2);
+      --stage-bottom: var(--stage-top);
+    }
+  }
+}
 
 @keyframes fade-opacity {
   0%, 100% {
@@ -68,6 +91,84 @@
 }
 .pill-wiggle {
   animation: pill-wiggle 0.95s ease-in-out !important;
+}
+
+/* Gentle continuous idle bob so the example pills catch the eye — people know
+   they're tappable (G smoke 2026-06-30: "a little bit of movement"). Subtle;
+   staggered per pill so the pair drifts out of sync, never mechanical. */
+@keyframes pill-idle {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-3px) rotate(-0.5deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes pill-idle { 0%, 100% { transform: none; } }
+}
+
+/* Contractor cards WHOOSH onto 6's chest — boom-boom-boom, TikTok-slick
+   (G spec 2026-06-30). Card 1 from the right, card 2 from the left, card 3 up
+   from the bottom. Each materializes (blur→sharp) with an overshoot "land".
+   Snappy landing curve baked into the 72% overshoot keyframe. */
+@keyframes card-whoosh-right {
+  0%   { opacity: 0; transform: translateX(72vw) scale(0.82) rotate(7deg); filter: blur(7px); }
+  72%  { opacity: 1; transform: translateX(-10px) scale(1.03) rotate(-1.5deg); filter: blur(0); }
+  100% { opacity: 1; transform: translateX(0) scale(1) rotate(0deg); filter: blur(0); }
+}
+@keyframes card-whoosh-left {
+  0%   { opacity: 0; transform: translateX(-72vw) scale(0.82) rotate(-7deg); filter: blur(7px); }
+  72%  { opacity: 1; transform: translateX(10px) scale(1.03) rotate(1.5deg); filter: blur(0); }
+  100% { opacity: 1; transform: translateX(0) scale(1) rotate(0deg); filter: blur(0); }
+}
+@keyframes card-whoosh-bottom {
+  0%   { opacity: 0; transform: translateY(80vh) scale(0.82); filter: blur(7px); }
+  72%  { opacity: 1; transform: translateY(-12px) scale(1.03); filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+/* Explicit exits for /dev/cards replay/clear: the demo now hides cards until
+   the find fires, then sweeps them away before replaying so entry/exit timing
+   can be tuned without a live avatar session. */
+@keyframes card-whoosh-exit-right {
+  0%   { opacity: 1; transform: translateX(0) scale(1) rotate(0deg); filter: blur(0); }
+  100% { opacity: 0; transform: translateX(72vw) scale(0.82) rotate(7deg); filter: blur(7px); }
+}
+@keyframes card-whoosh-exit-left {
+  0%   { opacity: 1; transform: translateX(0) scale(1) rotate(0deg); filter: blur(0); }
+  100% { opacity: 0; transform: translateX(-72vw) scale(0.82) rotate(-7deg); filter: blur(7px); }
+}
+@keyframes card-whoosh-exit-bottom {
+  0%   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  100% { opacity: 0; transform: translateY(80vh) scale(0.82); filter: blur(7px); }
+}
+/* Variable-driven whoosh (G via Herm 2026-07-01: RANDOM chaos, any direction).
+   Each card sets --wx/--wy (start offset), --wrot (start tilt); the 72% frame
+   overshoots ~1.4% back past home for the snap. One keyframe, infinite
+   directions — random per card per run, seeded in ContractorsPanel. */
+@keyframes card-whoosh-var {
+  0% {
+    opacity: 0;
+    transform: translate(var(--wx, 72vw), var(--wy, 0vh)) scale(0.82)
+      rotate(var(--wrot, 7deg));
+    filter: blur(7px);
+  }
+  72% {
+    opacity: 1;
+    transform: translate(calc(var(--wx, 72vw) * -0.014), calc(var(--wy, 0vh) * -0.014))
+      scale(1.03) rotate(calc(var(--wrot, 7deg) * -0.2));
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1) rotate(0deg);
+    filter: blur(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes card-whoosh-right        { 0%,100% { opacity: 1; transform: none; filter: none; } }
+  @keyframes card-whoosh-left         { 0%,100% { opacity: 1; transform: none; filter: none; } }
+  @keyframes card-whoosh-bottom       { 0%,100% { opacity: 1; transform: none; filter: none; } }
+  @keyframes card-whoosh-exit-right   { 0%,100% { opacity: 0; transform: none; filter: none; } }
+  @keyframes card-whoosh-exit-left    { 0%,100% { opacity: 0; transform: none; filter: none; } }
+  @keyframes card-whoosh-exit-bottom  { 0%,100% { opacity: 0; transform: none; filter: none; } }
+  @keyframes card-whoosh-var          { 0%,100% { opacity: 1; transform: none; filter: none; } }
 }
 
 @layer components {
@@ -214,4 +315,20 @@
     background-repeat: no-repeat;
     background-attachment: fixed;
   }
+}
+
+/* 6 names a button -> that button shakes (G smoke #7 2026-07-03: "when 6
+   says gallery, it's just a quick shake, boom boom boom"). Three quick
+   shakes + a brighter amber border while cued. */
+@keyframes btn-cue-shake {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  15% { transform: translateX(-5px) rotate(-2deg); }
+  30% { transform: translateX(5px) rotate(2deg); }
+  45% { transform: translateX(-4px) rotate(-1.5deg); }
+  60% { transform: translateX(4px) rotate(1.5deg); }
+  75% { transform: translateX(-2px) rotate(0); }
+}
+.btn-cue-shake {
+  animation: btn-cue-shake 0.55s cubic-bezier(0.36, 0.07, 0.19, 0.97) 3;
+  border-color: rgba(255, 233, 194, 0.95) !important;
 }

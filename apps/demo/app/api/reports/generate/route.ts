@@ -3,6 +3,8 @@ import { getUser } from "../../../../src/lib/auth/getUser";
 import { generateReport } from "../../../../src/lib/reports";
 import { defaultLocale, locales, type Locale } from "../../../../src/i18n/routing";
 import { getSupabaseAdminConfig } from "../../../../src/lib/supabaseAdmin";
+import { assertAllowedOrigin } from "../../../../src/lib/apiRouteSecurity";
+import { checkRateLimit } from "../../../../src/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 // Compose + render can take 15-30s on a chunky session. Bump function
@@ -51,6 +53,11 @@ async function getUserFirstName(userId: string): Promise<string | null> {
  * returns the final status when done.
  */
 export async function POST(request: NextRequest) {
+  const originErr = assertAllowedOrigin(request);
+  if (originErr) return originErr;
+  const rateLimitErr = await checkRateLimit(request);
+  if (rateLimitErr) return rateLimitErr;
+
   const user = await getUser();
   if (!user) {
     return NextResponse.json({ error: "not authenticated" }, { status: 401 });

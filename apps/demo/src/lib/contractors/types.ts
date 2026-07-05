@@ -22,6 +22,14 @@ export type ContractorCategorySlug =
 
 export type PriceTier = 1 | 2 | 3 | 4; // Google-style $..$$$$
 
+/** Where a contractor row came from / how verified it is. */
+export type ContractorClaimStatus =
+  | "unclaimed"
+  | "self_registered"
+  | "claimed"
+  | "verified"
+  | (string & {});
+
 /** A row from the public.contractors table. */
 export type ContractorRow = {
   id: string;
@@ -44,6 +52,14 @@ export type ContractorRow = {
   locally_owned: boolean | null;
   rating_avg: number | null;
   rating_count: number | null;
+  claim_status?: ContractorClaimStatus | null;
+  claimed_by_user_id?: string | null;
+  claimed_at?: string | null;
+  stripe_account_id?: string | null;
+  stripe_onboarding_status?: string | null;
+  license_number?: string | null;
+  license_state?: string | null;
+  license_status?: string | null;
   last_seen_at: string;
   scraped_payload: Record<string, unknown>;
   created_at: string;

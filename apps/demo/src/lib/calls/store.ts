@@ -80,6 +80,80 @@ export async function getCallByTwilioSid(args: {
   return rows[0] ?? null;
 }
 
+// ─── Call consent ledger (MD §10-402 all-party consent — CRIMINAL statute;
+// recording/transcription may only run when EVERY party's row says yes).
+// G order 2026-07-02 night; Herm TASK_088/092 legal gates. ──────────────
+
+export type CallConsentParty = "user" | "contractor";
+export type CallConsentMethod = "app_sheet" | "dtmf" | "speech" | "timeout";
+
+export type CallConsentRow = {
+  id: string;
+  call_id: string;
+  party: CallConsentParty;
+  consented: boolean;
+  method: CallConsentMethod;
+  consent_version: string;
+  created_at: string;
+};
+
+export async function recordCallConsent(args: {
+  call_id: string;
+  party: CallConsentParty;
+  consented: boolean;
+  method: CallConsentMethod;
+  consent_version?: string;
+}): Promise<CallConsentRow | null> {
+  const { url, serviceRoleKey } = getSupabaseAdminConfig();
+  const res = await fetch(`${url}/rest/v1/call_consents`, {
+    method: "POST",
+    headers: {
+      ...adminHeaders(serviceRoleKey),
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify([
+      {
+        call_id: args.call_id,
+        party: args.party,
+        consented: args.consented,
+        method: args.method,
+        consent_version: args.consent_version ?? "v1",
+      },
+    ]),
+  });
+  if (!res.ok) {
+    console.error("call_consents insert failed:", res.status, await res.text());
+    return null;
+  }
+  const rows = (await res.json()) as CallConsentRow[];
+  return rows[0] ?? null;
+}
+
+/**
+ * Latest consent per party for a call. FAIL-CLOSED: any fetch error reads
+ * as "no consent" — recording/transcription must never start on a doubt.
+ */
+export async function getCallConsents(
+  call_id: string,
+): Promise<{ user: boolean; contractor: boolean }> {
+  try {
+    const { url, serviceRoleKey } = getSupabaseAdminConfig();
+    const res = await fetch(
+      `${url}/rest/v1/call_consents?call_id=eq.${encodeURIComponent(
+        call_id,
+      )}&order=created_at.desc,id.desc`,
+      { headers: adminHeaders(serviceRoleKey), cache: "no-store" },
+    );
+    if (!res.ok) return { user: false, contractor: false };
+    const rows = (await res.json()) as CallConsentRow[];
+    const latest = (party: CallConsentParty) =>
+      rows.find((r) => r.party === party)?.consented === true;
+    return { user: latest("user"), contractor: latest("contractor") };
+  } catch {
+    return { user: false, contractor: false };
+  }
+}
+
 export async function patchCall(
   id: string,
   patch: Partial<
