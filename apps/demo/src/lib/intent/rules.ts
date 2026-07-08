@@ -40,6 +40,47 @@ import {
 } from "../lists";
 import type { ClassifyContext, ClassifyResult, IntentSlots } from "./types";
 
+const TODO_COMPLETE_COMMAND_RE =
+  /\b(?:check(?:ed)?\s+off|cross(?:ed)?\s+off|mark(?:ed)?\s+off|(?:cross|check|mark)(?:ed)?\s+.+?\s+off|mark\s+.+?\s+(?:as\s+)?(?:done|complete|completed|finished))\b/i;
+
+function hasTodoSurface(ctx: ClassifyContext): boolean {
+  return ctx.currentSurfaceKind === "todo";
+}
+
+function hasListTokenOrTodoSurface(text: string, ctx: ClassifyContext): boolean {
+  return /\blist\b/i.test(text) || hasTodoSurface(ctx);
+}
+
+function isTodoMutationCommand(text: string): boolean {
+  return (
+    parseRemovePositions(text).length > 0 ||
+    parseRemoveByPosition(text) !== null ||
+    isClearAllCommand(text) ||
+    TODO_COMPLETE_COMMAND_RE.test(text)
+  );
+}
+
+function parseTodoOrdinal(text: string): number | null {
+  const m = text.match(
+    /\b(?:number|item|#)?\s*(one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|1st|2nd|3rd|4th|5th|6th|7th|8th|9th|10th|\d{1,2})\b/i,
+  );
+  if (!m) return null;
+  const raw = m[1].toLowerCase();
+  const words: Record<string, number> = {
+    one: 1, first: 1, "1st": 1,
+    two: 2, second: 2, "2nd": 2,
+    three: 3, third: 3, "3rd": 3,
+    four: 4, fourth: 4, "4th": 4,
+    five: 5, fifth: 5, "5th": 5,
+    six: 6, sixth: 6, "6th": 6,
+    seven: 7, seventh: 7, "7th": 7,
+    eight: 8, eighth: 8, "8th": 8,
+    nine: 9, ninth: 9, "9th": 9,
+    ten: 10, tenth: 10, "10th": 10,
+  };
+  if (/^\d+$/.test(raw)) return parseInt(raw, 10);
+  return words[raw] ?? null;
+}
 
 type Rule = {
   id: string;
@@ -67,7 +108,9 @@ type Rule = {
     | "onboard_contractor"
     | "save_contractor_profile"
     | "add_todo"
+    | "rename_todo"
     | "view_todos"
+    | "inspect_todo"
     | "complete_todo"
     | "remove_todo"
     | "clear_list"
@@ -95,8 +138,23 @@ const TRADE_WORD_RE =
 const HOMEOWNER_FIND_PRO_RE =
   /\b(?:find|search|look\s+for|need|want|get|hire|show|give|pull\s+up)\b\s+(?:me\s+|us\s+)?(?:\d+\s+|[a-z]+\s+)?(?:more\s+)?(?:a|an|the|some)?\s*(plumbers?|electricians?|hvac|a\/c|ac|roofers?|landscapers?|painters?|handym(?:a|e)n|carpenters?|flooring|appliance|cleaners?|cleaning|pest|garage\s+doors?|windows?|contractors?|builders?|gardeners?)\b/i;
 
+// "that list" now dismisses like "this list" does — G said "take THAT list
+// down" on the 2026-07-07 16:54 ride, nothing matched, and he had to repeat
+// himself ("The list is still up. Take it down.").
 const DISMISS_SURFACE_RE =
-  /\b(?:take\s+(?:it|that|this(?:\s+(?:panel|surface|screen|list|contractor\s+(?:signup|sign[- ]?up|onboarding)))?|the\s+(?:panel|surface|screen|list|contractor\s+(?:signup|sign[- ]?up|onboarding)))\s+down(?!\s+a\s+(?:notch|bit|level|peg|couple|few|little))|get\s+(?:it|that|this(?:\s+(?:panel|surface|list|contractor\s+(?:signup|sign[- ]?up|onboarding)))?|the\s+(?:panel|surface|list|contractor\s+(?:signup|sign[- ]?up|onboarding)))\s+off\s+(?:the\s+)?screen|close\s+(?:it|that|this(?:\s+(?:panel|surface|screen|list|contractor\s+(?:signup|sign[- ]?up|onboarding)))?|the\s+(?:panel|surface|screen|list|contractor\s+(?:signup|sign[- ]?up|onboarding)))|remove\s+(?:it|that|this|the\s+)?(?:list|panel|surface|contractor\s+(?:signup|sign[- ]?up|onboarding))\s+from\s+(?:the\s+)?screen|make\s+(?:it|that|this)\s+go\s+away)\b/i;
+  /\b(?:take\s+(?:it|(?:this|that)(?:\s+(?:panel|surface|screen|list|contractor\s+(?:signup|sign[- ]?up|onboarding)))?|the\s+(?:panel|surface|screen|list|contractor\s+(?:signup|sign[- ]?up|onboarding)))\s+down(?!\s+a\s+(?:notch|bit|level|peg|couple|few|little))|get\s+(?:it|(?:this|that)(?:\s+(?:panel|surface|list|contractor\s+(?:signup|sign[- ]?up|onboarding)))?|the\s+(?:panel|surface|list|contractor\s+(?:signup|sign[- ]?up|onboarding)))\s+off\s+(?:the\s+)?screen|close\s+(?:it|(?:this|that)(?:\s+(?:panel|surface|screen|list|contractor\s+(?:signup|sign[- ]?up|onboarding)))?|the\s+(?:panel|surface|screen|list|contractor\s+(?:signup|sign[- ]?up|onboarding)))|remove\s+(?:it|that|this|the\s+)?(?:list|panel|surface|contractor\s+(?:signup|sign[- ]?up|onboarding))\s+from\s+(?:the\s+)?screen|(?:make\s+(?:it|that|this)\s+)?go\s+away)\b/i;
+
+// List rename (G live-ride 2026-07-06: "let's call this list Contractors
+// Needed... 6 should be able to change it for the user"). Gated on the todo
+// surface actually being open (ClassifyContext.currentSurfaceKind) so a bare
+// "call this X" out of list context never misfires.
+// "this" is often followed by the literal word "list" before the new name
+// ("call THIS LIST Contractors Needed") — that optional "list" token must be
+// CONSUMED by the alternation, not left for the capture group, or the name
+// leaks a leading "list " (verified 2026-07-06: "call this list contractors
+// list" captured "list contractors list" before this fix).
+const LIST_RENAME_RE =
+  /\b(?:let'?s\s+)?call\s+(?:this(?:\s+list)?|it|the\s+list)\s+(.+)|rename\s+(?:this|the)\s+list\s+(?:to\s+)?(.+)|name\s+(?:this|the)\s+list\s+(.+)/i;
 
 // M4.4 no-show phrasing — shared by the report.no_show rule AND the
 // onboarding-continuation bail (a no-show report must escape the panel).
@@ -255,6 +313,12 @@ const NEED_LIST_RE =
 const LIST_ITEM_COLLISION_RE =
   /\b(?:appointment|meeting|booking|visit|contractors?|plumbers?|electricians?|handym(?:a|e)n|roofers?|painters?|landscapers?|estimates?|contracts?|disputes?|calls?)\b/i;
 
+const LIST_ON_SCREEN_RE =
+  /\b(?:put|show|bring|pull)\s+(?:a|the|my|our)?\s*(?:to[- ]?do\s+|todo\s+|task\s+|shopping\s+)?list\s+(?:on|onto|up\s+on)\s+(?:the\s+)?screen\b|\blist\s+(?:on|onto)\s+(?:the\s+)?screen\b/i;
+
+const TODO_ITEM_QUERY_RE =
+  /\b(?:what(?:'s|\s+is)|which|read|say|tell\s+me|show\s+me)\s+(?:is\s+|me\s+)?(?:on\s+)?(?:number|item|#|the)?\s*(one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|\d+)\b/i;
+
 function isNeedListCommand(text: string): boolean {
   return NEED_LIST_RE.test(text);
 }
@@ -395,7 +459,8 @@ const RULES: readonly Rule[] = [
   // intent; the handler asks what to put on it.
   {
     id: "todo.make_list",
-    match: (t) => MAKE_LIST_RE.test(t) || isNeedListCommand(t),
+    match: (t) =>
+      !isClearAllCommand(t) && (MAKE_LIST_RE.test(t) || isNeedListCommand(t)),
     build: (t) => {
       // Need-list ("I need a list of odds and ends") has no make-verb tail to
       // parse — open the list empty and ask (Herm TASK_119). "I need a list of
@@ -414,6 +479,19 @@ const RULES: readonly Rule[] = [
     kind: "add_todo",
     required: [],
   },
+  // Visible-list item lookup — "what is number 1?" / "what's the second
+  // item?" must answer against the card, not fire contractor tell-me-more or
+  // get swallowed as a pending list item.
+  {
+    id: "todo.inspect_item",
+    match: (t, ctx) => ctx.currentSurfaceKind === "todo" && TODO_ITEM_QUERY_RE.test(t),
+    build: (t) => {
+      const pos = parseTodoOrdinal(t);
+      return pos !== null ? { todo_ref: { type: "ordinal", position: pos } } : {};
+    },
+    kind: "inspect_todo",
+    required: ["todo_ref"],
+  },
   // Answer to 6's "what should I put on it?" (one-shot ctx.pendingListAdd —
   // Herm TASK_094 blocker #2; G smoke #6: "a painter, a plumber, and a
   // roofer" had no list verb and trade words the strict gate rejects).
@@ -424,12 +502,26 @@ const RULES: readonly Rule[] = [
     match: (t, ctx) => {
       if (!ctx.pendingListAdd) return false;
       if (
-        /\b(?:find|search|look\s+for|show|call|book|schedule|open|go\s+to|never\s*mind|forget\s+it|cancel)\b/i.test(
+        /^\s*(?:done|finished|all\s+set|that'?s\s+(?:it|all|good)|that\s+is\s+(?:it|all|good)|(?:that|this|it)\s+looks\s+good|looks\s+good|nothing\s+else|no\s+more|we'?re\s+done|we\s+are\s+done|okay\s+that'?s\s+it|ok\s+that'?s\s+it)\s*[.!?]*\s*$/i.test(t)
+      ) {
+        return false;
+      }
+      if (
+        /\b(?:find|search|look\s+for|show|call|book|schedule|open|go\s+to|never\s*mind|forget\s+it|cancel|go\s+away|dismiss|close\s+it|close\s+that|close\s+this|get\s+rid\s+of\s+(?:it|that|this))\b/i.test(
           t,
         )
       ) {
         return false;
       }
+      // aiASAP parity: while the "add more items" window is hot, do NOT
+      // swallow list mutation commands as new item titles ("remove number
+      // one" must remove card #1, not write that phrase onto the card).
+      if (isTodoMutationCommand(t)) return false;
+      // Bare pronoun clears ("clear it", "wipe that") miss isClearAllCommand
+      // but are still commands — writing the words onto the card is the one
+      // wrong answer. Anchored so items like "clear coat spray" only lose
+      // the leading-verb form, which reads as a command anyway.
+      if (/^\s*(?:clear|wipe|erase)\b/i.test(t)) return false;
       return splitSpokenPendingListItems(t).length > 0;
     },
     build: (t, ctx) => ({
@@ -440,6 +532,25 @@ const RULES: readonly Rule[] = [
     }),
     kind: "add_todo",
     required: [],
+  },
+  // Rename the CURRENTLY OPEN list — "call this list Contractors Needed",
+  // "let's call this list contractors list", "rename this list to X". Gated
+  // on the todo surface actually being visible so a bare "call this X" out of
+  // list context never misfires.
+  {
+    id: "todo.rename",
+    match: (t, ctx) =>
+      ctx.currentSurfaceKind === "todo" && LIST_RENAME_RE.test(t),
+    build: (t) => {
+      const m = t.match(LIST_RENAME_RE);
+      const newTitle = (m?.[1] ?? m?.[2] ?? m?.[3] ?? "")
+        .trim()
+        .replace(/^["']|["']$/g, "")
+        .replace(/[.!?]+$/, "");
+      return newTitle ? { list_name: newTitle } : {};
+    },
+    kind: "rename_todo",
+    required: ["list_name"],
   },
   // Every rule demands an explicit list token so casual sentences ("I need
   // to fix the sink") never become list writes. First match wins — order:
@@ -471,7 +582,7 @@ const RULES: readonly Rule[] = [
   // so "remove everything" never reads as a single-item remove.
   {
     id: "todo.clear",
-    match: (t) => /\blist\b/i.test(t) && isClearAllCommand(t),
+    match: (t, ctx) => hasListTokenOrTodoSurface(t, ctx) && isClearAllCommand(t),
     build: (t) => {
       const listName = extractListName(t);
       return listName ? { list_name: listName } : {};
@@ -486,8 +597,8 @@ const RULES: readonly Rule[] = [
   // this on the active list; we gate on the spoken token).
   {
     id: "todo.remove",
-    match: (t) =>
-      /\blist\b/i.test(t) &&
+    match: (t, ctx) =>
+      hasListTokenOrTodoSurface(t, ctx) &&
       (parseRemovePositions(t).length > 0 ||
         parseRemoveByPosition(t) !== null ||
         /\b(?:take|remove|delete)\s+.+?\s+(?:off|from)\s+(?:my|the|our)\s+(?:[a-z0-9' -]+\s+)?list\b/i.test(
@@ -518,7 +629,8 @@ const RULES: readonly Rule[] = [
   // contractor" must not mutate a list).
   {
     id: "todo.complete",
-    match: (t) =>
+    match: (t, ctx) =>
+      hasListTokenOrTodoSurface(t, ctx) &&
       !/\b(?:appointment|meeting|booking|visit|contractor|plumber|electrician|handyman|roofer|painter|landscaper|estimate|contract|dispute|call)\b/i.test(
         t,
       ) &&
@@ -532,17 +644,8 @@ const RULES: readonly Rule[] = [
           t,
         )),
     build: (t) => {
-      const ord = t.match(
-        /\b(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|#?\s*([1-5]))\b/i,
-      );
-      if (ord) {
-        const words: Record<string, number> = {
-          first: 1, "1st": 1, second: 2, "2nd": 2, third: 3, "3rd": 3,
-          fourth: 4, "4th": 4, fifth: 5, "5th": 5,
-        };
-        const pos = ord[2]
-          ? parseInt(ord[2], 10)
-          : (words[ord[1].toLowerCase()] ?? 1);
+      const pos = parseTodoOrdinal(t);
+      if (pos !== null) {
         return { todo_ref: { type: "ordinal", position: pos } };
       }
       const m =
@@ -578,13 +681,25 @@ const RULES: readonly Rule[] = [
   },
   // "what's on my list", "read me my house list", "show me the Henderson list"
   // "see/view/pull up" added 2026-07-03 (G Droid ride: "I want to see the
-  // list on your chest" matched nothing).
+  // list on your chest" matched nothing). "put a list on (the) screen" /
+  // bare "list on screen" added 2026-07-07 (G's 13:08 ride: he said both,
+  // nothing matched, and 6 read the items voice-only instead of opening the
+  // panel). Dismiss beats this by rule order, and no dismiss verb appears
+  // here, so "take/remove the list from the screen" still closes it.
   {
     id: "todo.view",
     match: (t) =>
-      /\b(?:what'?s\s+on|show\s+(?:me\s+)?|see|view|pull\s+up|put\s+up|bring\s+up|read\s+(?:me\s+)?(?:back\s+)?|check)\s+(?:my|the|our|that|this)\s+(?:[a-z0-9' -]+\s+)?list\b/i.test(
+      LIST_ON_SCREEN_RE.test(t) ||
+      /\b(?:what'?s\s+on|show\s+(?:me\s+)?|see|view|pull\s+up|put\s+up|bring\s+up|read\s+(?:me\s+)?(?:back\s+)?|check)\s+(?:my|the|our|that|this|a)\s+(?:[a-z0-9' -]+\s+)?list\b/i.test(
         t,
-      ) || /\bmy\s+to[- ]?do\s+list\b/i.test(t),
+      ) ||
+      /\b(?:put|throw|pop|bring|show)\s+(?:a|an|the|my|that|this)?\s*(?:[a-z0-9' -]+\s+)?list\s+(?:up\s+)?on\s+(?:the\s+)?(?:screen|chest)\b/i.test(
+        t,
+      ) ||
+      /^\s*(?:a\s+|the\s+)?list\s+on\s+(?:the\s+)?screen\s*[.!?]*\s*$/i.test(
+        t,
+      ) ||
+      /\bmy\s+to[- ]?do\s+list\b/i.test(t),
     build: (t) => {
       const listName = extractListName(t);
       return listName ? { list_name: listName } : {};
@@ -813,10 +928,26 @@ const RULES: readonly Rule[] = [
   // ─── TELL_ME_MORE ─────────────────────────────────────────────────
   {
     id: "tell_me_more.about",
-    match: (t) =>
-      /\b(tell\s+me\s+more|more\s+(about|on|info)|what'?s\s+up\s+with|what\s+about|how\s+about)\b/i.test(
+    // Ctx-gated (Herm TASK_144 Patch D — G 13:11 ride: a bare "Tell me more"
+    // with no contractor context made 6 read "[INTENT NOT ACTIONABLE]"): a
+    // concrete contractor ref always matches; the generic phrasing only
+    // matches when a contractor-ish surface is actually in view. Otherwise
+    // the main brain answers naturally.
+    match: (t, ctx) => {
+      const ref = extractContractorRef(t);
+      if (ref) return true;
+      const surfaceCanHaveContractorContext = [
+        "contractors",
+        "summary",
+        "picks",
+        "pickResult",
+        "compare",
+      ].includes(ctx.currentSurfaceKind ?? "");
+      if (!surfaceCanHaveContractorContext) return false;
+      return /\b(tell\s+me\s+more|more\s+(?:about|on|info)|show\s+me\s+details|details)\b/i.test(
         t,
-      ),
+      );
+    },
     build: (t) => ({
       contractor_ref: extractContractorRef(t),
     }),

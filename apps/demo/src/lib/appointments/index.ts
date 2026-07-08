@@ -10,6 +10,7 @@ export {
   cancelAppointment,
   listUpcomingAppointments,
   findAppointmentsDueForReminder,
+  findAppointmentsDueForChecklist,
   markReminderSent,
   getAppointmentById,
   findRecentUnfulfilledAppointment,

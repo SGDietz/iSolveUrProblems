@@ -181,6 +181,7 @@ function parseSurfaceSnapshot(
     pendingListIndex?: unknown;
     pendingAddOffer?: unknown;
     pendingListAdd?: unknown;
+    todo?: unknown;
   };
   const validKinds = new Set([
     "contractors",
@@ -204,6 +205,41 @@ function parseSurfaceSnapshot(
   const contractorIds = Array.isArray(r.contractorIds)
     ? r.contractorIds.filter((x): x is string => typeof x === "string")
     : [];
+
+  let todo: SurfaceSnapshot["todo"] | undefined;
+  if (kind === "todo" && typeof r.todo === "object" && r.todo !== null) {
+    const t = r.todo as {
+      list_id?: unknown;
+      list_title?: unknown;
+      items?: unknown;
+      transient?: unknown;
+    };
+    const listId = typeof t.list_id === "string" ? t.list_id.trim().slice(0, 128) : "";
+    const listTitle = typeof t.list_title === "string" ? t.list_title.trim().slice(0, 120) : "";
+    const items = Array.isArray(t.items)
+      ? t.items
+          .map((item) => {
+            if (typeof item !== "object" || item === null) return null;
+            const i = item as { id?: unknown; title?: unknown; position?: unknown };
+            const id = typeof i.id === "string" ? i.id.trim().slice(0, 128) : "";
+            const title = typeof i.title === "string" ? i.title.trim().slice(0, 120) : "";
+            const position = typeof i.position === "number" && Number.isFinite(i.position)
+              ? Math.max(1, Math.min(500, Math.floor(i.position)))
+              : 1;
+            return id && title ? { id, title, position } : null;
+          })
+          .filter((item): item is { id: string; title: string; position: number } => Boolean(item))
+          .slice(0, 100)
+      : [];
+    if (listId && listTitle) {
+      todo = {
+        list_id: listId,
+        list_title: listTitle,
+        items,
+        transient: t.transient === true,
+      };
+    }
+  }
 
   // Parse deliberation carryover (compare variant only)
   let deliberation: SurfaceSnapshot["deliberation"] | undefined;
@@ -313,6 +349,7 @@ function parseSurfaceSnapshot(
   return {
     kind,
     contractorIds,
+    todo,
     deliberation,
     pendingFind,
     pendingListIndex,

@@ -340,20 +340,27 @@ export async function generateChecklist(args: GenerateChecklistInput & {
  */
 export async function markChecklistNotified(args: {
   appointment_id: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const { url, serviceRoleKey } = getSupabaseAdminConfig();
-  const res = await fetch(
-    `${url}/rest/v1/appointments?id=eq.${encodeURIComponent(args.appointment_id)}`,
-    {
-      method: "PATCH",
-      headers: {
-        ...adminHeaders(serviceRoleKey),
-        Prefer: "return=minimal",
+  try {
+    const res = await fetch(
+      `${url}/rest/v1/appointments?id=eq.${encodeURIComponent(args.appointment_id)}`,
+      {
+        method: "PATCH",
+        headers: {
+          ...adminHeaders(serviceRoleKey),
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ checklist_notified_at: new Date().toISOString() }),
       },
-      body: JSON.stringify({ checklist_notified_at: new Date().toISOString() }),
-    },
-  );
-  if (!res.ok) {
-    console.error("markChecklistNotified failed:", res.status, await res.text());
+    );
+    if (!res.ok) {
+      console.error("markChecklistNotified failed:", res.status, await res.text());
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error("markChecklistNotified threw:", error);
+    return false;
   }
 }

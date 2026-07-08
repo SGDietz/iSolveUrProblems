@@ -26,6 +26,40 @@ import {
   parseOfferedAddItems,
   type ListIndexEntry,
 } from "../lib/lists";
+import { UI_SIZE_BIGGER_RE, UI_SIZE_SMALLER_RE } from "../lib/uiSize";
+
+type ButtonCueTarget = "camera" | "video" | "gallery";
+
+// Returns each matched target WITH its first-match position in the text, in
+// spoken order. Position matters: when a transcript chunk carries several
+// button words at once ("hit Camera for a photo, Video for a clip, or
+// Gallery…"), the cues must fire in the order 6 SAYS them, staggered — not
+// all in the same tick (G live-ride 2026-07-07: "camera and gallery just
+// shook together… when Six says the word video, the video button should
+// shake").
+function avatarButtonCueTargetsFromText(
+  text: string,
+): Array<{ target: ButtonCueTarget; index: number }> {
+  const t = text.toLowerCase();
+  const found: Array<{ target: ButtonCueTarget; index: number }> = [];
+  // Bare words cue too — G's exact ask is "when Six says the WORD video, the
+  // video button should shake" (Herm TASK_139 red-team: the old compound-only
+  // phrases missed bare Camera/Video; `camera roll` stays a Gallery cue, so
+  // Camera negative-lookaheads it).
+  const CAMERA_RE =
+    /\b(?:camera(?!\s+roll)|photo\s+button|picture\s+button|take\s+(?:a\s+)?(?:picture|photo)|snap\s+(?:a\s+)?picture)\b/;
+  const VIDEO_RE =
+    /\b(?:video|take\s+(?:a\s+)?video|record\s+(?:a\s+)?video|shoot\s+(?:a\s+)?video)\b/;
+  const GALLERY_RE =
+    /\b(?:gallery|open\s+(?:the\s+)?gallery|camera\s+roll|photo\s+library)\b/;
+  const cam = CAMERA_RE.exec(t);
+  if (cam) found.push({ target: "camera", index: cam.index });
+  const vid = VIDEO_RE.exec(t);
+  if (vid) found.push({ target: "video", index: vid.index });
+  const gal = GALLERY_RE.exec(t);
+  if (gal) found.push({ target: "gallery", index: gal.index });
+  return found.sort((a, b) => a.index - b.index);
+}
 
 type LiveAvatarContextProps = {
   sessionRef: React.RefObject<LiveAvatarSession>;
@@ -199,6 +233,92 @@ const useTranscriptCapture = (
     at: number;
   } | null>(null);
   const PENDING_ADD_OFFER_TTL_MS = 2 * 60_000;
+  const avatarButtonCueSeenRef = useRef<Set<ButtonCueTarget>>(new Set());
+  // Staggered cue timers — when several button words land in ONE transcript
+  // chunk, later ones fire ~880ms apart in spoken order instead of together
+  // (G live-ride 2026-07-07: "camera and gallery just shook together").
+  const avatarButtonCueTimersRef = useRef<number[]>([]);
+  const clearAvatarButtonCueTimers = useCallback(() => {
+    if (typeof window === "undefined") return;
+    for (const id of avatarButtonCueTimersRef.current) window.clearTimeout(id);
+    avatarButtonCueTimersRef.current = [];
+  }, []);
+  // WORD-TIMED cues (G live-ride 19:44: "on the timing that Six SAYS it").
+  // The transcript text streams ahead of the voice, so a cue fired on text
+  // arrival lands early. Anchor each cue to WHERE its word sits in the
+  // sentence: chars-from-start ÷ speaking pace, measured from the moment
+  // this avatar turn started speaking.
+  const AVATAR_SPEECH_CHARS_PER_SEC = 14;
+  const avatarSpeechStartedAtRef = useRef<number>(0);
+  const dispatchAvatarButtonCues = useCallback((text: string) => {
+    if (typeof window === "undefined") return;
+    const fresh = avatarButtonCueTargetsFromText(text).filter(
+      ({ target }) => !avatarButtonCueSeenRef.current.has(target),
+    );
+    // Mark seen SYNCHRONOUSLY (cumulative transcript events re-run this fn
+    // constantly — a pending timer must not double-queue its target).
+    for (const { target } of fresh) avatarButtonCueSeenRef.current.add(target);
+    // Chunk arrival IS the word's spoken moment (G 19:48: a late-sentence
+    // "gallery" missed its shake — the old whole-sentence char math pushed
+    // it seconds out). The transcript streams cumulatively in near-realtime,
+    // so a word's FIRST appearance means 6 is saying it about now: fire
+    // almost immediately, with a small beat between words that land in the
+    // same chunk (in spoken order).
+    let prevDelay = -400;
+    const firedThisCall: string[] = [];
+    fresh.forEach(({ target }) => {
+      const fire = () =>
+        window.dispatchEvent(
+          new CustomEvent("isolve:button-cue", {
+            detail: { target, source: "avatar-transcript" },
+          }),
+        );
+      let delay = 150;
+      if (delay < prevDelay + 400) delay = prevDelay + 400;
+      prevDelay = delay;
+      firedThisCall.push(target);
+      avatarButtonCueTimersRef.current.push(window.setTimeout(fire, delay));
+    });
+    // "Then they ALL shake and puff up" (G 19:43/19:44): once this turn has
+    // named all three, one grand all-together puff after the last word.
+    if (
+      avatarButtonCueSeenRef.current.size >= 3 &&
+      firedThisCall.length > 0 &&
+      !avatarButtonCueSeenRef.current.has("__all_fired__" as ButtonCueTarget)
+    ) {
+      avatarButtonCueSeenRef.current.add("__all_fired__" as ButtonCueTarget);
+      const allDelay = prevDelay + 900;
+      avatarButtonCueTimersRef.current.push(
+        window.setTimeout(() => {
+          for (const target of ["camera", "video", "gallery"] as const) {
+            window.dispatchEvent(
+              new CustomEvent("isolve:button-cue", {
+                detail: { target, source: "avatar-transcript", grand: true },
+              }),
+            );
+          }
+        }, allDelay),
+      );
+    }
+  }, []);
+  const dispatchAvatarUiTranscript = useCallback((text: string) => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("isolve:avatar-ui-transcript", {
+        detail: { text, source: "avatar-transcript" },
+      }),
+    );
+  }, []);
+  const dispatchAvatarUtterance = useCallback((text: string) => {
+    if (typeof window === "undefined") return;
+    const trimmed = text.trim();
+    if (trimmed.length < 8) return;
+    window.dispatchEvent(
+      new CustomEvent("isolve:avatar-utterance", {
+        detail: { text: trimmed, source: "avatar-speak-ended" },
+      }),
+    );
+  }, []);
 
   useEffect(() => {
     const session = sessionRef.current;
@@ -292,6 +412,12 @@ const useTranscriptCapture = (
         | "recurring"
         | null;
       contractorIds: string[];
+      todo?: {
+        list_id: string;
+        list_title: string;
+        items: Array<{ id: string; title: string; position: number }>;
+        transient?: boolean;
+      };
       deliberation?: {
         category: string;
         constraints: Record<string, unknown>;
@@ -361,6 +487,12 @@ const useTranscriptCapture = (
           | "recurring"
           | null;
         contractorIds: string[];
+        todo?: {
+          list_id: string;
+          list_title: string;
+          items: Array<{ id: string; title: string; position: number }>;
+          transient?: boolean;
+        };
         deliberation?: {
           category: string;
           constraints: Record<string, unknown>;
@@ -427,7 +559,20 @@ const useTranscriptCapture = (
         case "todo":
           // List panel — no contractor IDs; the kind lets follow-up list
           // commands ("check off number two") resolve against what's shown.
-          return { kind: "todo", contractorIds: [] };
+          return {
+            kind: "todo",
+            contractorIds: [],
+            todo: {
+              list_id: variant.payload.list_id,
+              list_title: variant.payload.list_title,
+              items: variant.payload.items.map((item) => ({
+                id: item.id,
+                title: item.title,
+                position: item.position,
+              })),
+              transient: variant.payload.transient === true,
+            },
+          };
         case "contractorOnboarding":
           // Onboarding is the trade-pro signing up — no homeowner-facing
           // contractor IDs. The kind lets "save it"/"done" resolve to save.
@@ -487,6 +632,30 @@ const useTranscriptCapture = (
           )
         ) {
           pendingListAddRef.current = null;
+        }
+        // SUP #22 (G 16:55 ride: "make the text bigger" → "I can't change
+        // the text size"): a size ask while the list sheet is open resizes
+        // the on-screen text INSTANTLY client-side, and the brain gets told
+        // what happened instead of freelancing a refusal. Handled fully
+        // here — this turn never reaches the pill brain or the orchestrator
+        // (a size ask is UI meta-talk, not list content).
+        {
+          const wantsBigger = UI_SIZE_BIGGER_RE.test(trimmed);
+          const wantsSmaller = !wantsBigger && UI_SIZE_SMALLER_RE.test(trimmed);
+          if (wantsBigger || wantsSmaller) {
+            // GLOBAL, not list-only (G live-ride 19:38: "make the letters
+            // bigger, make everything bigger" — said at the PILLS with no
+            // list open). One shared level drives pills + list text.
+            const store = useAssistantSurface.getState();
+            const changed = store.bumpTodoTextSizeLevel(wantsBigger ? 1 : -1);
+            const line = changed
+              ? `I just made the on-screen text ${wantsBigger ? "bigger" : "smaller"}.`
+              : `the text is already at its ${wantsBigger ? "biggest" : "smallest"} readable size.`;
+            sendOrQueueContextMessage(
+              `[TEXT SIZE — not spoken by user] ${line} Confirm in one short sentence in first person as 6. Do not mention saving, accounts, or email.`,
+            );
+            return;
+          }
         }
         // Machine-injected context lines ("[FIND — not spoken by user] …")
         // must never feed the pill brain — G's ride 2026-07-04: one became
@@ -609,20 +778,11 @@ const useTranscriptCapture = (
       } catch {
         /* offer detection must never break transcript flow */
       }
-      // 6 named a button — cue the UI shake (G smoke #7: "when 6 says
-      // gallery, it's just a quick shake, boom boom boom"). Requires a
-      // point-at-it phrasing (hit/tap/press/use … or "<name> button") so a
-      // passing mention ("the video you sent") can't fire it.
+      // 6 named a button — cue the UI shake immediately from avatar transcript
+      // phrases (SUP 2026-07-05): camera/picture, video, and gallery each get
+      // their own one-shot cue per spoken turn.
       try {
-        const cue = trimmed.match(
-          /\b(?:hit|tap|press|use)\b[^.!?]{0,40}?\b(camera|video|gallery)\b|\b(camera|video|gallery)\s+button\b/i,
-        );
-        const target = (cue?.[1] ?? cue?.[2])?.toLowerCase();
-        if (target && typeof window !== "undefined") {
-          window.dispatchEvent(
-            new CustomEvent("isolve:button-cue", { detail: { target } }),
-          );
-        }
+        dispatchAvatarButtonCues(trimmed);
       } catch {
         /* cue detection must never break transcript flow */
       }
@@ -644,11 +804,21 @@ const useTranscriptCapture = (
     const onUserTranscription = (event: { text: string }) => {
       if (typeof event?.text === "string") {
         userTurnRef.current = event.text;
+        // "When ANYBODY says camera/video/gallery — user or 6 — they shake,
+        // just for fun" (G live-ride 19:48). User words fire on arrival;
+        // the avatar-side seen-set dedups per turn either way.
+        try {
+          dispatchAvatarButtonCues(event.text);
+        } catch {
+          /* cue detection must never break transcript flow */
+        }
       }
     };
     const onAvatarTranscription = (event: { text: string }) => {
       if (typeof event?.text === "string") {
         avatarTurnRef.current = event.text;
+        dispatchAvatarButtonCues(event.text);
+        dispatchAvatarUiTranscript(event.text);
       }
     };
     const onUserSpeakEnded = () => {
@@ -658,12 +828,25 @@ const useTranscriptCapture = (
     };
     const onAvatarSpeakStarted = () => {
       isAvatarSpeakingRef.current = true;
+      avatarButtonCueSeenRef.current = new Set();
+      // Anchor for word-timed cues: each button word fires at its spoken
+      // moment, measured from this turn's speech start (G 19:44).
+      avatarSpeechStartedAtRef.current = Date.now();
+      // A queued stagger-shake from the PREVIOUS turn must not fire into
+      // this new sentence.
+      clearAvatarButtonCueTimers();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("isolve:avatar-speak-start"));
+      }
     };
     const onAvatarSpeakEnded = () => {
       isAvatarSpeakingRef.current = false;
       const text = avatarTurnRef.current;
       avatarTurnRef.current = "";
-      if (text) void flushAvatar(text);
+      if (text) {
+        dispatchAvatarUtterance(text);
+        void flushAvatar(text);
+      }
       // Any pending context message rides on the next avatar-silence.
       const pending = pendingContextMessageRef.current;
       pendingContextMessageRef.current = null;
@@ -682,14 +865,42 @@ const useTranscriptCapture = (
     session.on(AgentEventsEnum.AVATAR_SPEAK_STARTED, onAvatarSpeakStarted);
     session.on(AgentEventsEnum.AVATAR_SPEAK_ENDED, onAvatarSpeakEnded);
 
+    // SUP #5: a tapped list-item ✕ arrives as a synthetic user turn and
+    // rides the exact voice path above — same snapshot, same orchestrator,
+    // same guest/signed-in remove handling as the spoken command.
+    const onSyntheticUserUtterance = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ source?: unknown; text?: unknown }>
+      ).detail;
+      if (detail?.source !== "todo-remove-tap") return;
+      const text = typeof detail.text === "string" ? detail.text.trim() : "";
+      if (!text) return;
+      void flushUser(text);
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener(
+        "isolve:synthetic-user-utterance",
+        onSyntheticUserUtterance,
+      );
+    }
+
     return () => {
+      // A queued stagger-shake must not fire after teardown (Herm TASK_139:
+      // cue timer could survive session stop for up to the stagger tail).
+      clearAvatarButtonCueTimers();
+      if (typeof window !== "undefined") {
+        window.removeEventListener(
+          "isolve:synthetic-user-utterance",
+          onSyntheticUserUtterance,
+        );
+      }
       session.off(AgentEventsEnum.USER_TRANSCRIPTION, onUserTranscription);
       session.off(AgentEventsEnum.AVATAR_TRANSCRIPTION, onAvatarTranscription);
       session.off(AgentEventsEnum.USER_SPEAK_ENDED, onUserSpeakEnded);
       session.off(AgentEventsEnum.AVATAR_SPEAK_STARTED, onAvatarSpeakStarted);
       session.off(AgentEventsEnum.AVATAR_SPEAK_ENDED, onAvatarSpeakEnded);
     };
-  }, [sessionRef]);
+  }, [sessionRef, dispatchAvatarButtonCues, clearAvatarButtonCueTimers, dispatchAvatarUiTranscript, dispatchAvatarUtterance]);
 };
 
 const useTalkingState = (sessionRef: React.RefObject<LiveAvatarSession>) => {

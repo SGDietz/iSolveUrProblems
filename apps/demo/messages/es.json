@@ -235,6 +235,7 @@
       },
       "todo": {
         "openCount": "{count} pendientes",
+        "showingCount": "Mostrando {count} pendientes.",
         "empty": "Esta lista está vacía.",
         "summaryAdded": "Añadido: {items}",
         "summaryCompleted": "Marcado: {items}",
@@ -257,6 +258,19 @@
           "sixSays": "Aviso de 6: todavía no puedo unirme a llamadas de teléfono, así que hablar te toca a ti. Yo me quedo aquí con las notas mientras llamas. Si contesta una máquina, deja tú el mensaje. Después cuéntame cómo fue.",
           "confirm": "Sí, llamar ahora",
           "cancel": "Todavía no"
+        },
+        "emailConsent": {
+          "title": "¿Enviar correo a {name}?",
+          "body": "6 enviará una presentación limpia desde iSolve en vez de abrir tu app de correo.",
+          "disclosure": "Se comparte el correo de tu cuenta para que el contratista pueda responderte directamente. No se envía nada hasta que toques Sí.",
+          "messageLabel": "Nota opcional",
+          "placeholder": "Ejemplo: Necesito ayuda con un fregadero que gotea esta semana.",
+          "confirm": "Sí, enviar correo",
+          "cancel": "Todavía no",
+          "sending": "Enviando…",
+          "sent": "Enviado — pueden responder al correo de tu cuenta.",
+          "failed": "Aún no se pudo enviar el correo.",
+          "signInRequired": "Inicia sesión para que 6 pueda enviar desde iSolve."
         },
         "cta": {
           "call": "Llamar al {phone}",

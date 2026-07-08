@@ -15,14 +15,62 @@ const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 const ISOLVE_SUPABASE_REF = "dphxcqjkzhvsdejtxdcj";
 const AIASAP_SUPABASE_REF = "wqszxsqzkaatghyrqviv";
 
+function canonicalLocalDevHost(host: string): string {
+  if (host === "localhost") return "127.0.0.1";
+  if (host.startsWith("localhost:")) return `127.0.0.1:${host.slice("localhost:".length)}`;
+  if (host === "[::1]") return "127.0.0.1";
+  if (host.startsWith("[::1]:")) return `127.0.0.1:${host.slice("[::1]:".length)}`;
+  return host;
+}
+
+function canonicalLocalDevOrigin(origin: string): string {
+  const trimmed = origin.trim().replace(/\/$/, "");
+  try {
+    const url = new URL(trimmed);
+    const canonicalHost = canonicalLocalDevHost(url.host);
+    if (canonicalHost !== url.host) {
+      url.host = canonicalHost;
+      return url.toString().replace(/\/$/, "");
+    }
+    return trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
+function appOrigin(request: Request, fallbackUrl: string): string {
+  const override = process.env.PUBLIC_APP_ORIGIN?.trim();
+  if (override) return canonicalLocalDevOrigin(override);
+
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const rawHost = forwardedHost || request.headers.get("host")?.split(",")[0]?.trim();
+  if (rawHost) {
+    const host = canonicalLocalDevHost(rawHost);
+    const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+    const proto =
+      forwardedProto ||
+      (host.startsWith("localhost") || host.startsWith("127.0.0.1")
+        ? "http"
+        : "https");
+    return `${proto}://${host}`.replace(/\/$/, "");
+  }
+
+  try {
+    return new URL(request.url).origin;
+  } catch {
+    return fallbackUrl.replace(/\/$/, "");
+  }
+}
+
 /**
  * Voice-driven account setup endpoint (ported from aiASAP, adapted for iSolve).
  *
  * Called by LiveAvatarSession after 6 walks the user through email collection +
  * on-chest confirmation. Generates a Supabase magic-link token_hash server-side,
  * sends OUR branded email via Resend, and points the link at iSolve's
- * /auth/callback?token_hash=...&type=magiclink so the callback writes the server
- * cookie deterministically (same proven path as ?code= OAuth).
+ * /auth/callback?token_hash=...&type=magiclink so the callback can verify
+ * the token and flip the exact device-link row without relying on the
+ * cookie-heavy Supabase SSR callback path.
  *
  * Also saves { lists, resumeState, fullName } to account_email_links.captured_lists
  * (service role, bypasses RLS) so on return 6 can say "You talked, I remembered."
@@ -108,15 +156,11 @@ export async function POST(request: Request) {
   }
 
   // token_hash flow: generate the link server-side and point it at OUR
-  // /auth/callback so the session cookie reaches the browser deterministically.
-  // PUBLIC_APP_ORIGIN pins the email-link origin for local/tunnel testing — the
-  // phone can't reach localhost, and a proxy (cloudflared) may hand the server a
-  // localhost Host header. Unset in prod => identical behavior (request origin).
-  const origin = (() => {
-    const override = process.env.PUBLIC_APP_ORIGIN?.trim();
-    if (override) return override.replace(/\/$/, "");
-    try { return new URL(request.url).origin; } catch { return supaUrl.replace(/\/$/, ""); }
-  })();
+  // /auth/callback so the live 6 browser can detect the click by polling the
+  // exact account_email_links row, without creating Supabase SSR auth cookies
+  // in the callback. PUBLIC_APP_ORIGIN pins the email-link origin for local /
+  // tunnel testing while still canonicalizing localhost to 127.0.0.1.
+  const origin = appOrigin(request, supaUrl);
   const callbackBase = `${origin}/auth/callback`;
   const nextParam = encodeURIComponent("/?account=verified");
   const redirectTo = `${callbackBase}?next=${nextParam}`;

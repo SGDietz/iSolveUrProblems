@@ -52,15 +52,10 @@ type GeminiPart =
 
 // Vision model + fallback (see analyze-image route for rationale). flash-lite
 // returned 503 UNAVAILABLE in G's 2026-06-30 smoke; fall back to flash (separate
-// capacity pool) on overload. 4xx (bad input) does NOT fall back.
-// Fallback chain across DISTINCT capacity pools — G's 2026-06-30 smoke hit
-// "UNAVAILABLE: high demand" on BOTH 2.5 models at once, failing the analysis.
-// gemini-2.0-flash is a separate pool, so a 2.5 overload no longer sinks it.
-const VISION_MODELS = [
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
-];
+// capacity pool) on overload. 4xx (bad input) does NOT fall back. Do not include
+// retired Gemini model ids here; a retired fallback only turns overload recovery
+// into a 404.
+const VISION_MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
 
 // Each model gets its own abort, and the fallback walk stops when the route
 // budget is nearly spent (Herm TASK_067) — a hung pool must not eat the whole

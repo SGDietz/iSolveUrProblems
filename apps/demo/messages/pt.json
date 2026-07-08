@@ -235,6 +235,7 @@
       },
       "todo": {
         "openCount": "{count} abertos",
+        "showingCount": "Mostrando {count} abertos.",
         "empty": "Esta lista está vazia.",
         "summaryAdded": "Adicionado: {items}",
         "summaryCompleted": "Concluído: {items}",

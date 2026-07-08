@@ -236,6 +236,7 @@
       },
       "todo": {
         "openCount": "{count} 项待办",
+        "showingCount": "显示 {count} 项待办。",
         "empty": "这个清单是空的。",
         "summaryAdded": "已添加：{items}",
         "summaryCompleted": "已完成：{items}",

@@ -3,12 +3,13 @@ import { CRON_SECRET } from "../../secrets";
 import { verifyAdminBearer } from "../../../../src/lib/apiRouteSecurity";
 import {
   findAppointmentsDueForReminder,
+  findAppointmentsDueForChecklist,
   markReminderSent,
   generateChecklist,
   markChecklistNotified,
   type AppointmentRow,
 } from "../../../../src/lib/appointments";
-import { send } from "../../../../src/lib/notifications";
+import { send, type DeliveryResult } from "../../../../src/lib/notifications";
 import { getSupabaseAdminConfig } from "../../../../src/lib/supabaseAdmin";
 import { APP_PUBLIC_BASE_URL } from "../../secrets";
 
@@ -152,19 +153,106 @@ function humanTime(when: string, offsetHours: 24 | 2): string {
   return offsetHours === 24 ? `tomorrow, ${formatted}` : `at ${formatted}`;
 }
 
+type CronRole = "homeowner" | "contractor";
+type CronKind = "24h" | "2h" | "checklist_2h";
+type CronSendContext = {
+  appointment_id: string;
+  role: CronRole;
+  cron_kind: CronKind;
+};
+
+const DELIVERED_NOTIFICATION_STATUSES = "sent,delivered,opened,clicked";
+
+function cronNotificationIdempotencyKey(args: {
+  recipient: string;
+  channel: "email" | "sms";
+  templateId: string;
+  context: CronSendContext;
+}): string {
+  const { context } = args;
+  return [
+    "cron",
+    context.appointment_id,
+    context.cron_kind,
+    context.role,
+    args.channel,
+    args.recipient,
+    args.templateId,
+  ].join(":");
+}
+
+async function cronNotificationAlreadySent(args: {
+  recipient: string;
+  channel: "email" | "sms";
+  templateId: string;
+  context: CronSendContext;
+}): Promise<boolean> {
+  try {
+    const { url, serviceRoleKey } = getSupabaseAdminConfig();
+    const qs = new URLSearchParams();
+    qs.set("recipient", `eq.${args.recipient}`);
+    qs.set("channel", `eq.${args.channel}`);
+    qs.set("template_id", `eq.${args.templateId}`);
+    qs.set("status", `in.(${DELIVERED_NOTIFICATION_STATUSES})`);
+    qs.set("context->>appointment_id", `eq.${args.context.appointment_id}`);
+    qs.set("context->>role", `eq.${args.context.role}`);
+    qs.set("context->>cron_kind", `eq.${args.context.cron_kind}`);
+    qs.set("select", "id");
+    qs.set("limit", "1");
+
+    const res = await fetch(`${url}/rest/v1/notifications_sent?${qs.toString()}`, {
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      console.error("cron notification dedupe check failed:", res.status, await res.text());
+      return false;
+    }
+    const rows = (await res.json().catch(() => [])) as Array<{ id: string }>;
+    return rows.length > 0;
+  } catch (error) {
+    console.error("cron notification dedupe check threw:", error);
+    return false;
+  }
+}
+
 async function sendOne(args: {
   to: string;
   channel: "email" | "sms";
   templateId: string;
   data: Record<string, unknown>;
-  context: Record<string, unknown>;
-}) {
+  context: CronSendContext;
+}): Promise<DeliveryResult | null> {
   if (!args.to) return null;
+  if (
+    await cronNotificationAlreadySent({
+      recipient: args.to,
+      channel: args.channel,
+      templateId: args.templateId,
+      context: args.context,
+    })
+  ) {
+    return {
+      ok: true,
+      channel: args.channel,
+      provider_id: "already-sent",
+      row_id: "already-sent",
+    };
+  }
   return send({
     channel: args.channel,
     recipient: args.to,
     templateId: args.templateId,
     data: args.data,
+    idempotencyKey: cronNotificationIdempotencyKey({
+      recipient: args.to,
+      channel: args.channel,
+      templateId: args.templateId,
+      context: args.context,
+    }),
     context: args.context,
   });
 }
@@ -206,8 +294,10 @@ async function dispatchAppointmentReminder(
         cron_kind: kind,
       },
     });
-    if (result?.ok) userSent = true;
-    else if (result) errors.push(`user: ${result.error}`);
+    if (result) {
+      if (result.ok) userSent = true;
+      else errors.push(`user: ${"error" in result ? result.error : "send failed"}`);
+    }
   } else {
     errors.push("user has no email or phone on file");
   }
@@ -236,13 +326,29 @@ async function dispatchAppointmentReminder(
         },
       });
       if (result?.ok) contractorSent = true;
-      else if (result) errors.push(`contractor: ${result.error}`);
+      else if (result) {
+        errors.push(`contractor: ${"error" in result ? result.error : "send failed"}`);
+      }
     } else {
       errors.push("contractor has no email or phone");
     }
   }
 
-  await markReminderSent({ appointment_id: appointment.id, kind });
+  const requiredDelivered = userSent && (!appointment.contractor_id || contractorSent);
+  if (!requiredDelivered) {
+    errors.push("not marking reminder sent; delivery incomplete and should retry");
+    return {
+      appointment_id: appointment.id,
+      user_sent: userSent,
+      contractor_sent: contractorSent,
+      errors,
+    };
+  }
+
+  const markerWritten = await markReminderSent({ appointment_id: appointment.id, kind });
+  if (!markerWritten) {
+    errors.push("markReminderSent failed; cron dedupe prevents duplicate delivered notices on retry");
+  }
 
   return {
     appointment_id: appointment.id,
@@ -327,9 +433,9 @@ async function dispatchChecklistIfDue(
     ? `${APP_PUBLIC_BASE_URL}/en/contractor/dashboard`
     : "/en/contractor/dashboard";
 
-  await send({
+  const delivery = await sendOne({
+    to,
     channel,
-    recipient: to,
     templateId: "appointment.checklist.v1",
     data: {
       recipientName: contractor.name,
@@ -344,7 +450,25 @@ async function dispatchChecklistIfDue(
       cron_kind: "checklist_2h",
     },
   });
-  await markChecklistNotified({ appointment_id: appointment.id });
+  if (!delivery?.ok) {
+    const deliveryError = delivery && "error" in delivery ? delivery.error : "send failed";
+    return {
+      appointment_id: appointment.id,
+      generated: result.generated,
+      notified: false,
+      skipped: `send_failed:${deliveryError}`,
+    };
+  }
+
+  const markerWritten = await markChecklistNotified({ appointment_id: appointment.id });
+  if (!markerWritten) {
+    return {
+      appointment_id: appointment.id,
+      generated: result.generated,
+      notified: false,
+      skipped: "marker_failed",
+    };
+  }
 
   return {
     appointment_id: appointment.id,
@@ -368,15 +492,17 @@ export async function GET(request: NextRequest) {
     ),
   );
 
-  // 2h window — reminder dispatch AND pre-departure checklist (M4.3).
+  // 2h window — reminder dispatch. The pre-departure checklist has its own
+  // due-query below so a reminder success cannot starve checklist retries.
   const due2h = await findAppointmentsDueForReminder({ kind: "2h" });
   const results2h = await Promise.all(
     due2h.map((a: AppointmentRow) =>
       dispatchAppointmentReminder(a, "2h"),
     ),
   );
+  const dueChecklist = await findAppointmentsDueForChecklist({});
   const checklistResults = await Promise.all(
-    due2h.map((a: AppointmentRow) => dispatchChecklistIfDue(a)),
+    dueChecklist.map((a: AppointmentRow) => dispatchChecklistIfDue(a)),
   );
 
   return NextResponse.json({
@@ -390,7 +516,7 @@ export async function GET(request: NextRequest) {
       results: results2h,
     },
     checklist: {
-      considered: due2h.length,
+      considered: dueChecklist.length,
       results: checklistResults,
     },
   });

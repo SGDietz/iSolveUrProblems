@@ -37,6 +37,9 @@ export function wrapContractorsResult(args: {
   category: string;
   location_text?: string;
   hits: ContractorCard[];
+  /** Set false when the hits did NOT pass the requested-area check — the
+   *  brain must then refuse "for that area"/"local" claims (Herm TASK_146). */
+  area_verified?: boolean;
 }): string {
   // "local"/"near" claims only when we actually know the user's area (Herm
   // release blocker #10: unlabeled fallback results must never be presented
@@ -75,14 +78,14 @@ export function wrapContractorsResult(args: {
   );
   return [
     `[CONTRACTOR SEARCH — not spoken by user]`,
-    args.location_text
+    args.location_text && args.area_verified !== false
       ? `The user asked for a ${category}${locPart}. I found ${args.hits.length} real pros from real directory supply for that area. Top 5:`
-      : `The user asked for a ${category}. I found ${args.hits.length} real pros — but their area is NOT confirmed, so do NOT call these "local" or "near you". Top 5:`,
+      : `The user asked for a ${category}${locPart}. I found ${args.hits.length} real pros, but their area is NOT confirmed. Do NOT call these "local" or "near you" unless the card line itself names the same area. Top 5:`,
     topList,
     hasSameAreaFill
       ? `Some of these cards are nearby pros from the same broader area (labeled "same area, distance unknown" on their card) because the exact area had fewer than 3. Do NOT call those ones exact-local and do NOT give a distance for them.`
       : "",
-    `Respond in first person as 6. Lead with the top pick — its name and rating (and how far only if a distance is shown above; never invent one). Only call them local/nearby if the line above names the area. Offer to tell them more about it or to look at the rest. Two sentences max. Don't list all 5; the cards are already on screen for the user to see.`,
+    `Respond in first person as 6. Lead with the top pick — its name and rating (and how far only if a distance is shown above; never invent one). Only call them local/nearby if the line above names the area. Offer to tell them more about it or to look at the rest. Two sentences max. Don't list all 5; the cards are already on screen for the user to see. Since real cards are present, NEVER say you lack internet/access or might not be able to access them.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -136,7 +139,7 @@ export function wrapRecommendationsResult(args: {
     prefsLine,
     `Top picks ranked by rating, sentiment, distance, and the user's preferences:`,
     picksList,
-    `Respond in first person as 6. Name the #1 pick and the one-line reason why. Offer to tell them more or to get them on the phone — never say you can book them (automatic booking is not live). Two sentences max. The cards are already on screen.`,
+    `Respond in first person as 6. Name the #1 pick and the one-line reason why. Offer to tell them more or to get them on the phone — never say you can book them (automatic booking is not live). Two sentences max. The cards are already on screen. Since real cards are present, NEVER say you lack internet/access or might not be able to access them.`,
   ]
     .filter(Boolean)
     .join("\n");

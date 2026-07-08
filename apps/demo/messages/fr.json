@@ -235,6 +235,7 @@
       },
       "todo": {
         "openCount": "{count} en cours",
+        "showingCount": "Affichage de {count} en cours.",
         "empty": "Cette liste est vide.",
         "summaryAdded": "Ajouté : {items}",
         "summaryCompleted": "Coché : {items}",

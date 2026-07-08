@@ -13,6 +13,7 @@ import crewInvitationTemplate from "./crew-invitation";
 import crewFilledTemplate from "./crew-filled";
 import contractorUrgentDispatchTemplate from "./contractor-urgent-dispatch";
 import adminDisputeEscalationTemplate from "./admin-dispute-escalation";
+import homeownerContractorIntroTemplate from "./homeowner-contractor-intro";
 
 /**
  * Local-in-code template registry (Q1.7a).
@@ -46,6 +47,8 @@ const REGISTRY: Record<string, NotificationTemplate<never>> = {
     contractorUrgentDispatchTemplate as NotificationTemplate<never>,
   "admin.dispute.escalation.v1":
     adminDisputeEscalationTemplate as NotificationTemplate<never>,
+  "homeowner.contractor_intro.v1":
+    homeownerContractorIntroTemplate as NotificationTemplate<never>,
 };
 
 export function getTemplate(id: string): NotificationTemplate<never> | null {

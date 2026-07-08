@@ -64,7 +64,7 @@ export const CRON_SECRET = process.env.CRON_SECRET || "";
 // Payments — Stripe Connect Express (M2.5).
 // Q2.5a: Connect flavor = Express.
 // Q2.5b: charge at acceptance.
-// Q2.5c: platform fee = 5% (PLATFORM_FEE_PERCENT overrides).
+// Q2.5c: platform fee = 7% by default (PLATFORM_FEE_PERCENT overrides).
 // Q2.5d: USD only (PLATFORM_CURRENCY overrides).
 // All Stripe routes return 503 'payments not configured' until
 // STRIPE_SECRET_KEY is present.

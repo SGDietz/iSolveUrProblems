@@ -131,19 +131,12 @@ export function AssistantSurface() {
     );
   }
 
-  // LIST = THE BOTTOM HALF OF 6'S AVATAR FRAME, on his chest (G 2026-07-03:
-  // "I want to see the list on your chest… all the boxes gone… Ours will be
-  // the bottom half of the screen"). Important desktop nuance: "screen" here
-  // means the locked 9:16 avatar stage, NOT the whole browser viewport. The
-  // stage can be letterboxed on desktop, so anchor width/height/bottom to the
-  // shared --stage-* variables from globals.css; otherwise the list box drifts
-  // below/outside 6's body on wide desktop windows.
+  // LIST = same avatar-bounded result space as contractor cards (G screenshot
+  // 2026-07-07: "make the lists more like in this space"). The blue-marked
+  // space is the lower-chest-to-footer stage sheet: same --stage-width, same
+  // bottom anchor, same 0.43*stage-height / 48vh cap as contractor results.
   // Prompt pills + Camera/Video/Gallery already hide while any surface is open
-  // ("all the boxes gone"). The amber chest styling keeps it reading as "on
-  // 6's chest," NOT the generic drawer — contractor results have their own
-  // slimmer stage-bounded sheet above. Every other panel keeps the sheet/drawer
-  // idiom untouched.
-  // iSolve-original UI: aiASAP has no on-screen list to copy.
+  // ("all the boxes gone"). Keep other panel variants on the generic drawer.
   if (variant.kind === "todo") {
     return (
       <aside
@@ -155,18 +148,22 @@ export function AssistantSurface() {
         <div
           className={
             "flex flex-col w-[var(--stage-width)] max-w-[96vw] " +
-            "h-[calc(var(--stage-height)*0.5)] max-h-[55vh] " +
-            "rounded-t-2xl border-2 border-b-0 border-[#f1c477] bg-[#140c05]/95 " +
-            "text-[#f3d9b0] shadow-[inset_0_2px_14px_rgba(0,0,0,0.6),0_0_30px_rgba(241,196,119,0.45)] " +
+            "h-[calc(var(--stage-height)*0.43)] max-h-[48vh] " +
+            "rounded-t-2xl border-2 border-b-0 border-[#e0aa62]/60 bg-[#241406]/95 " +
+            "text-[#f3d9b0] shadow-[inset_0_2px_14px_rgba(0,0,0,0.62),0_0_30px_rgba(224,170,98,0.34)] backdrop-blur brand-scroll " +
             "transition-transform duration-200 ease-out " +
             (isOpen
               ? "pointer-events-auto translate-y-0"
               : "pointer-events-none translate-y-[calc(100%_+_var(--stage-bottom))]")
           }
         >
-          <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[#e0aa62]/30 px-4 py-3">
-            <p className="brand-grad-text text-[11px] uppercase tracking-[0.18em]">
-              {labelForVariant(variant.kind, t)}
+          <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[#e0aa62]/30 px-3 py-2">
+            {/* Show the REAL list name here, not a static "YOUR LIST" label
+                (G live-ride 2026-07-06: "that should be the name of the list,
+                whatever the user wants it to be called" — rename via voice,
+                see todo.rename intent, updates payload.list_title live). */}
+            <p className="brand-grad-text truncate text-[10px] font-bold uppercase tracking-[0.18em]">
+              {variant.payload.list_title || labelForVariant(variant.kind, t)}
             </p>
             <button
               type="button"
@@ -177,15 +174,15 @@ export function AssistantSurface() {
               ✕
             </button>
           </header>
-          <div className="brand-scroll flex-1 overflow-y-auto px-4 py-3">
-            <TodoPanel payload={variant.payload} />
+          <div className="brand-scroll flex-1 overflow-y-auto px-3 py-2">
+            <TodoPanel payload={variant.payload} compact />
           </div>
-          {/* Legal line stays visible while the sheet is up — same rule as
-              the contractor sheet (G Droid smoke 2026-07-02), Herm TASK_104. */}
+          {/* Legal line stays inside the avatar-bounded sheet, matching the
+              contractor result footprint G marked. */}
           <Link
             href="/terms"
             target="_blank"
-            className="brand-grad-text block shrink-0 border-t border-[#e0aa62]/30 px-4 py-2 text-center text-[10px] whitespace-nowrap transition-opacity hover:opacity-90"
+            className="brand-grad-text block shrink-0 border-t border-[#e0aa62]/30 px-3 py-1.5 text-center text-[9px] whitespace-nowrap transition-opacity hover:opacity-90"
           >
             {tHome("footer")}
           </Link>

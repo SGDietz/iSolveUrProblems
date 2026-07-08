@@ -88,6 +88,66 @@ export async function createList(args: {
 }
 
 /**
+ * Rename an existing list (G live-ride 2026-07-06: "call this list Contractors
+ * Needed... 6 should be able to change it for the user"). Owner-scoped by
+ * user_id so a rename can never touch someone else's list. Fail-soft null.
+ */
+export async function renameList(args: {
+  user_id: string;
+  list_id: string;
+  title: string;
+}): Promise<ListRow | null> {
+  try {
+    const { url, serviceRoleKey } = getSupabaseAdminConfig();
+    const qs = new URLSearchParams();
+    qs.set("id", `eq.${args.list_id}`);
+    qs.set("user_id", `eq.${args.user_id}`);
+    const res = await fetch(`${url}/rest/v1/lists?${qs.toString()}`, {
+      method: "PATCH",
+      headers: {
+        ...adminHeaders(serviceRoleKey),
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({ title: args.title.slice(0, 60) }),
+    });
+    if (!res.ok) {
+      console.error("renameList failed:", res.status, await res.text());
+      return null;
+    }
+    const rows = (await res.json()) as ListRow[];
+    return rows[0] ?? null;
+  } catch (e) {
+    console.error("renameList threw:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+export async function getListById(args: {
+  user_id: string;
+  list_id: string;
+}): Promise<ListRow | null> {
+  try {
+    const { url, serviceRoleKey } = getSupabaseAdminConfig();
+    const qs = new URLSearchParams();
+    qs.set("id", `eq.${args.list_id}`);
+    qs.set("user_id", `eq.${args.user_id}`);
+    qs.set("status", "eq.active");
+    qs.set("select", "*");
+    qs.set("limit", "1");
+    const res = await fetch(`${url}/rest/v1/lists?${qs.toString()}`, {
+      headers: adminHeaders(serviceRoleKey),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as ListRow[];
+    return rows[0] ?? null;
+  } catch (e) {
+    console.error("getListById threw:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+/**
  * Resolve the target list for a spoken command. A named target ("house",
  * "Henderson job") matches an existing active list by title (case-insensitive
  * substring, both directions). Add commands can opt into auto-create — saying

@@ -149,6 +149,42 @@ async function persistScrapedContractors(
   return idMap;
 }
 
+// Requested-area sanity (Herm TASK_146; G ride 2026-07-07: a poisoned
+// "Okay, so" search shipped NYC + Hanoi cards as "your area"). Loose enough
+// for nearby real pros (160 km when coords exist; 3-digit ZIP prefix; city/
+// state word overlap), strict enough that a wrong-country row never rides.
+function normArea(value: string | null | undefined): string {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function requestedAreaWords(locationText: string): string[] {
+  return normArea(locationText)
+    .split(" ")
+    .filter((w) => w.length >= 3 && !["near", "the", "and", "for"].includes(w));
+}
+
+function hitMatchesRequestedArea(
+  hit: ContractorSearchHit,
+  locationText: string,
+  near: { lat: number; lng: number } | null | undefined,
+): boolean {
+  if (near && hit.lat != null && hit.lng != null) {
+    return haversineKm(near, { lat: hit.lat, lng: hit.lng }) <= 160;
+  }
+  const zip = locationText.match(/\b\d{5}\b/)?.[0];
+  if (zip) return Boolean(hit.zip?.startsWith(zip.slice(0, 3)));
+  const wanted = requestedAreaWords(locationText);
+  if (wanted.length === 0) return false;
+  const area = normArea(
+    [hit.city, hit.state, hit.zip, hit.address].filter(Boolean).join(" "),
+  );
+  return wanted.some((w) => area.includes(w));
+}
+
 export async function findContractorsLive(input: {
   category: string;
   locationText?: string | null;
@@ -205,7 +241,7 @@ export async function findContractorsLive(input: {
   }
 
   const now = new Date().toISOString();
-  const hits: ContractorSearchHit[] = businesses
+  const rawHits: ContractorSearchHit[] = businesses
     .filter((b) => b && b.name)
     .slice(0, limit)
     .map((b, i) => {
@@ -250,6 +286,16 @@ export async function findContractorsLive(input: {
       const score = rating != null ? Math.max(0, Math.min(1, (rating - 1) / 4)) : 0.5;
       return { ...row, distance_km, score };
     });
+
+  // Requested-area sanity BEFORE persist/cards (Herm TASK_146): provider
+  // results outside the asked area never reach the sacred contractors DB or
+  // the screen. All-mismatch = fail CLOSED (re-ask beats wrong-city cards).
+  const hits = rawHits.filter((h) =>
+    hitMatchesRequestedArea(h, where, input.near),
+  );
+  if (rawHits.length > 0 && hits.length === 0) {
+    return { hits: [], error: "live results outside requested area" };
+  }
 
   // Save every scrape to the permanent contractors DB (bounded so a slow
   // write can't hang 6's turn; the pros still show regardless) and REHYDRATE

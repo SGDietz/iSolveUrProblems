@@ -6,7 +6,7 @@ import { checkRateLimit } from "../../../../src/lib/rateLimit";
 /**
  * /api/analyze/go-live — Real-time frame analysis for Go Live mode.
  *
- * Per Q1.3a: Gemini 2.0 Flash by default; client can request escalation
+ * Per Q1.3a: Gemini 2.5 Flash Lite by default; client can request escalation
  * to GPT-4o by passing { model: "gpt4o" } (e.g. user says "take a
  * closer look, 6").
  *
@@ -41,7 +41,7 @@ import { checkRateLimit } from "../../../../src/lib/rateLimit";
 export const maxDuration = 15;
 const CAPTION_TIMEOUT_MS = 10_000;
 
-const FLASH_MODEL = "gemini-2.0-flash-exp";
+const FLASH_MODEL = "gemini-2.5-flash-lite";
 
 const CAPTION_PROMPT = `You are 6, an ai handyman analyzing what the user's camera is currently pointed at.
 

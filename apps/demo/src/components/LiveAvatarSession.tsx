@@ -27,13 +27,14 @@ import { SessionState, AgentEventsEnum } from "@heygen/liveavatar-web-sdk";
 import { useAvatarActions } from "../liveavatar/useAvatarActions";
 import { setVideoBusy, isVideoBusy } from "../liveavatar/videoRecordingState";
 import { captureMedia } from "../lib/captureMedia";
-import { playWhoosh } from "../lib/ui/sfx";
+import { playChime, playPillFlightSound, playWhoosh } from "../lib/ui/sfx";
 import { saveSessionMedia } from "../lib/media/saveMedia";
 import {
   getAppEventSessionId,
   setAppEventSessionId,
 } from "../lib/observability/clientEvents";
 import { useAssistantSurface } from "../lib/assistantSurface";
+import { TEXT_SIZE_FACTORS } from "../lib/uiSize";
 import { Radio, Camera, Images, Video, MicOff, Mail, X, Check, RotateCcw } from "lucide-react";
 
 // Cross-component channel: ContractorsPanel fires this when the call-consent
@@ -84,6 +85,14 @@ const VIDEO_DEADMAN_IOS_MS = 30_000;
 // Normalize a problem string for stale-problem comparison (whitespace + case).
 function normalizeProblem(s: string): string {
   return s.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function promptLabelKey(label: string): string {
+  return label.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function promptSlotKey(index: number, label: string): string {
+  return `${index}:${promptLabelKey(label)}`;
 }
 
 // Lightweight "the user switched problems mid-analysis" detector (Herm TASK_050,
@@ -249,6 +258,405 @@ const PROBLEM_PROMPTS = [
   "Running Toilet",
   "Clogged Gutters",
 ];
+
+type ButtonCueTarget = "camera" | "video" | "gallery";
+type ButtonCueState = Partial<Record<ButtonCueTarget, number>>;
+type PromptCueState = { index: number; nonce: number; erupt?: boolean };
+type PromptPillFlightPhase = "enter" | "exit";
+type PromptBrainListContext = { title: string; items: string[] };
+type PromptPillFlightStyle = React.CSSProperties & {
+  "--pill-flight-x"?: string;
+  "--pill-flight-y"?: string;
+  "--pill-spin"?: string;
+  "--pill-flight-delay"?: string;
+  "--pill-flight-duration"?: string;
+  "--pill-flight-ease"?: string;
+  "--pill-idle-delay"?: string;
+  "--pill-land-duration"?: string;
+  "--pill-shake-duration"?: string;
+};
+// Aliased to the sfx module's union so the two can never drift again (they
+// drifted twice on 2026-07-07 alone).
+type PromptFlightSoundFlavor = import("../lib/ui/sfx").PillFlightSoundFlavor;
+type PromptPillFlightPlan = {
+  /** Optional override for the enter animation class (e.g. the TikTok
+   *  hard-cut zoom-punch); default is the chaos flight. */
+  enterClass?: string;
+  enter: PromptPillFlightStyle;
+  exit: PromptPillFlightStyle;
+};
+type PromptSwapSlotPlan = PromptPillFlightPlan & {
+  index: number;
+  delayMs: number;
+  enterSoundDelayMs: number;
+  enterDurationMs: number;
+  // The exit layer must live for the FULL randomized exit flight — a fixed
+  // 980ms clear cut the slower (up to ~1.7s) exits off mid-air.
+  exitDurationMs: number;
+  soundFlavor: PromptFlightSoundFlavor;
+};
+type ButtonCueStyle = React.CSSProperties & {
+  "--cue-x"?: string;
+  "--cue-rot"?: string;
+  "--cue-pop"?: string;
+  "--cue-duration"?: string;
+};
+
+const PROMPT_PILL_FLIGHT_PATHS: Array<{
+  enter: readonly [string, string, string];
+  exit: readonly [string, string, string];
+}> = [
+  // Clock-angle energy. The swap planner below can reuse ONE path for a whole
+  // batch or pick different paths per pill, so G gets both "same direction" and
+  // "different directions" without hard-coding top-to-bottom sameness.
+  { enter: ["-86vw", "-48vh", "-520deg"], exit: ["-88vw", "-44vh", "-620deg"] },
+  { enter: ["86vw", "-46vh", "540deg"], exit: ["90vw", "-42vh", "660deg"] },
+  { enter: ["82vw", "54vh", "700deg"], exit: ["88vw", "58vh", "760deg"] },
+  { enter: ["-82vw", "56vh", "-640deg"], exit: ["-90vw", "60vh", "-720deg"] },
+  { enter: ["0vw", "-76vh", "480deg"], exit: ["0vw", "-82vh", "560deg"] },
+  { enter: ["0vw", "78vh", "-500deg"], exit: ["0vw", "84vh", "-620deg"] },
+  { enter: ["-92vw", "6vh", "-420deg"], exit: ["-96vw", "8vh", "-520deg"] },
+  { enter: ["92vw", "-4vh", "420deg"], exit: ["96vw", "-6vh", "520deg"] },
+];
+
+// G live-ride 19:41: "make some go straight north, like straight up — and
+// the one comes in from the bottom, fills it in." A dedicated paired lane:
+// the outgoing pill launches due north with barely any spin, its replacement
+// rises in from below.
+const PROMPT_PILL_NORTH_EXIT = {
+  enter: ["0vw", "64vh", "-240deg"],
+  exit: ["0vw", "-98vh", "120deg"],
+} as const;
+const PROMPT_PILL_BOTTOM_ENTER = {
+  enter: ["0vw", "72vh", "180deg"],
+  exit: ["0vw", "80vh", "-260deg"],
+} as const;
+// LAZY drift (G live-ride 19:57): the old pill turns slowly COUNTERCLOCKWISE
+// and floats off one side over a couple seconds; its replacement floats in
+// just as lazily from the OPPOSITE side and lands in the vacated slot.
+const PROMPT_PILL_LAZY_LEFT = {
+  enter: ["-108vw", "-5vh", "-140deg"],
+  exit: ["-106vw", "-8vh", "-170deg"],
+} as const;
+const PROMPT_PILL_LAZY_RIGHT = {
+  enter: ["108vw", "5vh", "-140deg"],
+  exit: ["106vw", "8vh", "-170deg"],
+} as const;
+const PROMPT_PILL_LAZY_EASE = "cubic-bezier(0.35, 0, 0.45, 1)";
+// Croquet-mallet BAP (G 19:59: "when something goes out, try to bap it out
+// like you're hitting it with a croquet mallet") — the kicked pill flies
+// flat and fast like a struck ball, barely tumbling.
+const PROMPT_PILL_MALLET_EXITS = [
+  { enter: ["-120vw", "-8vh", "-90deg"], exit: ["135vw", "-12vh", "70deg"] },
+  { enter: ["120vw", "-8vh", "90deg"], exit: ["-135vw", "-10vh", "-70deg"] },
+] as const;
+
+const PROMPT_PILL_FLIGHT_EASES = [
+  "cubic-bezier(0.16, 1.18, 0.25, 1)",
+  "cubic-bezier(0.2, 1.42, 0.28, 1)",
+  "cubic-bezier(0.28, 0.95, 0.22, 1)",
+  "cubic-bezier(0.18, 1.05, 0.36, 1)",
+];
+const PROMPT_PILL_SOUND_FLAVORS: PromptFlightSoundFlavor[] = [
+  "bubble",
+  "sparkle",
+  "boop",
+  "whoop",
+  "zing",
+  "plop",
+  "twinkle",
+  "waka",
+  "coin",
+  "slide",
+];
+
+// CONVERSATION ENERGY (G 2026-07-07 late: "quick... chaotically, randomly —
+// not all the time. give breaks. sometimes faster, harder, sometimes softer.
+// can be dependent on the conversation as well"): swaps arriving close
+// together = the conversation is hot = punchier, quicker lanes; a lull
+// decays energy toward calm = lazier lanes, longer gaps. Module-scoped —
+// one pill row per page.
+let lastPillSwapAt = 0;
+function currentPillEnergy(): number {
+  const now = Date.now();
+  const sinceMs = lastPillSwapAt === 0 ? 60_000 : now - lastPillSwapAt;
+  lastPillSwapAt = now;
+  // 1.0 when swaps land within ~4s of each other, decaying to 0.15 by ~60s.
+  const energy = Math.exp(-Math.max(0, sinceMs - 4_000) / 22_000);
+  return Math.max(0.15, Math.min(1, energy));
+}
+
+function pickPromptItem<T>(items: readonly T[]): T {
+  return items[Math.floor(Math.random() * items.length)] ?? items[0];
+}
+
+function randomPromptMs(min: number, max: number): number {
+  return Math.round(min + Math.random() * (max - min));
+}
+
+function makePromptFlightStyle(
+  path: { enter: readonly [string, string, string]; exit: readonly [string, string, string] },
+  phase: PromptPillFlightPhase,
+  durationMs: number,
+  delayMs: number,
+  ease: string,
+  idleDelayMs: number,
+  landDurationMs: number,
+  shakeDurationMs: number,
+): PromptPillFlightStyle {
+  const [x, y, spin] = path[phase];
+  return {
+    "--pill-flight-x": x,
+    "--pill-flight-y": y,
+    "--pill-spin": spin,
+    "--pill-flight-delay": `${delayMs}ms`,
+    "--pill-flight-duration": `${durationMs}ms`,
+    "--pill-flight-ease": ease,
+    "--pill-idle-delay": `${idleDelayMs}ms`,
+    "--pill-land-duration": `${landDurationMs}ms`,
+    "--pill-shake-duration": `${shakeDurationMs}ms`,
+  };
+}
+
+function promptPillFlightStyle(
+  index: number,
+  phase: PromptPillFlightPhase,
+  epoch: number,
+): PromptPillFlightStyle {
+  // GROUP entrance (epoch 0: session start / panel just closed) = METEORS
+  // (G live-ride 19:55: "this meteor is coming in... it literally explodes
+  // and turns into a pillbox — the way all of them come in in the
+  // beginning"). Each streaks down from high above on a slight spread,
+  // impact-flashes, and resolves into its pill, still 1-2-3 staggered.
+  if (phase === "enter" && epoch === 0) {
+    // Three meteors, three directions (G 19:58: "one from the top, one from
+    // the right, one from the left") — all explode into place, 1-2-3.
+    const METEOR_LANES: ReadonlyArray<readonly [string, string, string]> = [
+      ["-115vw", "-55vh", "-340deg"],
+      ["0vw", "-125vh", "320deg"],
+      ["115vw", "-55vh", "360deg"],
+    ];
+    return makePromptFlightStyle(
+      {
+        enter: METEOR_LANES[index % METEOR_LANES.length],
+        exit: ["0vw", "-82vh", "560deg"],
+      },
+      phase,
+      1050 + index * 170,
+      index * 680,
+      "cubic-bezier(0.3, 0.05, 0.2, 1)",
+      index * -420,
+      920 + index * 110,
+      1540 + index * 260,
+    );
+  }
+  const path = PROMPT_PILL_FLIGHT_PATHS[
+    (index + epoch) % PROMPT_PILL_FLIGHT_PATHS.length
+  ];
+  const enterDelay = phase === "enter" && epoch === 0 ? index * 680 : 0;
+  return makePromptFlightStyle(
+    path,
+    phase,
+    phase === "enter" ? 1180 + index * 120 : 1040,
+    enterDelay,
+    PROMPT_PILL_FLIGHT_EASES[index % PROMPT_PILL_FLIGHT_EASES.length],
+    index * -420,
+    920 + index * 110,
+    1540 + index * 260,
+  );
+}
+
+function buildPromptSwapBatches(indexes: number[]): number[][] {
+  const queue = [...indexes].sort(() => Math.random() - 0.5);
+  if (queue.length <= 1) return queue.length ? [queue] : [];
+  if (queue.length === 2) {
+    return Math.random() < 0.5 ? [[queue[0]], [queue[1]]] : [queue];
+  }
+  const roll = Math.random();
+  if (roll < 0.28) return [queue.slice(0, 3)];
+  if (roll < 0.62) {
+    return Math.random() < 0.5
+      ? [queue.slice(0, 2), queue.slice(2, 3)]
+      : [queue.slice(0, 1), queue.slice(1, 3)];
+  }
+  return queue.map((index) => [index]);
+}
+
+function buildPromptSwapPlan(indexes: number[]): {
+  slots: PromptSwapSlotPlan[];
+  totalMs: number;
+} {
+  const batches = buildPromptSwapBatches(indexes);
+  const slots: PromptSwapSlotPlan[] = [];
+  let delayMs = 0;
+  // Energy: hot conversation → punchier, quicker lanes; a lull → lazier
+  // lanes and LONGER gaps between batches ("give breaks"). Sampled once per
+  // plan so one swap doesn't mix moods.
+  const energy = currentPillEnergy();
+  for (const batch of batches) {
+    const sharedExitPath = Math.random() < 0.5
+      ? pickPromptItem(PROMPT_PILL_FLIGHT_PATHS)
+      : null;
+    const sharedEnterPath = Math.random() < 0.5
+      ? pickPromptItem(PROMPT_PILL_FLIGHT_PATHS)
+      : null;
+    const batchEase = pickPromptItem(PROMPT_PILL_FLIGHT_EASES);
+    for (const index of batch) {
+      // RANDOM CHAOS ladder (G's ride 19:39-20:02 + late order: "quick cuts,
+      // quick edits... chaotically, randomly, not all the time — sometimes
+      // faster, harder, sometimes softer, dependent on the conversation").
+      // One cumulative roll, weights breathe with conversation energy.
+      const chaosRoll = Math.random();
+      let edge = 0.34 - 0.2 * energy;
+      const lazy = chaosRoll < edge;
+      const speedy = !lazy && chaosRoll < (edge += 0.05 + 0.1 * energy);
+      const kick =
+        !lazy && !speedy && chaosRoll < (edge += 0.06 + 0.06 * energy);
+      const hardcut =
+        !lazy && !speedy && !kick && chaosRoll < (edge += 0.02 + 0.16 * energy);
+      const peekaboo =
+        !lazy && !speedy && !kick && !hardcut && chaosRoll < (edge += 0.07);
+      // Occasional blowfish (G 19:59: "fly in and kind of expand like a
+      // blowfish and glow brightly") — rides the meteor keyframe solo.
+      const blowfish =
+        !lazy && !speedy && !kick && !hardcut && !peekaboo &&
+        chaosRoll < (edge += 0.04);
+      const north =
+        !lazy && !speedy && !kick && !hardcut && !peekaboo && !blowfish &&
+        chaosRoll < edge + 0.12;
+
+      const exitDurationMs = hardcut
+        ? 90
+        : kick
+          ? randomPromptMs(460, 660)
+          : peekaboo
+            ? randomPromptMs(280, 380)
+            : lazy
+              ? randomPromptMs(3000, 5200)
+              : speedy
+                ? randomPromptMs(620, 900)
+                : randomPromptMs(1250, 2260);
+      const enterDurationMs = hardcut
+        ? randomPromptMs(220, 300)
+        : kick
+          ? randomPromptMs(620, 840)
+          : peekaboo
+            ? randomPromptMs(360, 470)
+            : lazy
+              ? randomPromptMs(2800, 4600)
+              : speedy
+                ? randomPromptMs(700, 980)
+                : randomPromptMs(1350, 2500);
+      const landDurationMs = randomPromptMs(820, 1280);
+      const shakeDurationMs = randomPromptMs(980, 2380);
+      // The kick: the NEW pill charges in first; the old one blasts off the
+      // moment it lands ("bams into the pillbox... goes flying off, bopped").
+      const exitDelayMs = kick ? Math.round(enterDurationMs * 0.55) : 0;
+      const enterSoundDelayMs = hardcut
+        ? 30
+        : kick
+          ? randomPromptMs(40, 120)
+          : randomPromptMs(180, Math.min(620, Math.max(200, exitDurationMs - 120)));
+      const lazyExitLeft = Math.random() < 0.5;
+      const ease = lazy
+        ? PROMPT_PILL_LAZY_EASE
+        : peekaboo
+          ? "cubic-bezier(0.2, 1.4, 0.3, 1)"
+          : Math.random() < 0.55
+            ? batchEase
+            : pickPromptItem(PROMPT_PILL_FLIGHT_EASES);
+      const malletLane = kick
+        ? pickPromptItem(PROMPT_PILL_MALLET_EXITS)
+        : null;
+      // Hard cut: no travel at all — in-place dissolve + zoom-punch enter.
+      const HARDCUT_PATH = {
+        enter: ["0vw", "0vh", "0deg"],
+        exit: ["0vw", "0vh", "0deg"],
+      } as const;
+      // Peek-a-boo: duck below the row, pop back up with the new label.
+      const PEEKABOO_PATH = {
+        enter: ["0vw", "24vh", "-14deg"],
+        exit: ["0vw", "26vh", "20deg"],
+      } as const;
+      const exitPath = hardcut
+        ? HARDCUT_PATH
+        : peekaboo
+          ? PEEKABOO_PATH
+          : malletLane
+            ? malletLane
+            : north
+              ? PROMPT_PILL_NORTH_EXIT
+              : lazy
+                ? (lazyExitLeft ? PROMPT_PILL_LAZY_LEFT : PROMPT_PILL_LAZY_RIGHT)
+                : sharedExitPath ?? pickPromptItem(PROMPT_PILL_FLIGHT_PATHS);
+      const enterPath = hardcut
+        ? HARDCUT_PATH
+        : peekaboo
+          ? PEEKABOO_PATH
+          : malletLane
+            ? malletLane
+            : north
+              ? PROMPT_PILL_BOTTOM_ENTER
+              : lazy
+                ? (lazyExitLeft ? PROMPT_PILL_LAZY_RIGHT : PROMPT_PILL_LAZY_LEFT)
+                : sharedEnterPath ?? pickPromptItem(PROMPT_PILL_FLIGHT_PATHS);
+      slots.push({
+        index,
+        delayMs,
+        enterSoundDelayMs,
+        enterDurationMs,
+        exitDurationMs,
+        // Lane-matched sounds: kick lands the meme BOOM, hard cuts get
+        // arcade coin/pew, peek-a-boo gets the spring; the rest draw from
+        // the happy pool (waka/slide/twinkle/etc).
+        soundFlavor: kick
+          ? "boom"
+          : hardcut
+            ? (Math.random() < 0.5 ? "coin" : "pew")
+            : peekaboo
+              ? "boing"
+              : pickPromptItem(PROMPT_PILL_SOUND_FLAVORS),
+        enterClass: hardcut
+          ? "pill-hardcut-enter"
+          : blowfish
+            ? "pill-meteor-enter"
+            : undefined,
+        exit: makePromptFlightStyle(
+          exitPath,
+          "exit",
+          exitDurationMs,
+          exitDelayMs,
+          hardcut
+            ? "linear"
+            : kick
+              ? "cubic-bezier(0.3, 0.1, 0.4, 1)"
+              : ease,
+          index * -420,
+          landDurationMs,
+          shakeDurationMs,
+        ),
+        enter: makePromptFlightStyle(
+          enterPath,
+          "enter",
+          enterDurationMs,
+          enterSoundDelayMs,
+          ease,
+          index * -420,
+          landDurationMs,
+          shakeDurationMs,
+        ),
+      });
+    }
+    // Breaks between batches breathe with the conversation: hot = tight
+    // cuts, calm = long easy gaps.
+    delayMs += Math.round(randomPromptMs(780, 1540) * (1.9 - energy));
+  }
+  const totalMs = slots.reduce(
+    (max, slot) => Math.max(max, slot.delayMs + slot.enterSoundDelayMs + slot.enterDurationMs),
+    0,
+  );
+  return { slots, totalMs };
+}
 
 export type SessionStoppedReason = { reason?: "inactivity" | "explicit" };
 
@@ -462,6 +870,26 @@ const LiveAvatarSessionComponent: React.FC<{
   // pills + Camera/Video/Gallery rows get out of their way (G via Herm
   // 2026-07-01: pills were sitting on top of the contractor cards).
   const assistantSurfaceOpen = useAssistantSurface((s) => s.isOpen);
+  const assistantSurfaceVariant = useAssistantSurface((s) => s.variant);
+  // "Make the letters bigger / I need reading glasses" (G live-ride 19:38) —
+  // the shared voice-set text level scales the prompt pills too.
+  const uiTextSizeLevel = useAssistantSurface((s) => s.todoTextSizeLevel);
+  // aiASAP prompt-brain port: when a TODO/list panel is visibly on 6's chest,
+  // pill labels are driven by that live list's title + items ("Add Milk",
+  // "Check List"), not by stale generic repair pills.
+  const activeTodoPromptContext = useMemo<PromptBrainListContext | null>(() => {
+    if (!assistantSurfaceOpen || assistantSurfaceVariant?.kind !== "todo") {
+      return null;
+    }
+    return {
+      title: assistantSurfaceVariant.payload.list_title,
+      items: assistantSurfaceVariant.payload.items.map((item) => item.title),
+    };
+  }, [assistantSurfaceOpen, assistantSurfaceVariant]);
+  const activeTodoPromptContextRef = useRef<PromptBrainListContext | null>(null);
+  useEffect(() => {
+    activeTodoPromptContextRef.current = activeTodoPromptContext;
+  }, [activeTodoPromptContext]);
   // Which lens the in-app camera is showing, so the front/back flip can toggle it
   // and the preview can mirror the front camera the way phones do (G 2026-06-28).
   const [cameraFacing, setCameraFacing] = useState<"environment" | "user">(
@@ -613,6 +1041,27 @@ const LiveAvatarSessionComponent: React.FC<{
       4500,
     );
   }, []);
+
+  const mediaEntryBlocked =
+    mode === "FULL" &&
+    (sessionState !== SessionState.CONNECTED ||
+      !isActive ||
+      micPermState === "denied" ||
+      Boolean(microphoneWarning));
+
+  const mediaSessionBlocked =
+    mode === "FULL" &&
+    (sessionState !== SessionState.CONNECTED ||
+      micPermState === "denied" ||
+      Boolean(microphoneWarning));
+
+  const explainMediaCaptureBlocked = useCallback(() => {
+    showCaptureNotice(
+      micPermState === "denied" || microphoneWarning
+        ? "Microphone is not active. Re-enable the mic before using photo, video, or gallery."
+        : "Start 6 before using photo, video, or gallery.",
+    );
+  }, [micPermState, microphoneWarning, showCaptureNotice]);
   // Per-recording id + cancel flag: a delayed buy-time / vision injection from a
   // recording the user already exited must be ignored (Herm 2026-06-29).
   const videoAnalysisRunIdRef = useRef(0);
@@ -852,12 +1301,8 @@ const LiveAvatarSessionComponent: React.FC<{
       return null;
     });
 
-    // Clean up preview URL if it's not the default fallback image
-    if (
-      fallbackImagePreview &&
-      fallbackImage &&
-      fallbackImage.name !== "2c44c052-e58a-4f6d-a6c8-dba901ff0e9e.jpg"
-    ) {
+    // Clean up preview URL; bundled fallback images are no longer valid camera input.
+    if (fallbackImagePreview) {
       URL.revokeObjectURL(fallbackImagePreview);
     }
     setFallbackImage(null);
@@ -1166,6 +1611,14 @@ const LiveAvatarSessionComponent: React.FC<{
         return;
       }
       await start();
+      // SUP #21: open the mic BEFORE the scripted greeting, so if the user is
+      // already asking for contractors during the opener, USER_SPEAK_STARTED can
+      // interrupt 6 and the user's real request is not lost behind the greeting.
+      if (mode === "FULL") {
+        startListening();
+      }
+      hasUserPressedVoiceStartRef.current = true;
+      setHasUserPressedVoiceStart(true);
       // One-shot greeting per live session: set the flag BEFORE awaiting the
       // speech so overlapping calls can't both pass. Reset only on true session
       // disconnect (the SessionState.DISCONNECTED effects), never on an ordinary
@@ -1185,16 +1638,14 @@ const LiveAvatarSessionComponent: React.FC<{
         const greeting = accountEmailRef.current
           ? `${baseGreeting}${accountResumeMemorySentence(accountResumeSummaryRef.current)}`
           : baseGreeting;
+        // Track before speaking too: the mic is already open for barge-in, so an
+        // STT echo of the greeting must be recognized immediately.
+        lastAvatarResponseRef.current = greeting;
         await repeat(greeting);
         // Item 18: track the scripted greeting so an STT echo of it is filtered
         // like every other scripted line (was missing for the start greeting).
         lastAvatarResponseRef.current = greeting;
       }
-      if (mode === "FULL") {
-        startListening();
-      }
-      hasUserPressedVoiceStartRef.current = true;
-      setHasUserPressedVoiceStart(true);
     } finally {
       voiceStartPendingRef.current = false;
       setVoiceStartAwaitingReady(false);
@@ -1330,6 +1781,18 @@ const LiveAvatarSessionComponent: React.FC<{
   const [chestEmailText, setChestEmailText] = useState("");
   const [chestEmailStatus, setChestEmailStatus] = useState<string | null>(null);
   const [showChestEmail, setShowChestEmail] = useState(false);
+  // Pill motion/SFX must go silent+still whenever a panel (list, contractors,
+  // etc.) covers the prompt row — matches the render gate at
+  // `isActive && !isCameraActive && (_emailBoxActive || !assistantSurfaceOpen)`.
+  // G live-ride 2026-07-06: "I can still HEAR the pillboxes moving when the
+  // list is up... all the sounds go out too." The pill-brain refresh loop runs
+  // in the background regardless of what's on screen, so the swap/whoosh must
+  // check LIVE state via a ref (a useCallback's timeout closures see stale
+  // state otherwise), not just skip rendering.
+  const pillMotionSuppressedRef = useRef(false);
+  useEffect(() => {
+    pillMotionSuppressedRef.current = assistantSurfaceOpen && !showChestEmail;
+  }, [assistantSurfaceOpen, showChestEmail]);
   // Prior user STT fragment — lets an STT-split "close the" + "session" stitch
   // into one close intent (Herm TASK_034: voice-close was never wired in).
   const lastUserFragmentRef = useRef<string>("");
@@ -1342,6 +1805,24 @@ const LiveAvatarSessionComponent: React.FC<{
   const [promptPills, setPromptPills] = useState<string[]>(() =>
     PROBLEM_PROMPTS.slice(0, 3),
   );
+  const [exitingPromptPills, setExitingPromptPills] = useState<string[]>([]);
+  const [promptMotionEpoch, setPromptMotionEpoch] = useState(0);
+  const [promptFlightPlans, setPromptFlightPlans] = useState<
+    Record<number, PromptPillFlightPlan>
+  >({});
+  // FROZEN enter motion per mounted pill (review 2026-07-07 P1s): a mounted
+  // pill's entrance class/style must NEVER change under it — a changed
+  // animation-name restarts the flight with the OLD label (the epoch 0→1
+  // flip re-flew all three after the meteor opening, and schedule-time plan
+  // merges dressed old pills in the next lane's class early). Written ONLY
+  // when a slot's swap actually fires; absent = the meteor opening.
+  const [promptEnterMotion, setPromptEnterMotion] = useState<
+    Record<number, { cls: string; style: PromptPillFlightStyle }>
+  >({});
+  const [silentPromptKeys, setSilentPromptKeys] = useState<Record<string, true>>(
+    {},
+  );
+
   // aiASAP PILL-BRAIN port (G smoke #7: "the pillboxes don't change
   // anything… Everything is in aiASAP"): after each user utterance the
   // pills refresh to the CURRENT subject via /api/prompt-brain. aiASAP's
@@ -1351,16 +1832,341 @@ const LiveAvatarSessionComponent: React.FC<{
   const pillBrainTimerRef = useRef<number | null>(null);
   const pillBrainHistoryRef = useRef<string[]>([]);
   const promptPillsRef = useRef<string[]>([]);
+  const promptSwapTimersRef = useRef<number[]>([]);
+  // Monotonic swap epoch — the final silent reconcile below only lands if no
+  // NEWER response superseded this cascade (Herm TASK_139: the cross-slot
+  // duplicate skip must not strand stale labels forever).
+  const promptSwapEpochRef = useRef(0);
+  // Short recent-history dedup (G live-ride 2026-07-06: "Get help was there
+  // before, is there now" — a pill swapping back to a value shown moments ago
+  // reads as pointless motion, even though it's technically a real change
+  // from what's on screen right this second). Tracks last-shown time per
+  // label; a swap TO a very-recently-shown label is skipped so it doesn't
+  // re-animate something the user just saw.
+  const recentPillShownAtRef = useRef<Map<string, number>>(new Map());
+  const RECENT_PILL_WINDOW_MS = 15_000;
+  const lastPromptMotionAtRef = useRef(0);
+  const PROMPT_MOTION_MIN_INTERVAL_MS = 2_600;
   useEffect(() => {
     promptPillsRef.current = promptPills;
   }, [promptPills]);
+  const clearPromptSwapTimers = useCallback(() => {
+    if (typeof window !== "undefined") {
+      for (const timer of promptSwapTimersRef.current) {
+        window.clearTimeout(timer);
+      }
+    }
+    promptSwapTimersRef.current = [];
+  }, []);
+  const markSilentPromptSlots = useCallback((labels: string[], indexes: number[]) => {
+    if (indexes.length === 0) return;
+    setSilentPromptKeys((current) => {
+      const nextKeys = { ...current };
+      for (const index of indexes) {
+        const label = labels[index];
+        if (label) nextKeys[promptSlotKey(index, label)] = true;
+      }
+      return nextKeys;
+    });
+  }, []);
+  const clearSilentPromptSlots = useCallback((labels: string[], indexes: number[]) => {
+    if (indexes.length === 0) return;
+    setSilentPromptKeys((current) => {
+      const nextKeys = { ...current };
+      for (const index of indexes) {
+        const label = labels[index];
+        if (label) delete nextKeys[promptSlotKey(index, label)];
+      }
+      return nextKeys;
+    });
+  }, []);
+  // Panel just closed → the whole pill group remounts next render. Clear queued
+  // per-slot swaps first so stale timers cannot fire after the epoch/style reset
+  // and make one old pill jump during the returning 1-2-3 group entrance.
+  useEffect(() => {
+    if (!assistantSurfaceOpen) {
+      clearPromptSwapTimers();
+      promptSwapEpochRef.current += 1;
+      setExitingPromptPills([]);
+      setPromptFlightPlans({});
+      setSilentPromptKeys({});
+      // Frozen motion clears too — every slot falls back to the meteor
+      // opening on the group remount.
+      setPromptEnterMotion({});
+      setPromptMotionEpoch(0);
+    }
+  }, [assistantSurfaceOpen, clearPromptSwapTimers]);
+  const animatePromptPillSwap = useCallback((nextPrompts: string[]) => {
+    const next = nextPrompts.map((p) => p.trim()).filter(Boolean).slice(0, 3);
+    if (next.length !== 3) return;
+    // No response with internal duplicates ever applies (server sanitizer
+    // blocks these; belt-and-suspenders — G live-ride 2026-07-07: "the second
+    // says show options and the third says show options").
+    if (new Set(next.map((p) => promptLabelKey(p))).size !== 3) return;
+    const prev = promptPillsRef.current.slice(0, 3);
+    if (
+      prev.length === 3 &&
+      prev.every((p, i) => promptLabelKey(p) === promptLabelKey(next[i]))
+    ) {
+      return;
+    }
+    const swapEpoch = ++promptSwapEpochRef.current;
+
+    if (typeof window === "undefined") {
+      setPromptPills(next);
+      return;
+    }
+
+    // A panel is covering the pill row right now — update the text silently,
+    // with no fly/whoosh, so it's correct whenever the panel closes but makes
+    // no sound or motion while hidden.
+    if (pillMotionSuppressedRef.current) {
+      clearPromptSwapTimers();
+      setExitingPromptPills([]);
+      setPromptPills(next);
+      return;
+    }
+
+    clearPromptSwapTimers();
+    setExitingPromptPills([]);
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setPromptPills(next);
+      setPromptMotionEpoch((n) => n + 1);
+      return;
+    }
+
+    const now = Date.now();
+    const allChangedIndexes = next
+      .map((prompt, index) =>
+        promptLabelKey(prev[index] ?? "") !== promptLabelKey(prompt) ? index : -1,
+      )
+      .filter((index) => index >= 0);
+    const recentlyShownIndexes = allChangedIndexes.filter((index) => {
+      const lastShown = recentPillShownAtRef.current.get(promptLabelKey(next[index]));
+      return lastShown !== undefined && now - lastShown < RECENT_PILL_WINDOW_MS;
+    });
+    const changedIndexes = allChangedIndexes.filter(
+      (index) => !recentlyShownIndexes.includes(index),
+    );
+
+    // SUP #13/#14: content may update quickly during a conversation, but the
+    // pill row should not keep flying/whooshing during rapid turns. If a real
+    // content change arrives too soon after the last animated landing, update
+    // the text silently and wait for the next conversation beat to animate.
+    if (
+      changedIndexes.length > 0 &&
+      now - lastPromptMotionAtRef.current < PROMPT_MOTION_MIN_INTERVAL_MS
+    ) {
+      markSilentPromptSlots(next, changedIndexes);
+      setPromptPills(next);
+      return;
+    }
+
+    // Recent-label de-dupe suppresses only repeat motion/SFX. The actual text
+    // still updates silently so a fast context swing does not leave stale pills
+    // on screen just because the new label appeared moments ago.
+    if (recentlyShownIndexes.length > 0) {
+      markSilentPromptSlots(next, recentlyShownIndexes);
+      setPromptPills((currentPills) => {
+        const copy = (currentPills.length === 3 ? currentPills : prev).slice(0, 3);
+        for (const index of recentlyShownIndexes) {
+          // Same cross-slot duplicate guard as the animated path.
+          const dupe = copy.some(
+            (p, otherIdx) =>
+              otherIdx !== index &&
+              promptLabelKey(p) === promptLabelKey(next[index]),
+          );
+          if (!dupe) copy[index] = next[index];
+        }
+        return copy;
+      });
+    }
+
+    const swapPlan = buildPromptSwapPlan(changedIndexes);
+    if (swapPlan.slots.length > 0) {
+      lastPromptMotionAtRef.current = now;
+      setPromptFlightPlans((current) => {
+        const copy = { ...current };
+        for (const slot of swapPlan.slots) {
+          copy[slot.index] = {
+            enterClass: slot.enterClass,
+            enter: slot.enter,
+            exit: slot.exit,
+          };
+        }
+        return copy;
+      });
+    }
+
+    for (const slotPlan of swapPlan.slots) {
+      const { index, delayMs } = slotPlan;
+      const timer = window.setTimeout(() => {
+        const current = promptPillsRef.current.slice(0, 3);
+        const oldPrompt = current[index] ?? prev[index] ?? "";
+        if (current[index] === next[index]) return;
+        // Cross-slot duplicate guard: a NEWER response's cascade can be
+        // interrupted mid-flight, stranding its label in one slot while THIS
+        // older queued swap tries to land the same label in another (G
+        // live-ride 2026-07-07: two pills both said "Show Options"). Never
+        // let two slots show the same words.
+        if (
+          current.some(
+            (p, otherIdx) =>
+              otherIdx !== index &&
+              promptLabelKey(p) === promptLabelKey(next[index]),
+          )
+        ) {
+          return;
+        }
+
+        clearSilentPromptSlots(next, [index]);
+        const shownAt = Date.now();
+        recentPillShownAtRef.current.set(promptLabelKey(next[index]), shownAt);
+        for (const [label, at] of recentPillShownAtRef.current) {
+          if (shownAt - at > RECENT_PILL_WINDOW_MS * 4) {
+            recentPillShownAtRef.current.delete(label);
+          }
+        }
+
+        // Re-check at fire time: a panel can open mid-flight (up to 6.8s out).
+        if (pillMotionSuppressedRef.current) {
+          setPromptEnterMotion((current) => ({
+            ...current,
+            [index]: { cls: "", style: {} },
+          }));
+          setPromptPills((currentPills) => {
+            const copy = (currentPills.length === 3 ? currentPills : prev).slice(0, 3);
+            copy[index] = next[index];
+            return copy;
+          });
+          return;
+        }
+
+        // Freeze THIS swap's entrance motion for the remounting pill — the
+        // only moment enter class/style may change (review 2026-07-07).
+        setPromptEnterMotion((current) => ({
+          ...current,
+          [index]: {
+            cls: slotPlan.enterClass ?? "pill-chaos-enter",
+            style: slotPlan.enter,
+          },
+        }));
+        setExitingPromptPills((existing) => {
+          const copy = existing.slice(0, 3);
+          copy[index] = oldPrompt;
+          return copy;
+        });
+        setPromptMotionEpoch((n) => n + 1);
+        setPromptPills((currentPills) => {
+          const copy = (currentPills.length === 3 ? currentPills : prev).slice(0, 3);
+          copy[index] = next[index];
+          return copy;
+        });
+        try {
+          playPillFlightSound("exit", slotPlan.soundFlavor);
+          const inTimer = window.setTimeout(() => {
+            if (!pillMotionSuppressedRef.current) {
+              playPillFlightSound("enter", slotPlan.soundFlavor);
+            }
+          }, slotPlan.enterSoundDelayMs);
+          promptSwapTimersRef.current.push(inTimer);
+        } catch {
+          /* sfx fails soft */
+        }
+        const clearExitTimer = window.setTimeout(() => {
+          setExitingPromptPills((existing) => {
+            const copy = existing.slice(0, 3);
+            copy[index] = "";
+            return copy;
+          });
+        }, slotPlan.exitDurationMs + 240);
+        promptSwapTimersRef.current.push(clearExitTimer);
+      }, delayMs);
+      promptSwapTimersRef.current.push(timer);
+    }
+
+    // Final silent reconcile: after the cascade tail, land the full intended
+    // set (no motion/SFX) unless a NEWER response superseded this one. This
+    // guarantees a cross-slot duplicate skip can't strand stale labels
+    // (Herm TASK_139 finding #2). `next` is internally unique per the guard
+    // above, so a full-set write cannot create duplicate slots.
+    const reconcileDelayMs = swapPlan.slots.length > 0 ? swapPlan.totalMs + 220 : 80;
+    const reconcileTimer = window.setTimeout(() => {
+      if (promptSwapEpochRef.current !== swapEpoch) return;
+      const currentBeforeReconcile = promptPillsRef.current.slice(0, 3);
+      const reconcileIndexes = next
+        .map((prompt, index) =>
+          currentBeforeReconcile[index] !== prompt ? index : -1,
+        )
+        .filter((index) => index >= 0);
+      markSilentPromptSlots(next, reconcileIndexes);
+      setPromptPills((currentPills) => {
+        const current = (currentPills.length === 3 ? currentPills : prev).slice(0, 3);
+        if (current.every((p, i) => p === next[i])) return currentPills;
+        return next;
+      });
+    }, reconcileDelayMs);
+    promptSwapTimersRef.current.push(reconcileTimer);
+  }, [clearPromptSwapTimers, clearSilentPromptSlots, markSilentPromptSlots]);
+  useEffect(() => clearPromptSwapTimers, [clearPromptSwapTimers]);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const onUtterance = (e: Event) => {
-      const text = (e as CustomEvent<{ text?: string }>).detail?.text?.trim();
-      if (!text || text.length < 3) return;
+    const schedulePillBrainFromText = (rawText: string, source: "user" | "avatar") => {
+      const text = rawText.trim();
+      if (!text || text.length < (source === "avatar" ? 8 : 3)) return;
       // Spelled-email turns would make junk pills — sit those out.
       if (/@|\bdot\s+com\b|\bgmail\b|\bproton\b|\byahoo\b|\boutlook\b/i.test(text)) {
+        return;
+      }
+      // UI-META talk never mints pills (G live-ride 2026-07-07: his feedback
+      // about the interface itself — "the video button should shake", "the
+      // pillboxes are freaking out" — became pill fodder like "Fix Video").
+      // NARROWED per Herm TASK_139 red-team: motion words alone must NOT
+      // skip real repair talk ("stop the fan shaking", "my washer is
+      // shaking"), and "garage door button should work" is a repair ask, not
+      // UI feedback. Four lanes: (a) always-UI phrases; (b) motion word +
+      // app/UI noun together; (c) button + MOTION verb (the verb is the
+      // distinguisher — "button should shake" is UI, "button should work"
+      // is repair); (d) two or more media-button nouns moving together,
+      // e.g. G's "camera and gallery just shook together", while a single
+      // real-world "security camera is shaking" still refreshes repair pills.
+      const appUiPhrase =
+        /\b(?:pill\s*box(?:es)?|animation(?:s)?|animat(?:e|ed|ing)|fly(?:ing)?\s+(?:in|out|off|on)|off\s+the\s+screen|on\s+the\s+screen|(?:camera|video|gallery)\s+button)\b/i;
+      const appUiStandaloneFeedback =
+        /\b(?:more\s+(?:brown|light|color|colour)|(?:brown|light|color|colour)[-\s]*splash|text\s+size|make\s+(?:the\s+)?text\s+bigger)\b/i;
+      const appUiNoun = /\b(?:app|interface|ui|pill\s*box(?:es)?|pills?|screen|sheet|panel|drawer|card(?:s)?|button(?:s)?|avatar|six|6|chest|animation(?:s)?)\b/i;
+      const mediaCueNoun = /\b(?:camera|video|gallery)\b/i;
+      const motionWord =
+        /\b(?:shak(?:e|es|ing)|wobbl(?:e|es|ing)|jitter(?:s|ing)?|shook|freak(?:s|ing)?\s+(?:out|the)|fly(?:s|ing)?|bop(?:ped|s)?|bam(?:med|s)?|kick(?:ed|s)?|puff(?:ed|s|ing)?)\b/i;
+      const buttonMotionDirective =
+        /\bbutton(?:s)?\s+(?:should\s+)?(?:shak\w*|shook|mov\w*|fly\w*|wiggl\w*|animat\w*|puff\w*)\b/i;
+      // G narrates build instructions to his agents by name mid-ride ("So
+      // Claude, I want...") — those whole turns are dev meta-talk, never a
+      // repair subject (live-ride 19:40: pills said "Fix Claude").
+      const agentNameTalk = /\b(?:claude|herm|herman)\b/i;
+      const mediaCueNounCount =
+        text.match(new RegExp(mediaCueNoun.source, "gi"))?.length ?? 0;
+      if (
+        agentNameTalk.test(text) ||
+        appUiPhrase.test(text) ||
+        appUiStandaloneFeedback.test(text) ||
+        (motionWord.test(text) && appUiNoun.test(text)) ||
+        buttonMotionDirective.test(text) ||
+        (motionWord.test(text) && mediaCueNounCount >= 2)
+      ) {
+        return;
+      }
+
+      // DEVICE/CONNECTION CONTEXT is not a home/garden subject. G's 13:11
+      // ride: "now I'm on my computer" minted "Fix Computer / Get Help".
+      // Keep real repair requests like "my computer desk is broken" alive by
+      // requiring the absence of a repair/object signal before skipping.
+      // (Herm TASK_144 Patch A.)
+      const deviceContextPhrase =
+        /\b(?:(?:i'?m|i\s+am|we'?re|we\s+are|now|back)?\s*(?:on|using|at)\s+(?:my|the)?\s*(?:computer|laptop|desktop|phone|ipad|tablet)|(?:no|without|lost|don'?t\s+have)\s+(?:internet|wi[- ]?fi|connection|access)|(?:my|the)\s+(?:phone|computer|laptop|desktop|ipad|tablet)\s+(?:is\s+)?(?:working|connected|back|on))\b/i;
+      const repairSubjectSignal =
+        /\b(?:fix|repair|replace|install|broken|stuck|leak(?:ing)?|clog(?:ged)?|crack(?:ed)?|paint|build|clean|mow|grass|yard|gutter|roof|plumb(?:er|ing)?|electric(?:al|ian)?|handy\s*man|contractor|pro|estimate|quote|desk|chair|table|appliance|door|window|wall|floor)\b/i;
+      if (deviceContextPhrase.test(text) && !repairSubjectSignal.test(text)) {
         return;
       }
       pillBrainHistoryRef.current = [...pillBrainHistoryRef.current, text].slice(-6);
@@ -1380,6 +2186,9 @@ const LiveAvatarSessionComponent: React.FC<{
             // can be a short UI/action phrase while the real problem is already
             // locked in currentProblemRef.
             currentSubject: currentProblemRef.current || "",
+            ...(activeTodoPromptContextRef.current
+              ? { listContext: activeTodoPromptContextRef.current }
+              : {}),
             // Session id rides along so the route can log every pill-brain attempt
             // to conversation_messages (source prompt_brain_v1) — sup-provable
             // pills, same as aiASAP (G Droid/iPad ride 2026-07-03).
@@ -1394,53 +2203,163 @@ const LiveAvatarSessionComponent: React.FC<{
               data.prompts.length === 3 &&
               data.prompts.every((p) => typeof p === "string" && p.trim())
             ) {
-              setPromptPills(data.prompts);
+              animatePromptPillSwap(data.prompts);
             }
           })
           .catch(() => {
             /* keep the pills we have */
           });
-      }, 700);
+      // Debounce cut 1400/700 → 1000/350 (G 13:11: "pillboxes need to be
+      // faster on point"; Herm TASK_144 Patch A).
+      }, source === "avatar" ? 1000 : 350);
     };
-    window.addEventListener("isolve:user-utterance", onUtterance);
+    const onUserUtterance = (e: Event) => {
+      schedulePillBrainFromText(
+        (e as CustomEvent<{ text?: string }>).detail?.text ?? "",
+        "user",
+      );
+    };
+    const onAvatarUtterance = (e: Event) => {
+      schedulePillBrainFromText(
+        (e as CustomEvent<{ text?: string }>).detail?.text ?? "",
+        "avatar",
+      );
+    };
+    window.addEventListener("isolve:user-utterance", onUserUtterance);
+    window.addEventListener("isolve:avatar-utterance", onAvatarUtterance);
     return () => {
-      window.removeEventListener("isolve:user-utterance", onUtterance);
+      window.removeEventListener("isolve:user-utterance", onUserUtterance);
+      window.removeEventListener("isolve:avatar-utterance", onAvatarUtterance);
       if (pillBrainTimerRef.current) {
         window.clearTimeout(pillBrainTimerRef.current);
       }
     };
-  }, []);
+  }, [animatePromptPillSwap]);
 
   // 6 named a button → it shakes + a whoosh (G smoke #7 "boom boom boom").
-  // Cue fires from context.tsx off 6's own transcript; dies after ~1.8s.
-  const [buttonCue, setButtonCue] = useState<
-    "camera" | "video" | "gallery" | null
-  >(null);
+  // Cue fires from context.tsx off 6's own transcript; dies after ~1s.
+  const [buttonCues, setButtonCues] = useState<ButtonCueState>({});
+  const buttonCueTimersRef = useRef<Partial<Record<ButtonCueTarget, number>>>({});
+  // The "all three named → grand double-size puff" window (G 19:44).
+  const grandCueUntilRef = useRef<number>(0);
+  const isButtonCueActive = (target: ButtonCueTarget) =>
+    buttonCues[target] !== undefined;
+  const [promptCue, setPromptCue] = useState<PromptCueState | null>(null);
+  const promptCueSeenRef = useRef<Set<string>>(new Set());
+  const normalizePromptCueKey = (text: string) =>
+    text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   useEffect(() => {
     if (typeof window === "undefined") return;
     let timer: number | null = null;
+    const onAvatarUiTranscript = (e: Event) => {
+      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        return;
+      }
+      const text = normalizePromptCueKey(
+        (e as CustomEvent<{ text?: string }>).detail?.text ?? "",
+      );
+      if (!text) return;
+      const prompts = promptPillsRef.current.slice(0, 3);
+      const textWords = new Set(text.split(/\s+/).filter(Boolean));
+      const index = prompts.findIndex((pill) => {
+        const normalized = normalizePromptCueKey(pill);
+        if (!normalized || promptCueSeenRef.current.has(normalized)) return false;
+        const words = normalized.split(/\s+/).filter((w) => w.length >= 4);
+        const wordHits = words.filter((w) => textWords.has(w)).length;
+        return text.includes(normalized) || (words.length >= 2 && wordHits >= 2);
+      });
+      if (index < 0) return;
+      const key = normalizePromptCueKey(prompts[index]);
+      promptCueSeenRef.current.add(key);
+      setPromptCue({ index, nonce: Date.now() });
+      try {
+        playChime("soft");
+      } catch {
+        /* sfx fails soft */
+      }
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => setPromptCue(null), 920);
+    };
+    const onAvatarSpeakStart = () => {
+      promptCueSeenRef.current = new Set();
+      setPromptCue(null);
+    };
+    // "Just have them shake. Sometimes." (G live-ride 19:49) — a rare, lazy
+    // fun-shake on one random prompt pill, same pop the named-pill cue uses.
+    // 18-40s apart keeps it a wink, not a nervous tic.
+    let funShakeTimer: number | null = null;
+    const queueFunShake = () => {
+      funShakeTimer = window.setTimeout(() => {
+        const index = Math.floor(Math.random() * 3);
+        // "They can erupt in colors and things like that" (G 19:50) — some
+        // fun-shakes flare brand colors for a beat; resting fill untouched.
+        setPromptCue({ index, nonce: Date.now(), erupt: Math.random() < 0.4 });
+        if (timer) window.clearTimeout(timer);
+        timer = window.setTimeout(() => setPromptCue(null), 920);
+        queueFunShake();
+      }, 18_000 + Math.random() * 22_000);
+    };
+    queueFunShake();
+    window.addEventListener("isolve:avatar-ui-transcript", onAvatarUiTranscript);
+    window.addEventListener("isolve:avatar-speak-start", onAvatarSpeakStart);
+    return () => {
+      if (funShakeTimer) window.clearTimeout(funShakeTimer);
+      window.removeEventListener("isolve:avatar-ui-transcript", onAvatarUiTranscript);
+      window.removeEventListener("isolve:avatar-speak-start", onAvatarSpeakStart);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     const onCue = (e: Event) => {
       // Reduced-motion users skip the shake (Herm TASK_098 polish).
       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
         return;
       }
-      const target = (e as CustomEvent<{ target?: string }>).detail?.target;
+      const detail = (e as CustomEvent<{ target?: string; grand?: boolean }>)
+        .detail;
+      const target = detail?.target;
       if (target !== "camera" && target !== "video" && target !== "gallery") {
         return;
       }
-      setButtonCue(target);
+      // GRAND all-puff (G 19:44: "make them just like all puff up, like
+      // double the size... then settle back down"): when the dispatcher
+      // fires all three together after 6 named them all, they inflate ~2x.
+      if (detail?.grand) {
+        grandCueUntilRef.current = Date.now() + 1300;
+      }
+
+      // Per-target cue so "Camera, Video, and Gallery" in one breath shakes
+      // ALL three, not just the last one (Herm TASK_132 C1: singleton bug).
+      setButtonCues((prev) => ({ ...prev, [target]: Date.now() }));
       try {
         playWhoosh("in");
+        window.setTimeout(
+          () => playChime(target === "gallery" ? "pop" : "soft"),
+          45,
+        );
       } catch {
         /* sfx fails soft */
       }
-      if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(() => setButtonCue(null), 1800);
+
+      const existingTimer = buttonCueTimersRef.current[target];
+      if (existingTimer) window.clearTimeout(existingTimer);
+      buttonCueTimersRef.current[target] = window.setTimeout(() => {
+        setButtonCues((prev) => {
+          const next = { ...prev };
+          delete next[target];
+          return next;
+        });
+        delete buttonCueTimersRef.current[target];
+      }, 1080);
     };
     window.addEventListener("isolve:button-cue", onCue);
     return () => {
       window.removeEventListener("isolve:button-cue", onCue);
-      if (timer) window.clearTimeout(timer);
+      Object.values(buttonCueTimersRef.current).forEach((timerId) => {
+        if (timerId) window.clearTimeout(timerId);
+      });
+      buttonCueTimersRef.current = {};
     };
   }, []);
   useEffect(() => {
@@ -2240,48 +3159,6 @@ const LiveAvatarSessionComponent: React.FC<{
     // Do nothing - greeting disabled to prevent mouth movement during loading
   }, []);
 
-  // Function to load fallback image from public folder
-  const loadFallbackImage = useCallback(async (): Promise<File> => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          reject(new Error("Failed to get canvas context"));
-          return;
-        }
-        ctx.drawImage(img, 0, 0);
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              const file = new File(
-                [blob],
-                "2c44c052-e58a-4f6d-a6c8-dba901ff0e9e.jpg",
-                { type: "image/jpeg" },
-              );
-              resolve(file);
-            } else {
-              reject(new Error("Failed to convert canvas to blob"));
-            }
-          },
-          "image/jpeg",
-          0.95,
-        );
-      };
-
-      img.onerror = () => {
-        reject(new Error("Failed to load fallback image from public folder"));
-      };
-
-      // Load image from public folder
-      img.src = "/2c44c052-e58a-4f6d-a6c8-dba901ff0e9e.jpg";
-    });
-  }, []);
 
   // Handle Go Live button - enable real-time streaming vision mode (verbal questions)
   const handleGoLive = useCallback(async () => {
@@ -2293,21 +3170,13 @@ const LiveAvatarSessionComponent: React.FC<{
     // Activate streaming Vision mode
     setVisionMode("streaming");
 
-    // If camera is not available, show fallback mode with default image
+    // If camera is not available, fail closed — no bundled fallback image.
     if (cameraAvailable === false) {
-      setIsCameraActive(true);
-      // If fallback image is not already set, load it
-      if (!fallbackImage) {
-        loadFallbackImage()
-          .then((file) => {
-            setFallbackImage(file);
-            const previewUrl = URL.createObjectURL(file);
-            setFallbackImagePreview(previewUrl);
-          })
-          .catch((error) => {
-            console.error("Error loading fallback image:", error);
-          });
-      }
+      setVisionMode(null);
+      setIsCameraActive(false);
+      setFallbackImage(null);
+      setFallbackImagePreview(null);
+      showCaptureNotice("Camera is not available. Check camera permission and try again.");
       return;
     }
 
@@ -2328,22 +3197,14 @@ const LiveAvatarSessionComponent: React.FC<{
           });
           setCameraAvailable(true);
         } catch (error2) {
-          // No camera available, use fallback mode with default image
-          console.log("No camera available, using fallback mode");
+          // No camera available: fail closed, do not substitute a static image.
+          console.log("No camera available");
           setCameraAvailable(false);
-          setIsCameraActive(true);
-          // If fallback image is not already set, load it
-          if (!fallbackImage) {
-            loadFallbackImage()
-              .then((file) => {
-                setFallbackImage(file);
-                const previewUrl = URL.createObjectURL(file);
-                setFallbackImagePreview(previewUrl);
-              })
-              .catch((error) => {
-                console.error("Error loading fallback image:", error);
-              });
-          }
+          setVisionMode(null);
+          setIsCameraActive(false);
+          setFallbackImage(null);
+          setFallbackImagePreview(null);
+          showCaptureNotice("Camera is not available. Check camera permission and try again.");
           return;
         }
       }
@@ -2354,20 +3215,13 @@ const LiveAvatarSessionComponent: React.FC<{
       }
     } catch (error) {
       console.error("Error accessing camera:", error);
-      // Use fallback mode instead of showing error
+      // Camera access failed: fail closed, do not substitute a static image.
       setCameraAvailable(false);
-      setIsCameraActive(true);
-      if (!fallbackImage) {
-        loadFallbackImage()
-          .then((file) => {
-            setFallbackImage(file);
-            const previewUrl = URL.createObjectURL(file);
-            setFallbackImagePreview(previewUrl);
-          })
-          .catch((error) => {
-            console.error("Error loading fallback image:", error);
-          });
-      }
+      setVisionMode(null);
+      setIsCameraActive(false);
+      setFallbackImage(null);
+      setFallbackImagePreview(null);
+      showCaptureNotice("Camera is not available. Check camera permission and try again.");
     }
 
     // Inject a state signal into the TALK conversation so the avatar's LLM
@@ -2405,10 +3259,9 @@ const LiveAvatarSessionComponent: React.FC<{
     triggerGreetingIfNeeded,
     visionMode,
     cameraAvailable,
-    fallbackImage,
-    loadFallbackImage,
     mode,
     sessionRef,
+    showCaptureNotice,
   ]);
 
   // Allow the initial greeting (intro line) from the backend to play when session is fully loaded
@@ -2460,10 +3313,12 @@ const LiveAvatarSessionComponent: React.FC<{
       return null;
     }
 
-    // If using fallback image, return it directly
+    // Fail closed if stale fallback state exists. A bundled/static image is not
+    // a user camera frame and must never be captured, saved, or analyzed as one.
     if (fallbackImage) {
-      console.log("Using fallback image:", fallbackImage.name);
-      return fallbackImage;
+      console.warn("Refusing to capture fallback image as camera frame:", fallbackImage.name);
+      showCaptureNotice("Camera is not available. Check camera permission and try again.");
+      return null;
     }
 
     // Otherwise, try to capture from camera
@@ -2547,12 +3402,20 @@ const LiveAvatarSessionComponent: React.FC<{
       console.error("Error capturing camera frame:", error);
       return null;
     }
-  }, [isCameraActive, fallbackImage]);
+  }, [isCameraActive, fallbackImage, showCaptureNotice]);
 
   // Function to capture photo and analyze it (only for snapshot mode)
   // Capture the frame and FREEZE it for review (G 2026-06-30): the user confirms
   // with "Use Picture?" or hits "Retake" before we analyze or close the camera.
   const handleSnapPhoto = useCallback(async () => {
+    if (mediaSessionBlocked) {
+      explainMediaCaptureBlocked();
+      return;
+    }
+    if (!cameraStream) {
+      showCaptureNotice("Camera is not available. Check camera permission and try again.");
+      return;
+    }
     if (!isCameraActive || visionMode !== "snapshot") {
       return;
     }
@@ -2569,7 +3432,16 @@ const LiveAvatarSessionComponent: React.FC<{
     }
     const url = URL.createObjectURL(frameFile);
     setPendingPhoto({ file: frameFile, url });
-  }, [isCameraActive, visionMode, captureCameraFrame, sessionRef]);
+  }, [
+    mediaSessionBlocked,
+    explainMediaCaptureBlocked,
+    cameraStream,
+    showCaptureNotice,
+    isCameraActive,
+    visionMode,
+    captureCameraFrame,
+    sessionRef,
+  ]);
 
   // "Retake" — discard the frozen shot and return to the live preview.
   const retakePhoto = useCallback(() => {
@@ -2613,12 +3485,8 @@ const LiveAvatarSessionComponent: React.FC<{
       setIsCameraActive(false);
       setVisionMode(null);
 
-      // Clean up preview URL if it's not the default fallback image
-      if (
-        fallbackImagePreview &&
-        fallbackImage &&
-        fallbackImage.name !== "2c44c052-e58a-4f6d-a6c8-dba901ff0e9e.jpg"
-      ) {
+      // Clean up preview URL; bundled fallback images are no longer valid camera input.
+      if (fallbackImagePreview) {
         URL.revokeObjectURL(fallbackImagePreview);
       }
       setFallbackImage(null);
@@ -3311,6 +4179,25 @@ const LiveAvatarSessionComponent: React.FC<{
         }
       }
 
+      // SUP #19: if G says we already said it, do not route that correction to
+      // the generic brain (which can re-recap). Acknowledge once and stop.
+      if (/\b(?:you\s+)?(?:already\s+said|just\s+said|said\s+that\s+already|repeating\s+yourself|stop\s+repeating)\b/i.test(userText)) {
+        try {
+          await interrupt();
+        } catch {
+          // non-fatal
+        }
+        const spoken = "You're right — I won't repeat it. What do you want me to do next?";
+        try {
+          await repeat(spoken);
+          lastAvatarResponseRef.current = spoken;
+          rememberConversationLine("assistant", spoken);
+        } catch {
+          // never leave 6 silent
+        }
+        return;
+      }
+
       // Voice "open camera" / "open gallery" (G 2026-06-27): a browser BLOCKS a
       // file input from opening unless a REAL tap triggers it — a voice command
       // can't pop the picker. So 6 GUIDES them to tap the button and NEVER goes
@@ -3772,33 +4659,18 @@ const LiveAvatarSessionComponent: React.FC<{
         );
         setCameraAvailable(hasVideoInput);
 
-        // If no camera available, load and set default fallback image
-        if (!hasVideoInput) {
-          try {
-            const fallbackImageFile = await loadFallbackImage();
-            setFallbackImage(fallbackImageFile);
-            const previewUrl = URL.createObjectURL(fallbackImageFile);
-            setFallbackImagePreview(previewUrl);
-          } catch (error) {
-            console.error("Error loading fallback image:", error);
-          }
-        }
+        // No fake fallback camera. If the device has no camera, the capture
+        // controls must fail closed with a visible notice instead of showing a
+        // random bundled image that can be captured/analyzed as the user's photo.
       } catch (error) {
         console.error("Error checking camera availability:", error);
         setCameraAvailable(false);
-        // Still try to load fallback image
-        try {
-          const fallbackImageFile = await loadFallbackImage();
-          setFallbackImage(fallbackImageFile);
-          const previewUrl = URL.createObjectURL(fallbackImageFile);
-          setFallbackImagePreview(previewUrl);
-        } catch (err) {
-          console.error("Error loading fallback image:", err);
-        }
+        setFallbackImage(null);
+        setFallbackImagePreview(null);
       }
     };
     checkCameraAvailability();
-  }, [loadFallbackImage]);
+  }, []);
 
   // Open the in-app camera with a specific lens. getUserMedia honors facingMode
   // reliably (unlike a native <input capture> hint, which phones ignored — opening
@@ -3862,23 +4734,18 @@ const LiveAvatarSessionComponent: React.FC<{
         setIsCameraActive(true);
       } else {
         // Camera couldn't open (no device, OR permission denied / device busy).
-        // Make sure the static-image fallback actually has an image to show, or
-        // the user is stranded on an endless "loading" with a dead shutter
-        // (Herm 2026-06-29). Load it on demand if mount didn't preload one.
+        // Fail closed. Do NOT show/capture the bundled fallback image as if it
+        // were the user's camera view (G 2026-07-07 smoke: cartoon cat/pig image
+        // appeared behind Take Photo after mic/camera failure).
         setCameraAvailable(false);
-        setIsCameraActive(true);
-        if (!fallbackImagePreview) {
-          try {
-            const fallbackImageFile = await loadFallbackImage();
-            setFallbackImage(fallbackImageFile);
-            setFallbackImagePreview(URL.createObjectURL(fallbackImageFile));
-          } catch (err) {
-            console.error("Error loading fallback image:", err);
-          }
-        }
+        setFallbackImage(null);
+        setFallbackImagePreview(null);
+        setIsCameraActive(false);
+        setVisionMode(null);
+        showCaptureNotice("Camera is not available. Check camera permission and try again.");
       }
     },
-    [cameraStream, fallbackImagePreview, loadFallbackImage, showCaptureNotice],
+    [cameraStream, showCaptureNotice],
   );
 
   // Silence 6 BEFORE the phone's camera opens (G 2026-06-29, "no excuses"):
@@ -3931,6 +4798,10 @@ const LiveAvatarSessionComponent: React.FC<{
   // in-app camera as video; the snap then shows OUR "Use Picture?/Retake" confirm.
   // Bonus: canvas-JPEG capture sidesteps the native HEIC/large-file failure.
   const handleCameraClick = () => {
+    if (mediaEntryBlocked) {
+      explainMediaCaptureBlocked();
+      return;
+    }
     // Silence 6 the instant the camera opens — otherwise he keeps talking while
     // the user frames the shot ("why are you still talking to me?", G smoke
     // 2026-06-30). Mirrors handleGalleryClick's interrupt.
@@ -3965,6 +4836,10 @@ const LiveAvatarSessionComponent: React.FC<{
     void unlockAudio();
   };
   const handleVideoClick = () => {
+    if (mediaEntryBlocked) {
+      explainMediaCaptureBlocked();
+      return;
+    }
     // IN-APP video recorder (G 2026-06-29): native video FROZE 6 on iOS (the OS
     // suspends his live stream when the phone camera takes the whole screen). The
     // in-app recorder captures INSIDE the page, so 6 never backgrounds and never
@@ -4028,6 +4903,10 @@ const LiveAvatarSessionComponent: React.FC<{
   };
 
   const handleGalleryClick = useCallback(() => {
+    if (mediaEntryBlocked) {
+      explainMediaCaptureBlocked();
+      return;
+    }
     // Gallery opens the phone's photo picker via the no-capture fileInputRef (its
     // accept is static "image/*,video/*"; it's never mutated now that Camera has
     // its own ref). Click SYNCHRONOUSLY inside the gesture — mobile blocks a
@@ -4041,7 +4920,7 @@ const LiveAvatarSessionComponent: React.FC<{
       // non-fatal
     }
     void unlockAudio();
-  }, [unlockAudio, sessionRef]);
+  }, [unlockAudio, sessionRef, mediaEntryBlocked, explainMediaCaptureBlocked]);
 
   // Restore 6 + the mic after a native capture. Used for BOTH the cancelled path
   // (visibilitychange below) and the confirmed path (handleFileChange, AFTER
@@ -4105,6 +4984,10 @@ const LiveAvatarSessionComponent: React.FC<{
 
   // Record video from the live camera preview (snapshot mode only)
   const handleStartRecording = useCallback(() => {
+    if (mediaSessionBlocked) {
+      explainMediaCaptureBlocked();
+      return;
+    }
     if (visionMode !== "snapshot" || !cameraStream) {
       return;
     }
@@ -4261,11 +5144,7 @@ const LiveAvatarSessionComponent: React.FC<{
       setCameraStream(null);
       setIsCameraActive(false);
       setVisionMode(null);
-      if (
-        fallbackImagePreview &&
-        fallbackImage &&
-        fallbackImage.name !== "2c44c052-e58a-4f6d-a6c8-dba901ff0e9e.jpg"
-      ) {
+      if (fallbackImagePreview) {
         URL.revokeObjectURL(fallbackImagePreview);
       }
       setFallbackImage(null);
@@ -4605,6 +5484,8 @@ const LiveAvatarSessionComponent: React.FC<{
       }
     }
   }, [
+    mediaSessionBlocked,
+    explainMediaCaptureBlocked,
     visionMode,
     cameraStream,
     isCameraActive,
@@ -4617,7 +5498,7 @@ const LiveAvatarSessionComponent: React.FC<{
     mute,
     unmute,
     fallbackImagePreview,
-    fallbackImage,
+    showCaptureNotice,
   ]);
 
   // Stop video recording — onstop freezes the clip for review (playback +
@@ -4750,12 +5631,8 @@ const LiveAvatarSessionComponent: React.FC<{
     }
     setIsCameraActive(false);
     setVisionMode(null);
-    // Clean up preview URL if it's not the default fallback image
-    if (
-      fallbackImagePreview &&
-      fallbackImage &&
-      fallbackImage.name !== "2c44c052-e58a-4f6d-a6c8-dba901ff0e9e.jpg"
-    ) {
+    // Clean up preview URL; bundled fallback images are no longer valid camera input.
+    if (fallbackImagePreview) {
       URL.revokeObjectURL(fallbackImagePreview);
     }
     setFallbackImage(null);
@@ -5553,7 +6430,10 @@ const LiveAvatarSessionComponent: React.FC<{
   // container. Missing this cap is why iSolve pills ran full-width/chunky
   // (G 2026-06-27 screenshot). Matches aiASAP LiveAvatarSession bottom stack.
   const _pillMaxWidth = "min(calc(var(--stage-width) * 0.56), 92vw)";
-  const _pillFont = `min(calc(var(--stage-height) * 0.030), calc((${_pillMaxWidth} - 2rem) / ${_pillDivisor}))`;
+  // Voice-set text level scales the pill letters ("make the letters bigger",
+  // G live-ride 19:38); level 1 = factor 1 = the untouched default look.
+  const _pillFontScale = TEXT_SIZE_FACTORS[uiTextSizeLevel] ?? 1;
+  const _pillFont = `calc(min(calc(var(--stage-height) * 0.030), calc((${_pillMaxWidth} - 2rem) / ${_pillDivisor})) * ${_pillFontScale})`;
   const _pillMinH = `calc(${_pillFont} * 1.5)`;
   // When the email box is up, it REPLACES all 3 prompt pills (G 2026-06-27):
   // only the distinct email field + Camera/Gallery remain.
@@ -5561,6 +6441,28 @@ const LiveAvatarSessionComponent: React.FC<{
   // any letters land — the old `&& (status||text)` kept it hidden at the empty
   // spell prompt, so G saw NO email box and the pills never dropped.
   const _emailBoxActive = Boolean(showChestEmail);
+  const mediaButtonStyle = (target: ButtonCueTarget): ButtonCueStyle => {
+    const active = isButtonCueActive(target);
+    const seed = buttonCues[target] ?? 0;
+    const cueDuration = `${1.18 + (Number(seed) % 5) * 0.13}s`;
+    // Grand all-puff (G 19:44): the all-three finale inflates near-double
+    // and settles; single-word cues keep the subtler puffer pop.
+    const grand = grandCueUntilRef.current > Date.now();
+    const cueVars = active
+      ? target === "gallery"
+        ? { "--cue-x": "18px", "--cue-rot": "10deg", "--cue-pop": grand ? "1.9" : "1.18", "--cue-duration": cueDuration }
+        : target === "video"
+          ? { "--cue-x": "15px", "--cue-rot": "8.5deg", "--cue-pop": grand ? "1.85" : "1.14", "--cue-duration": cueDuration }
+          : { "--cue-x": "13px", "--cue-rot": "7.5deg", "--cue-pop": grand ? "1.8" : "1.12", "--cue-duration": cueDuration }
+      : {};
+    return {
+      fontSize: `calc(${_pillFont} * 0.95)`,
+      minHeight: `calc(${_pillFont} * 1.4)`,
+      ...cueVars,
+    };
+  };
+  const buttonCueNonce = (target: ButtonCueTarget) =>
+    buttonCues[target] ?? "idle";
 
   return (
     <div className="site-bg fixed inset-0 w-screen h-screen supports-[height:100dvh]:h-[100dvh] flex flex-col">
@@ -5635,67 +6537,125 @@ const LiveAvatarSessionComponent: React.FC<{
               )}
             </div>
           )}
-          {(_emailBoxActive ? [] : promptPills).map((prompt, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => {
-                try {
-                  void interrupt();
-                } catch {
-                  // non-fatal
-                }
-                void sendMessage(`Help me with my ${prompt.toLowerCase()}.`);
-              }}
-              className="pointer-events-auto flex w-full items-center justify-center whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/92 to-[#241406]/92 px-4 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:brightness-90"
-              style={{
-                fontSize: _pillFont,
-                minHeight: _pillMinH,
-                maxWidth: _pillMaxWidth,
-                // Gentle idle bob; opposite phase per pill (delay = half the
-                // 3.2s cycle) so the pair drifts out of sync. active:brightness
-                // gives press feedback without fighting the transform (G 2026-06-30).
-                animation: "pill-idle 3.2s ease-in-out infinite",
-                animationDelay: `${i * 1.6}s`,
-              }}
-            >
-              <span className="brand-grad-text">{prompt}</span>
-            </button>
-          ))}
-          {/* 4th row: Camera | Gallery side-by-side, just below the prompts.
-              Hidden while collecting the email (G 2026-06-28: "drop all pill
-              boxes, including camera and gallery, put only one up for the email"). */}
+          {(_emailBoxActive ? [] : [0, 1, 2]).map((i) => {
+            const prompt = promptPills[i];
+            const exitingPrompt = exitingPromptPills[i];
+            const flightPlan = promptFlightPlans[i];
+            const silentPrompt = prompt
+              ? Boolean(silentPromptKeys[promptSlotKey(i, prompt)])
+              : false;
+            const promptCueVars = promptCue?.index === i
+              ? ({
+                  "--prompt-cue-duration": `${1.08 + (promptCue.nonce % 5) * 0.16}s`,
+                } as React.CSSProperties)
+              : undefined;
+            return (
+              <div
+                key={`prompt-slot-${i}`}
+                className="relative flex w-full items-center justify-center"
+                style={{ minHeight: _pillMinH, maxWidth: _pillMaxWidth }}
+              >
+                {/* KEY FIX (G live-ride 2026-07-07: "all 3 always move"): the
+                    shared motion epoch must NOT live in these keys — it bumps
+                    on EVERY single-slot swap, which remounted and re-flew ALL
+                    THREE pills each time one changed. Keyed on slot+label now,
+                    so only the pill whose words changed animates; the epoch
+                    still feeds the style for flight-path variety. */}
+                {exitingPrompt && (
+                  <div
+                    key={`prompt-exit-${i}-${exitingPrompt}`}
+                    className="pill-chaos-exit absolute inset-x-0 top-0 z-20 w-full"
+                    style={flightPlan?.exit ?? promptPillFlightStyle(i, "exit", promptMotionEpoch)}
+                    aria-hidden
+                  >
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      className="pill-energy-idle pointer-events-none flex w-full items-center justify-center whitespace-nowrap rounded-full border border-[#ffe9c2]/90 bg-gradient-to-b from-[#4a2a0c]/50 to-[#241406]/50 px-4 text-[#ffe9c2] font-semibold leading-tight shadow-[0_0_30px_rgba(241,196,119,0.45),inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)]"
+                      style={{ fontSize: _pillFont, minHeight: _pillMinH }}
+                    >
+                      <span className="brand-grad-text">{exitingPrompt}</span>
+                    </button>
+                  </div>
+                )}
+                {prompt && (
+                  <div
+                    key={`prompt-enter-${i}-${prompt}`}
+                    className={`${silentPrompt ? "" : promptEnterMotion[i]?.cls ?? "pill-meteor-enter"} relative z-10 w-full`}
+                    style={
+                      silentPrompt
+                        ? undefined
+                        : promptEnterMotion[i]
+                          ? promptEnterMotion[i].style
+                          : promptPillFlightStyle(i, "enter", 0)
+                    }
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          void interrupt();
+                        } catch {
+                          // non-fatal
+                        }
+                        void sendMessage(`Help me with my ${prompt.toLowerCase()}.`);
+                      }}
+                      className={`pill-energy-idle ${silentPrompt ? "" : "pill-land-flare"} pointer-events-auto flex w-full items-center justify-center whitespace-nowrap rounded-full border border-[#e0aa62]/85 bg-gradient-to-b from-[#4a2a0c]/50 to-[#241406]/50 px-4 text-[#f1c477] font-semibold leading-tight shadow-[inset_0_1px_8px_rgba(255,255,255,0.08),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-[filter,brightness,border-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] active:brightness-90 ${promptCue?.index === i ? "prompt-cue-pop" : ""} ${promptCue?.index === i && promptCue?.erupt ? "pill-color-erupt" : ""}`}
+                      style={{
+                        fontSize: _pillFont,
+                        minHeight: _pillMinH,
+                        ...promptCueVars,
+                      }}
+                    >
+                      <span className="brand-grad-text">{prompt}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {/* Media rows sit in the SAME flex rhythm as the 3 prompt pills.
+              G inked the extra dead-space band (2026-07-07): keep Gallery's
+              bottom anchor where it was, but remove the added media-row top
+              margins so Camera/Video + the prompts move downward into that
+              dead space and every vertical row gap matches the prompt gaps. */}
           {!_emailBoxActive && (
           <>
           {/* Two NATIVE capture buttons side-by-side: Camera = photo, Video =
               video. Split so Android behaves (G 2026-06-29). */}
-          <div className="grid w-full grid-cols-2 gap-[calc(var(--stage-height)*0.008)] mt-[calc(var(--stage-height)*0.012)]" style={{ maxWidth: "min(calc(var(--stage-width) * 0.60), 94vw)" }}>
+          <div className="grid w-full grid-cols-2 gap-[calc(var(--stage-height)*0.008)]" style={{ maxWidth: "min(calc(var(--stage-width) * 0.60), 94vw)" }}>
             <button
+              key={`camera-${buttonCueNonce("camera")}`}
               type="button"
               onClick={() => handleCameraClick()}
-              className={`pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-4 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95 ${buttonCue === "camera" ? "btn-cue-shake" : ""}`}
-              style={{ fontSize: `calc(${_pillFont} * 0.95)`, minHeight: `calc(${_pillFont} * 1.4)` }}
+              disabled={mediaEntryBlocked}
+              className={`pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-4 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-[filter,brightness,border-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95 disabled:opacity-55 disabled:cursor-not-allowed ${isButtonCueActive("camera") ? "btn-cue-shake" : ""}`}
+              style={mediaButtonStyle("camera")}
             >
               <Camera className="shrink-0" style={{ width: `calc(${_pillFont} * 0.95)`, height: `calc(${_pillFont} * 0.95)` }} strokeWidth={2.5} aria-hidden />
               <span className="brand-grad-text">{t("camera")}</span>
             </button>
             <button
+              key={`video-${buttonCueNonce("video")}`}
               type="button"
               onClick={() => handleVideoClick()}
-              className={`pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-4 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95 ${buttonCue === "video" ? "btn-cue-shake" : ""}`}
-              style={{ fontSize: `calc(${_pillFont} * 0.95)`, minHeight: `calc(${_pillFont} * 1.4)` }}
+              disabled={mediaEntryBlocked}
+              className={`pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-4 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-[filter,brightness,border-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95 disabled:opacity-55 disabled:cursor-not-allowed ${isButtonCueActive("video") ? "btn-cue-shake" : ""}`}
+              style={mediaButtonStyle("video")}
             >
               <Video className="shrink-0" style={{ width: `calc(${_pillFont} * 0.95)`, height: `calc(${_pillFont} * 0.95)` }} strokeWidth={2.5} aria-hidden />
               <span className="brand-grad-text">Video</span>
             </button>
           </div>
           {/* Gallery full-width below — pick an existing photo/video. */}
-          <div className="grid w-full grid-cols-1 mt-[calc(var(--stage-height)*0.012)]" style={{ maxWidth: "min(calc(var(--stage-width) * 0.60), 94vw)" }}>
+          <div className="grid w-full grid-cols-1" style={{ maxWidth: "min(calc(var(--stage-width) * 0.60), 94vw)" }}>
             <button
+              key={`gallery-${buttonCueNonce("gallery")}`}
               type="button"
               onClick={() => void handleGalleryClick()}
-              className={`pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-4 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95 ${buttonCue === "gallery" ? "btn-cue-shake" : ""}`}
-              style={{ fontSize: `calc(${_pillFont} * 0.95)`, minHeight: `calc(${_pillFont} * 1.4)` }}
+              disabled={mediaEntryBlocked}
+              className={`pointer-events-auto flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 px-4 text-[#e8b96a] font-semibold leading-tight shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] transition-[filter,brightness,border-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-95 disabled:opacity-55 disabled:cursor-not-allowed ${isButtonCueActive("gallery") ? "btn-cue-shake" : ""}`}
+              style={mediaButtonStyle("gallery")}
             >
               <Images className="shrink-0" style={{ width: `calc(${_pillFont} * 0.95)`, height: `calc(${_pillFont} * 0.95)` }} strokeWidth={2.5} aria-hidden />
               <span className="brand-grad-text">{t("gallery")}</span>
@@ -5942,34 +6902,14 @@ const LiveAvatarSessionComponent: React.FC<{
         {/* Camera Preview - full screen under header when active */}
         {isCameraActive && (
           <div className="absolute inset-0 pt-24 flex items-center justify-center z-10">
-            {cameraAvailable === false && fallbackImagePreview ? (
-              // Fallback image preview (default image from public folder)
-              <div className="relative w-full h-full max-w-4xl max-h-[calc(100vh-8rem)] supports-[height:100dvh]:max-h-[calc(100dvh-8rem)] flex flex-col">
-                <img
-                  src={fallbackImagePreview}
-                  alt="Fallback"
-                  className="w-full h-full object-contain rounded-lg"
-                />
-                {/* <button
-                  onClick={() => fallbackImageInputRef.current?.click()}
-                  className="absolute top-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-md z-40 hover:bg-blue-700 text-sm"
-                >
-                  Change Image
-                </button> */}
-                <input
-                  ref={fallbackImageInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleFallbackImageChange}
-                />
-              </div>
-            ) : cameraAvailable === false && !fallbackImagePreview ? (
-              // Loading fallback image
-              <div className="flex flex-col items-center justify-center w-full h-full max-w-4xl max-h-[calc(100vh-8rem)] supports-[height:100dvh]:max-h-[calc(100dvh-8rem)] bg-gray-900 rounded-lg p-8">
-                <div className="text-center">
-                  <p className="text-inset text-lg">{t("loading")}</p>
-                </div>
+            {cameraAvailable === false ? (
+              // Fail-closed camera unavailable state. Never render/capture a
+              // bundled fallback image in the camera/photo surface.
+              <div className="flex flex-col items-center justify-center w-full h-full max-w-4xl max-h-[calc(100vh-8rem)] supports-[height:100dvh]:max-h-[calc(100dvh-8rem)] bg-black/70 rounded-lg p-8 text-center border border-[#e0aa62]/45">
+                <p className="brand-grad-text text-2xl font-bold">Camera unavailable</p>
+                <p className="mt-3 max-w-md text-sm text-[#ffe9c2]/75">
+                  Check camera permission and reconnect 6 before taking a photo.
+                </p>
               </div>
             ) : fallbackImagePreview ? (
               // User uploaded image preview
@@ -6094,7 +7034,7 @@ const LiveAvatarSessionComponent: React.FC<{
                 <button
                   type="button"
                   onClick={() => void confirmPendingPhoto()}
-                  disabled={isAnalyzingImage}
+                  disabled={isAnalyzingImage || mediaSessionBlocked}
                   className="rounded-full px-9 py-5 min-w-[11rem] min-h-[4rem] flex items-center justify-center gap-2.5 text-xl font-bold border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 text-[#e8b96a] shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] active:scale-95 disabled:opacity-70"
                   aria-label="Use this photo"
                 >
@@ -6107,7 +7047,7 @@ const LiveAvatarSessionComponent: React.FC<{
                 <button
                   type="button"
                   onClick={() => handleStartRecording()}
-                  disabled={!cameraStream || isAnalyzingImage}
+                  disabled={mediaSessionBlocked || !cameraStream || isAnalyzingImage}
                   className="rounded-full px-9 py-5 min-w-[11rem] min-h-[4rem] flex items-center justify-center gap-2.5 text-xl font-bold border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 text-[#e8b96a] shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] active:scale-95 disabled:opacity-70"
                   aria-label="Record video"
                 >
@@ -6139,10 +7079,11 @@ const LiveAvatarSessionComponent: React.FC<{
                 type="button"
                 onClick={() => void handleSnapPhoto()}
                 disabled={
+                  mediaSessionBlocked ||
                   isRecording ||
                   isAnalyzingImage ||
                   isProcessingCameraQuestion ||
-                  (!cameraStream && !fallbackImage)
+                  !cameraStream
                 }
                 className="rounded-full px-9 py-5 min-w-[11rem] min-h-[4rem] flex items-center justify-center gap-2.5 text-xl font-bold border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/95 to-[#130a03]/95 text-[#e8b96a] shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-[3px] drop-shadow-[0_3px_16px_rgba(30,14,0,0.9)] active:scale-95 disabled:opacity-70"
                 aria-label="Take photo"

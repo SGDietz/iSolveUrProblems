@@ -72,6 +72,7 @@ export type NotificationRow = {
   template_id: string;
   locale?: string | null;
   provider_id?: string | null;
+  idempotency_key?: string | null;
   status: NotificationStatus;
   error?: string | null;
   is_fallback?: boolean;

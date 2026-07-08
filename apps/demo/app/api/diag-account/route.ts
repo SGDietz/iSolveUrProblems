@@ -1,29 +1,53 @@
-import { NextRequest, NextResponse } from "next/server";
-import { checkRateLimit } from "../../../src/lib/rateLimit";
+import { NextResponse, type NextRequest } from "next/server";
+import { assertAllowedOrigin, truncateUtf8String } from "../../../src/lib/apiRouteSecurity";
 
-// Diagnostic breadcrumb sink for the voice-account smoke.
-//
-// We cannot open the app in a browser to read its console (loading the page mints
-// the avatar = real money), so the client POSTs breadcrumbs here and they print to
-// the server console — readable from the dev log (localhost) or the Vercel function
-// logs (preview). Gated on VERCEL_ENV, NOT NODE_ENV: Vercel preview runs as
-// NODE_ENV=production, so the old NODE_ENV gate 404'd on every preview smoke and we
-// got no breadcrumbs. VERCEL_ENV is "preview" on preview deploys and "production"
-// only on the real domain — so this logs on dev + preview, stays inert on prod.
-export async function POST(req: NextRequest) {
-  if (process.env.VERCEL_ENV === "production") {
-    return NextResponse.json({ ok: false }, { status: 404 });
+export const dynamic = "force-dynamic";
+export const maxDuration = 5;
+
+const MAX_KEYS = 24;
+const MAX_VALUE_CHARS = 160;
+
+function sanitizeValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return truncateUtf8String(value.replace(/\s+/g, " ").trim(), MAX_VALUE_CHARS);
   }
-  // Preview/dev only past this point — rate-limit so a runaway client can't
-  // flood the function logs (Herm release blocker #7).
-  const rateLimitErr = await checkRateLimit(req);
-  if (rateLimitErr) return rateLimitErr;
+  if (typeof value === "number" || typeof value === "boolean" || value === null) {
+    return value;
+  }
+  if (Array.isArray(value)) return `[array:${value.length}]`;
+  if (typeof value === "object") return "[object]";
+  return String(value).slice(0, MAX_VALUE_CHARS);
+}
+
+function sanitizePayload(raw: unknown): Record<string, unknown> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw).slice(0, MAX_KEYS)) {
+    const safeKey = truncateUtf8String(key.replace(/[^a-zA-Z0-9_.:-]/g, "_"), 64);
+    if (/token|secret|password|authorization|cookie|email|phone|name/i.test(safeKey)) {
+      out[safeKey] = "[redacted]";
+      continue;
+    }
+    out[safeKey] = sanitizeValue(value);
+  }
+  return out;
+}
+
+export async function POST(request: NextRequest) {
+  const originErr = assertAllowedOrigin(request);
+  if (originErr) return originErr;
+
+  let payload: unknown = null;
   try {
-    const body = await req.json();
-    // Single tagged line so it's easy to grep in the dev log.
-    console.log("[account-diag]", JSON.stringify(body));
+    payload = await request.json();
   } catch {
-    console.log("[account-diag] (unparseable body)");
+    payload = null;
   }
+
+  const env = process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "development";
+  if (env !== "production") {
+    console.info("[diag-account]", sanitizePayload(payload));
+  }
+
   return NextResponse.json({ ok: true });
 }

@@ -235,6 +235,7 @@
       },
       "todo": {
         "openCount": "{count} offen",
+        "showingCount": "Zeige {count} offen.",
         "empty": "Diese Liste ist leer.",
         "summaryAdded": "Hinzugefügt: {items}",
         "summaryCompleted": "Abgehakt: {items}",
@@ -257,6 +258,19 @@
           "sixSays": "Kurzer Hinweis von 6: Ich kann noch nicht mit ans Telefon — das Reden übernimmst du. Ich bleibe mit den Notizen genau hier, während du anrufst. Wenn ein Anrufbeantworter rangeht, sprich die Nachricht selbst auf. Erzähl mir danach, wie es lief.",
           "confirm": "Ja, jetzt anrufen",
           "cancel": "Noch nicht"
+        },
+        "emailConsent": {
+          "title": "{name} per E-Mail kontaktieren?",
+          "body": "6 sendet eine klare Einführung von iSolve, statt deine Mail-App zu öffnen.",
+          "disclosure": "Deine Konto-E-Mail wird geteilt, damit der Handwerker direkt antworten kann. Es wird nichts gesendet, bis du Ja tippst.",
+          "messageLabel": "Optionale Notiz",
+          "placeholder": "Beispiel: Ich brauche diese Woche Hilfe mit einem undichten Waschbecken.",
+          "confirm": "Ja, E-Mail senden",
+          "cancel": "Noch nicht",
+          "sending": "Wird gesendet…",
+          "sent": "Gesendet — sie können an deine Konto-E-Mail antworten.",
+          "failed": "E-Mail konnte noch nicht gesendet werden.",
+          "signInRequired": "Melde dich an, damit 6 von iSolve senden kann."
         },
         "cta": {
           "call": "Anrufen: {phone}",

@@ -235,6 +235,7 @@
       },
       "todo": {
         "openCount": "{count} open",
+        "showingCount": "Showing {count} open.",
         "empty": "This list is empty.",
         "summaryAdded": "Added: {items}",
         "summaryCompleted": "Checked off: {items}",
@@ -257,6 +258,19 @@
           "sixSays": "Heads-up from 6: I can't join phone calls yet, so the talking is all you. I'll stay right here with the notes while you call. If a machine answers, you leave the message yourself. Then come back and tell me how it went.",
           "confirm": "Yes, call now",
           "cancel": "Not yet"
+        },
+        "emailConsent": {
+          "title": "Email {name}?",
+          "body": "6 will send a clean intro from iSolve instead of opening your mail app.",
+          "disclosure": "Your account email is shared so the contractor can reply directly. Nothing sends until you tap Yes.",
+          "messageLabel": "Optional note",
+          "placeholder": "Example: I need help with a leaking sink this week.",
+          "confirm": "Yes, email them",
+          "cancel": "Not yet",
+          "sending": "Sending…",
+          "sent": "Sent — they can reply to your account email.",
+          "failed": "Email could not be sent yet.",
+          "signInRequired": "Sign in so 6 can send from iSolve."
         },
         "cta": {
           "call": "Call {phone}",

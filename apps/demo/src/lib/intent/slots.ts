@@ -141,6 +141,63 @@ export function collapseSpokenZip(text: string): string | undefined {
   return undefined;
 }
 
+// ASR filler must never become a search area (G ride 2026-07-07 16:15: the
+// utterance "painter near Okay, so" searched the directory for "Okay" and
+// returned NYC/Hanoi as "your area" — Herm TASK_146). A state token has to be
+// a REAL state; a candidate made entirely of filler words is rejected.
+const US_STATE_ALIASES: Record<string, true> = {
+  al: true, alabama: true, ak: true, alaska: true, az: true, arizona: true,
+  ar: true, arkansas: true, ca: true, california: true, co: true, colorado: true,
+  ct: true, connecticut: true, de: true, delaware: true, dc: true,
+  fl: true, florida: true, ga: true, georgia: true, hi: true, hawaii: true,
+  id: true, idaho: true, il: true, illinois: true, in: true, indiana: true,
+  ia: true, iowa: true, ks: true, kansas: true, ky: true, kentucky: true,
+  la: true, louisiana: true, me: true, maine: true, md: true, maryland: true,
+  ma: true, massachusetts: true, mi: true, michigan: true, mn: true, minnesota: true,
+  ms: true, mississippi: true, mo: true, missouri: true, mt: true, montana: true,
+  ne: true, nebraska: true, nv: true, nevada: true, nh: true, "new hampshire": true,
+  nj: true, "new jersey": true, nm: true, "new mexico": true, ny: true,
+  "new york": true, nc: true, "north carolina": true, nd: true, "north dakota": true,
+  oh: true, ohio: true, ok: true, oklahoma: true, or: true, oregon: true,
+  pa: true, pennsylvania: true, ri: true, "rhode island": true, sc: true,
+  "south carolina": true, sd: true, "south dakota": true, tn: true, tennessee: true,
+  tx: true, texas: true, ut: true, utah: true, vt: true, vermont: true,
+  va: true, virginia: true, wa: true, washington: true, wv: true,
+  "west virginia": true, wi: true, wisconsin: true, wy: true, wyoming: true,
+};
+
+const LOCATION_FILLER_WORDS = new Set([
+  "ok", "okay", "so", "um", "uh", "er", "yeah", "yep", "yes", "no", "nope",
+  "well", "like", "actually", "basically", "just", "all", "right", "alright",
+  "you", "know",
+]);
+
+function cleanLocationCandidate(raw: string): string | undefined {
+  const cleaned = raw
+    .replace(/^[\s"'“”]+|[\s"'“”,.;:!?]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return undefined;
+  const words = cleaned
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+  if (words.length > 0 && words.every((w) => LOCATION_FILLER_WORDS.has(w))) {
+    return undefined;
+  }
+  return cleaned;
+}
+
+function isUsStateToken(value: string | undefined): boolean {
+  if (!value) return false;
+  return Boolean(
+    US_STATE_ALIASES[value.toLowerCase().replace(/\./g, "").trim()],
+  );
+}
+
 /**
  * Raw location TEXT — NOT tied to KNOWN_CITIES. Lets us search + save ANY US
  * city or ZIP ("48 states first, then world"), even with no coords for it.
@@ -161,13 +218,22 @@ export function extractLocationText(text: string): string | undefined {
     "my", "our", "do", "done", "need", "want", "find",
     "looking", "yes", "no", "it", "its",
   ]);
-  const bareCityState = trimmed.match(
-    /^([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,3}(?:,\s*|\s+)[A-Za-z]{2}(?:\s+\d{5})?)$/,
+  // State can be a 2-letter code OR a spelled-out name ("Las Vegas, Nevada"
+  // — G's ride 2026-07-07), but it must be a REAL state: "Okay, so" looks
+  // like City+ST to the shape check and must die here (Herm TASK_146).
+  const bareForm = trimmed.replace(/[.!?]+$/, "").trim();
+  const bareCityState = bareForm.match(
+    /^([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,3})(?:,\s*|\s+)([A-Za-z]{2}|[A-Za-z]+(?:\s+[A-Za-z]+)?)(?:\s+(\d{5}))?$/,
   );
-  if (bareCityState) {
-    const first = (bareCityState[1].match(/^[A-Za-z']+/)?.[0] ?? "").toLowerCase();
-    if (!REJECT_LOC_FIRST.has(first)) {
-      return bareCityState[1].replace(/\s+/g, " ").trim();
+  if (bareCityState && isUsStateToken(bareCityState[2])) {
+    const city = cleanLocationCandidate(bareCityState[1]);
+    const first = (city?.match(/^[A-Za-z']+/)?.[0] ?? "").toLowerCase();
+    if (city && !REJECT_LOC_FIRST.has(first)) {
+      return [city, bareCityState[2].trim(), bareCityState[3]]
+        .filter(Boolean)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
     }
   }
   const bareZip = trimmed.match(/^(\d{5})$/);
@@ -176,7 +242,7 @@ export function extractLocationText(text: string): string | undefined {
   // "in / near / around / serving / out of / based in / located in / from
   //  <City>[ Word][ Word][, ST][ 12345]"
   const m = text.match(
-    /\b(?:in|near|around|serving|based\s+in|out\s+of|located\s+in|from)\s+([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2}(?:,\s*[A-Za-z]{2}(?![A-Za-z]))?(?:\s+\d{5})?)/i,
+    /\b(?:in|near|around|serving|based\s+in|out\s+of|located\s+in|from)\s+([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2}(?:,\s*(?:[A-Za-z]{2}(?![A-Za-z])|[A-Za-z]+(?:\s+[A-Za-z]+)?))?(?:\s+\d{5})?)/i,
   );
   if (m) {
     let raw = m[1].replace(/\s+/g, " ").trim();
@@ -188,6 +254,18 @@ export function extractLocationText(text: string): string | undefined {
       )
       .replace(/[.,]+$/g, "")
       .trim();
+    // ASR filler is never a place — "near Okay, so" must re-ask, not search
+    // (G ride 2026-07-07; Herm TASK_146).
+    raw = cleanLocationCandidate(raw) ?? "";
+    // A comma tail is only kept when it's a REAL state ("Las Vegas, Nevada",
+    // "Frederick, MD") — anything else is glued speech, keep just the city.
+    const commaSplit = raw.split(/\s*,\s*/);
+    if (commaSplit.length === 2) {
+      const tail = commaSplit[1].replace(/\s+\d{5}$/, "").trim();
+      if (tail && !isUsStateToken(tail)) {
+        raw = commaSplit[0].trim();
+      }
+    }
     // Reject obvious non-locations ("near the end of my rope", "in my
     // kitchen") without dropping real "The <City>" places. \b after each word
     // protects real cities (Kitchener, Homestead).

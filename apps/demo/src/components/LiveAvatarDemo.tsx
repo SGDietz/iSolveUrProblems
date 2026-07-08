@@ -223,7 +223,8 @@ export const LiveAvatarDemo = () => {
           <img
             src="/startscreen.png"
             alt="6"
-            className="absolute inset-0 h-full w-full object-cover object-top"
+            className="absolute inset-0 h-full w-full object-cover"
+            style={{ objectPosition: "center 8%" }}
           />
           {/* soft top scrim so the gold wordmark stays crisp over the tools */}
           <div className="pointer-events-none absolute inset-x-0 top-0 h-44 bg-gradient-to-b from-black/55 via-black/25 to-transparent" />

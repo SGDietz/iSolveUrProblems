@@ -33,6 +33,8 @@ export {
 export {
   listLists,
   createList,
+  renameList,
+  getListById,
   resolveTargetList,
   listOpenItems,
   addItems,

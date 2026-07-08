@@ -9,10 +9,12 @@ export const PILL_MAX_CHARS = 18;
 // token with a trailing \b so legit repair labels ("Sign Installation", "Log
 // Interior") are NOT killed — and hyphen/space forms (E-mail, Sign-In) + the
 // noun "Summary" are now caught. Leading \b keeps "Design"/"Logistics"/"Signal"
-// safe. Covers Email, E-mail, E Mail, Emailing, Summary, Zip-Code, Sign In,
-// Sign-In, Signin, Signing-In, Log In, Log-In, Login, Log Into.
+// safe. G live-ride addenda: provider labels must not cross into contact/call
+// lanes or destructive list actions. Covers Email, E-mail, E Mail, Emailing,
+// Summary, Zip-Code, Sign In, Sign-In, Signin, Signing-In, Log In, Log-In,
+// Login, Log Into, Call/Phone/Text/SMS, Delete List, Clear List, Remove List.
 const BLOCKED_PILL_RE =
-  /\b(?:contact\w*|remind\w*|notif\w*|e[-\s]?mail\w*|summar(?:y|i[sz]\w*)|change[-\s]?subject|confirm[-\s]?understanding|review[-\s]?key[-\s]?points|check[-\s]?understanding|zip[-\s]?code\w*|sign(?:ing)?[-\s]?in(?:to)?\b|log(?:ging)?[-\s]?in(?:to)?\b)/i;
+  /\b(?:contact\w*|remind\w*|notif\w*|call(?:ing)?\b|phone\w*|text(?:ing)?\b|sms\b|e[-\s]?mail\w*|summar(?:y|i[sz]\w*)|change[-\s]?subject|confirm[-\s]?understanding|review[-\s]?key[-\s]?points|check[-\s]?understanding|get[-\s]?help\b|zip[-\s]?code\w*|(?:delete|clear|remove)[-\s]?list\b|stop[-\s]?(?:the[-\s]?)?(?:project|task|session)|cancel[-\s]?(?:this|project|task|session)|end[-\s]?(?:the[-\s]?)?(?:project|task|session)|sign(?:ing)?[-\s]?in(?:to)?\b|log(?:ging)?[-\s]?in(?:to)?\b|claude|herm\b|kea\b)/i;
 
 const CONTROL_CHARS_RE = new RegExp(
   "[" +
@@ -37,6 +39,17 @@ const GENERIC_SUBJECT_SIGNAL_RE =
   /\b(?:fix|repair|replace|install|broken|stuck|leak(?:ing)?|clog(?:ged)?|crack(?:ed)?|paint|build|clean|mow|grass|yard|gutter|roof|plumb(?:er|ing)?|electric(?:al|ian)?|handy\s*man|contractor|pro|estimate|quote)\b/i;
 const GENERIC_SUBJECT_NOISE_RE =
   /\b(?:visually|visible|screen|chest|pill\s*boxes?|worked\s+great|great|thanks?|thank\s+you|okay|ok|perfect|nice)\b/i;
+const APP_UI_NOUN_RE =
+  /\b(?:app|interface|ui|screen|sheet|panel|drawer|card(?:s)?|button(?:s)?|pill\s*box(?:es)?|pills?|avatar|six|6|chest|camera\s+button|video\s+button|gallery\s+button)\b/i;
+const APP_UI_FEEDBACK_RE =
+  /\b(?:more|less|too|make|turn|bump|increase|decrease|bigger|smaller|larger|brown|light|brighter|darker|color|colour|splash|move|moving|animate|animation|wiggl(?:e|es|ing|y)|wigg(?:ing|in)|shak(?:e|es|ing)|shook|freak(?:s|ing|ed)?|fly(?:ing)?|crazy|fast|slow|tempo|text|font|size)\b/i;
+
+// Two or more media-button nouns moving together is app-UI talk ("camera and
+// gallery just shook together") — a single one ("my security camera is
+// shaking") stays a real repair subject. Mirrors the client-side gate.
+const MEDIA_CUE_NOUN_GLOBAL_RE = /\b(?:camera|video|gallery)\b/gi;
+const APP_UI_STANDALONE_FEEDBACK_RE =
+  /\b(?:more\s+(?:brown|light|color|colour)|(?:brown|light|color|colour)[-\s]*splash|text\s+size|make\s+(?:the\s+)?text\s+bigger)\b/i;
 
 type SubjectMatch = {
   subject: string;
@@ -64,6 +77,39 @@ const SUBJECT_PATTERNS: Array<[RegExp, SubjectMatch]> = [
   [/\b(?:contractors?|pros?|professionals?)\b/i, { subject: "Pros", kind: "task" }],
 ];
 
+// aiASAP-style safe fallback: when speech has no concrete subject, never mint
+// pills from filler words. Rotate clean action labels so the text still changes
+// without recreating "Fix Visually" / "Stop The Project" junk.
+const ACTION_DEFAULT_POOL: string[] = [
+  "Tell Me More",
+  "Show A Photo",
+  "What Is Wrong",
+  "Get Estimate",
+  "Find A Pro",
+  "Compare Pros",
+  "Fix It Myself",
+  "How Bad Is It",
+  "See My Options",
+  "What It Costs",
+  "Book A Visit",
+  "Ask A Question",
+];
+
+function rotatingActionDefaults(seedText: string, avoid: string[] = []): string[] {
+  let seed = 0;
+  for (let i = 0; i < seedText.length; i += 1) {
+    seed = (seed * 31 + seedText.charCodeAt(i)) & 0xffff;
+  }
+  const avoidLower = new Set(avoid.map((item) => item.toLowerCase()));
+  const picked: string[] = [];
+  const start = ACTION_DEFAULT_POOL.length ? seed % ACTION_DEFAULT_POOL.length : 0;
+  for (let i = 0; i < ACTION_DEFAULT_POOL.length && picked.length < 3; i += 1) {
+    const pill = ACTION_DEFAULT_POOL[(start + i) % ACTION_DEFAULT_POOL.length];
+    if (!avoidLower.has(pill.toLowerCase())) picked.push(pill);
+  }
+  return sanitizePills(picked) ?? ACTION_DEFAULT_POOL.slice(0, 3);
+}
+
 export type PromptBrainInput = {
   latestUserText: string;
   recentUserTexts?: string[];
@@ -79,6 +125,37 @@ export function cleanPromptBrainText(raw: unknown, cap = MAX_TEXT): string {
         .trim()
         .slice(0, cap)
     : "";
+}
+
+// DEVICE/CONNECTION context is not a home/garden subject (G 13:11 ride:
+// "now I'm on my computer" minted "Fix Computer / Get Help"). Shared
+// predicate so BOTH the client gate and the route/tests hit the same logic
+// (Herm TASK_144 Patch B). A repair signal ("my computer desk is broken")
+// keeps the turn alive.
+const DEVICE_CONTEXT_RE =
+  /\b(?:(?:i'?m|i\s+am|we'?re|we\s+are|now|back)?\s*(?:on|using|at)\s+(?:my|the)?\s*(?:computer|laptop|desktop|phone|ipad|tablet)|(?:no|without|lost|don'?t\s+have)\s+(?:internet|wi[- ]?fi|connection|access)|(?:my|the)\s+(?:phone|computer|laptop|desktop|ipad|tablet)\s+(?:is\s+)?(?:working|connected|back|on))\b/i;
+
+const DEVICE_REPAIR_SIGNAL_RE =
+  /\b(?:fix|repair|replace|install|broken|stuck|leak(?:ing)?|clog(?:ged)?|crack(?:ed)?|paint|build|clean|mow|grass|yard|gutter|roof|plumb(?:er|ing)?|electric(?:al|ian)?|handy\s*man|contractor|pro|estimate|quote|desk|chair|table|appliance|door|window|wall|floor)\b/i;
+
+// G narrates dev instructions to his agents BY NAME mid-ride ("So Claude, I
+// want to make these letters bigger") — those turns minted "Fix Claude" /
+// "Show Claude" pills (live-ride 19:40). Agent-name turns are dev meta-talk,
+// never a repair subject.
+const AGENT_NAME_RE = /\b(?:claude|herm|herman)\b/i;
+
+export function isPromptBrainContextOnlyText(raw: unknown): boolean {
+  const text = cleanPromptBrainText(raw, 300);
+  if (!text) return false;
+  if (AGENT_NAME_RE.test(text)) return true;
+  if (DEVICE_REPAIR_SIGNAL_RE.test(text)) return false;
+  const mediaNounCount = text.match(MEDIA_CUE_NOUN_GLOBAL_RE)?.length ?? 0;
+  return Boolean(
+    DEVICE_CONTEXT_RE.test(text) ||
+      (APP_UI_NOUN_RE.test(text) && APP_UI_FEEDBACK_RE.test(text)) ||
+      (mediaNounCount >= 2 && APP_UI_FEEDBACK_RE.test(text)) ||
+      APP_UI_STANDALONE_FEEDBACK_RE.test(text),
+  );
 }
 
 function titleCaseWords(raw: string): string {
@@ -133,7 +210,7 @@ function stripNegatedSubjectClauses(text: string): string {
 
 function findSubject(text: string): SubjectMatch | null {
   const clean = stripNegatedSubjectClauses(cleanPromptBrainText(text, 300));
-  if (!clean || SUBJECT_STOP_RE.test(clean)) return null;
+  if (!clean || SUBJECT_STOP_RE.test(clean) || isPromptBrainContextOnlyText(clean)) return null;
   for (const [re, match] of SUBJECT_PATTERNS) {
     if (re.test(clean)) return match;
   }
@@ -183,26 +260,27 @@ export function derivePromptBrainSubject(input: PromptBrainInput): string {
   return "";
 }
 
-export function buildPromptBrainFallback(input: PromptBrainInput): string[] | null {
+export function buildPromptBrainFallback(input: PromptBrainInput): string[] {
   const latest = cleanPromptBrainText(input.latestUserText);
   const subjectText = derivePromptBrainSubject(input) || latest;
   const match = findSubject(subjectText) ?? findSubject(latest);
-  // Generic-only matches never mint a pill set (Herm TASK_106) — better to
-  // keep the pills we have than ship "Fix Worked Great".
-  if (!match || match.generic) return null;
 
-  const candidates =
-    match.kind === "trade"
-      ? [`Find ${match.trade ?? match.subject}`, "Get Estimate", "Compare Pros"]
-      : match.kind === "task"
-        ? [
-            match.subject === "Estimate" ? "Get Estimate" : "Find Pros",
-            "Compare Pros",
-            "Next Step",
-          ]
-        : [`Fix ${match.subject}`, `Find ${match.trade ?? "Help"}`, "Show Me How"];
+  if (match && !match.generic) {
+    const candidates =
+      match.kind === "trade"
+        ? [`Find ${match.trade ?? match.subject}`, "Get Estimate", "Compare Pros"]
+        : match.kind === "task"
+          ? [
+              match.subject === "Estimate" ? "Get Estimate" : "Find Pros",
+              "Compare Pros",
+              "Next Step",
+            ]
+          : [`Fix ${match.subject}`, `Find ${match.trade ?? "Help"}`, "Show Me How"];
+    const built = sanitizePills([...candidates, "Next Step", "Find Help", "Show Me How"]);
+    if (built) return built;
+  }
 
-  return sanitizePills([...candidates, "Next Step", "Find Help", "Show Me How"]);
+  return rotatingActionDefaults(subjectText || latest || "start", input.currentPrompts ?? []);
 }
 
 export function buildPromptBrainUserMessage(input: PromptBrainInput): string {

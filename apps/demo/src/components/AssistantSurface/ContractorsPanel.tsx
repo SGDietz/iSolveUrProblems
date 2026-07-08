@@ -33,6 +33,10 @@ const DIRECTIONS: Array<{ wx: string; wy: string }> = [
 
 type CardMotion = { wx: string; wy: string; wrot: string; delayMs: number };
 
+type ContractorEmailOutcome =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
 function rollMotions(count: number): CardMotion[] {
   let lastDir = -1;
   return Array.from({ length: count }, (_, i) => {
@@ -60,16 +64,6 @@ function checkThemOutUrl(hit: { website: string | null; name: string }): string 
   return `https://www.google.com/maps/search/${encodeURIComponent(hit.name)}`;
 }
 
-/** Bare domain for the small under-CTA line (Herm TASK_086 card v1). */
-function websiteDomain(url: string | null): string | null {
-  if (!url) return null;
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
-}
-
 export function ContractorsPanel({
   hits,
   totalConsidered,
@@ -87,6 +81,11 @@ export function ContractorsPanel({
   // honest heads-up (6 can't join calls yet; Herm TASK_086 ruling: never
   // promise a 3-way) and the voicemail rule (the human leaves the message).
   const [pendingCall, setPendingCall] = useState<ContractorCard | null>(null);
+  const [pendingEmail, setPendingEmail] = useState<ContractorCard | null>(null);
+  const [emailMessage, setEmailMessage] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailOutcome, setEmailOutcome] =
+    useState<ContractorEmailOutcome | null>(null);
 
   // Every call intent and website tap is COUNTED in app_events (G order
   // 2026-07-02: "if people get the number and just call themselves, we're
@@ -121,6 +120,70 @@ export function ContractorsPanel({
     setPendingCall(null);
   };
 
+  const openEmailConsent = (hit: ContractorCard) => {
+    pingAppEvent("contractor_email_consent_open", {
+      contractorId: hit.id,
+      context: { name: hit.name },
+    });
+    setEmailMessage("");
+    setEmailOutcome(null);
+    setPendingEmail(hit);
+  };
+
+  const dismissEmailConsent = () => {
+    if (pendingEmail) {
+      pingAppEvent("contractor_email_consent_dismiss", {
+        contractorId: pendingEmail.id,
+      });
+    }
+    setPendingEmail(null);
+    setEmailBusy(false);
+    setEmailOutcome(null);
+  };
+
+  const confirmEmailIntro = async () => {
+    if (!pendingEmail || emailBusy) return;
+    setEmailBusy(true);
+    setEmailOutcome(null);
+    try {
+      const res = await fetch(
+        `/api/contractors/${encodeURIComponent(pendingEmail.id)}/email-intent`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: emailMessage }),
+        },
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !data.ok) {
+        setEmailOutcome({
+          ok: false,
+          message:
+            data.error ??
+            (res.status === 401
+              ? t("emailConsent.signInRequired")
+              : t("emailConsent.failed")),
+        });
+        return;
+      }
+      pingAppEvent("contractor_email_consent_yes", {
+        contractorId: pendingEmail.id,
+        context: { name: pendingEmail.name },
+      });
+      setEmailOutcome({ ok: true, message: t("emailConsent.sent") });
+    } catch (e) {
+      setEmailOutcome({
+        ok: false,
+        message: e instanceof Error ? e.message : t("emailConsent.failed"),
+      });
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
   // One chaos roll per result set — stable across re-renders of the same
   // hits, fresh directions on every new search.
   const motions = useMemo(() => rollMotions(hits.length), [hits]);
@@ -152,9 +215,7 @@ export function ContractorsPanel({
   const nameSize = compact ? "text-[0.9rem]" : "text-[1.02rem]";
   const metaSize = compact ? "text-[10px]" : "text-[11px]";
   const starSize = compact ? "text-xs" : "text-sm";
-  const phoneSize = compact ? "text-xs" : "text-sm";
   const badgeSize = compact ? "text-[9px]" : "text-[10px]";
-  const domainSize = compact ? "text-[9px]" : "text-[10px]";
   const ctaPadding = compact ? "py-1.5" : "py-2";
   const ctaSize = compact ? "text-[11px]" : "text-xs";
 
@@ -198,46 +259,37 @@ export function ContractorsPanel({
                 (G screenshot order 2026-07-02 evening: "a lot of open space"
                 — two dense lines instead of four). */}
             <div className="flex flex-wrap items-baseline gap-x-2">
-              <h3 className={`brand-grad-text ${nameSize} font-black leading-tight`}>
+              {/* Name IS the website link (whole card is clickable) — underline
+                  it so the link reads (G screenshot 2026-07-06: "Hardy Plumbing
+                  should have a line under it, it should be the website itself"). */}
+              <h3 className={`brand-grad-text ${nameSize} font-black leading-tight underline decoration-[#e0aa62]/60 underline-offset-2`}>
                 {hit.name}
               </h3>
-              {hit.rating_count != null && (
-                <span className={`${metaSize} text-[#e8b96a]/75`}>
-                  {hit.rating_count.toLocaleString()} reviews
+              {/* Reviews hug the star on the right (G screenshot 2026-07-06 red
+                  arrow: "63 reviews should be near the star, all three"). */}
+              <span className="ml-auto flex shrink-0 items-baseline gap-x-1.5">
+                {hit.rating_count != null && (
+                  <span className={`${metaSize} text-[#e8b96a]/75`}>
+                    {hit.rating_count.toLocaleString()} reviews
+                  </span>
+                )}
+                <span className={`${starSize} font-bold text-[#ffd98a]`}>
+                  {hit.rating_avg != null ? `★ ${hit.rating_avg.toFixed(1)}` : "★ —"}
                 </span>
-              )}
-              <span className={`ml-auto shrink-0 ${starSize} font-bold text-[#ffd98a]`}>
-                {hit.rating_avg != null ? `★ ${hit.rating_avg.toFixed(1)}` : "★ —"}
               </span>
             </div>
             {/* Line 2 — area left (the nearby-fill honesty anchor, Herm
                 TASK_086) + phone right, "towards the star". The number is
                 the ONLY tap that doesn't go to the website: it opens the
                 call-consent sheet. */}
-            {(hit.area_label || hit.phone) && (
+            {/* Area line — the honest city/state/ZIP. Phone REMOVED from here
+                (G screenshot 2026-07-06: "you've got the phone number at two
+                different places"); it now lives ONLY in the Call pillbox. */}
+            {hit.area_label && (
               <div className="flex flex-wrap items-center gap-x-2">
-                {/* The card shows the real city/state/ZIP — that IS the
-                    honest location. G iPad smoke 2026-07-03: "Same area,
-                    distance unknown. That should not be there." Suffix
-                    removed; the brain (contextInjector) still knows not to
-                    call these exact-local, so no dishonesty is introduced. */}
-                {hit.area_label && (
-                  <span className={`${metaSize} font-semibold text-[#f1c477]/80`}>
-                    {hit.area_label}
-                  </span>
-                )}
-                {hit.phone && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openConsent(hit);
-                    }}
-                    className={`ml-auto font-mono ${phoneSize} font-bold text-[#ffe9c2] underline decoration-[#e0aa62]/50 underline-offset-2 active:brightness-90`}
-                  >
-                    {hit.phone}
-                  </button>
-                )}
+                <span className={`${metaSize} font-semibold text-[#f1c477]/80`}>
+                  {hit.area_label}
+                </span>
               </div>
             )}
             {(hit.distance_km > 0 ||
@@ -273,14 +325,10 @@ export function ContractorsPanel({
                 )}
               </div>
             )}
-            {/* Pillbox CTAs REMOVED (G screenshot order 2026-07-02 evening:
-                "Call the top one — what the hell is that?"). The whole card
-                is the website link now; the domain line is the visible cue. */}
-            {websiteDomain(hit.website) && (
-              <div className={`mt-1 text-center ${domainSize} font-semibold text-[#f1c477]/80 underline decoration-[#e0aa62]/40 underline-offset-2`}>
-                {websiteDomain(hit.website)}
-              </div>
-            )}
+            {/* Domain line REMOVED (G screenshot 2026-07-06: X'd out the
+                "callhardyplumbing.com" — "no website down there; Hardy Plumbing
+                should BE the link, without the website name"). The underlined
+                company name up top is the website link now. */}
             {/* Line-only email REMOVED (Herm TASK_098 polish: it duplicated
                 the Email pill below and crowded the card). The CTA pill is
                 the one email affordance now. */}
@@ -314,7 +362,7 @@ export function ContractorsPanel({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      window.location.href = `mailto:${hit.email}`;
+                      openEmailConsent(hit);
                     }}
                     className={`flex items-center justify-center rounded-full border-2 border-[#e0aa62]/70 bg-gradient-to-b from-[#341d07] to-[#130a03] ${ctaPadding} ${ctaSize} font-black tracking-wide text-[#f1c477] shadow-[inset_0_1px_6px_rgba(255,255,255,0.08),0_6px_16px_rgba(0,0,0,0.45)] active:brightness-90`}
                   >
@@ -370,6 +418,68 @@ export function ContractorsPanel({
               >
                 {t("callConsent.confirm")}
               </a>
+            </div>
+          </div>
+        </div>
+      )}
+      {pendingEmail?.email && (
+        <div
+          className="fixed inset-0 z-[999] flex items-end justify-center bg-black/60 p-4 backdrop-blur-[2px] sm:items-center"
+          onClick={dismissEmailConsent}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="w-full max-w-sm rounded-2xl border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07] to-[#130a03] px-4 py-4 shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_14px_40px_rgba(0,0,0,0.6)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="brand-grad-text text-lg font-black leading-tight">
+              {t("emailConsent.title", { name: pendingEmail.name })}
+            </h3>
+            <p className="mt-1 text-xs font-semibold text-[#f1c477]/90">
+              {t("emailConsent.body")}
+            </p>
+            <p className="mt-2 rounded-xl border border-[#e0aa62]/40 bg-black/25 px-3 py-2 text-xs leading-relaxed text-[#ffe9c2]/90">
+              {t("emailConsent.disclosure")}
+            </p>
+            <label className="mt-3 flex flex-col gap-1 text-xs font-semibold text-[#f1c477]/90">
+              {t("emailConsent.messageLabel")}
+              <textarea
+                value={emailMessage}
+                onChange={(e) => setEmailMessage(e.target.value.slice(0, 500))}
+                placeholder={t("emailConsent.placeholder")}
+                rows={3}
+                className="resize-none rounded-xl border border-[#e0aa62]/45 bg-black/25 px-3 py-2 text-xs font-medium text-[#ffe9c2] outline-none placeholder:text-[#e8b96a]/45 focus:border-[#ffd98a]"
+              />
+            </label>
+            {emailOutcome && (
+              <p
+                className={`mt-2 rounded-xl border px-3 py-2 text-xs font-semibold ${
+                  emailOutcome.ok
+                    ? "border-emerald-300/40 bg-emerald-500/10 text-emerald-100"
+                    : "border-red-300/40 bg-red-500/10 text-red-100"
+                }`}
+              >
+                {emailOutcome.message}
+              </p>
+            )}
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={dismissEmailConsent}
+                disabled={emailBusy}
+                className="btn-inset flex items-center justify-center rounded-full py-2 text-xs font-bold tracking-wide active:brightness-90 disabled:opacity-60"
+              >
+                {t("emailConsent.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={confirmEmailIntro}
+                disabled={emailBusy || emailOutcome?.ok === true}
+                className="flex items-center justify-center rounded-full bg-gradient-to-b from-[#ffe9c2] via-[#d7a05a] to-[#9e6a35] py-2 text-xs font-black tracking-wide text-[#2a1606] shadow-[inset_0_1px_0_rgba(255,255,255,0.5),0_6px_16px_rgba(0,0,0,0.45)] active:brightness-90 disabled:opacity-60"
+              >
+                {emailBusy ? t("emailConsent.sending") : t("emailConsent.confirm")}
+              </button>
             </div>
           </div>
         </div>

@@ -1,6 +1,11 @@
 "use client";
 
 import { create } from "zustand";
+import {
+  TODO_TEXT_SIZE_MAX_LEVEL,
+  TODO_TEXT_SIZE_STORAGE_KEY,
+  loadTodoTextSizeLevel,
+} from "../uiSize";
 import type {
   AppointmentSurfacePayload,
   CallPayload,
@@ -36,6 +41,11 @@ import type {
 type AssistantSurfaceState = {
   variant: SurfaceVariant | null;
   isOpen: boolean;
+  /** SUP #22 — voice-adjustable list text size ("make the text bigger").
+   *  Indexes TODO_TEXT_SIZE_CLASSES; persisted per device. */
+  todoTextSizeLevel: number;
+  /** Returns true when the level actually changed (false at min/max). */
+  bumpTodoTextSizeLevel: (delta: -1 | 1) => boolean;
 
   // Mutators
   showContractors: (
@@ -65,6 +75,27 @@ type AssistantSurfaceState = {
 export const useAssistantSurface = create<AssistantSurfaceState>((set) => ({
   variant: null,
   isOpen: false,
+  todoTextSizeLevel: loadTodoTextSizeLevel(),
+
+  bumpTodoTextSizeLevel: (delta) => {
+    let changed = false;
+    set((state) => {
+      const next = Math.max(
+        0,
+        Math.min(TODO_TEXT_SIZE_MAX_LEVEL, state.todoTextSizeLevel + delta),
+      );
+      changed = next !== state.todoTextSizeLevel;
+      if (changed && typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(TODO_TEXT_SIZE_STORAGE_KEY, String(next));
+        } catch {
+          /* size still applies for this session */
+        }
+      }
+      return changed ? { todoTextSizeLevel: next } : state;
+    });
+    return changed;
+  },
 
   showContractors: (hits, total_considered = hits.length) =>
     set({

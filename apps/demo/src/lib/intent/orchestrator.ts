@@ -39,6 +39,8 @@ import {
   findClaimedContractorId,
   listLists,
   listOpenItems,
+  renameList,
+  getListById,
   resolveTargetList,
   resolveListPick,
   setItemStatus,
@@ -48,6 +50,10 @@ import {
   type ListRow,
 } from "../lists";
 import { getSupabaseAdminConfig } from "../supabaseAdmin";
+import {
+  captureFeatureRequest,
+  detectFeatureRequestCapture,
+} from "../featureRequests";
 import { classifyIntent } from "./classify";
 import {
   cleanForContext,
@@ -173,6 +179,14 @@ export type SurfaceSnapshot = {
     | null;
   /** Ordered as displayed in the drawer. Empty for non-list variants. */
   contractorIds: string[];
+  /** Visible todo/list snapshot. Used for local-only guest list follow-ups
+   *  where there is no DB row to reopen. */
+  todo?: {
+    list_id: string;
+    list_title: string;
+    items: Array<{ id: string; title: string; position: number }>;
+    transient?: boolean;
+  };
   /**
    * Carryover state when current surface is the deliberation compare panel.
    * Lets multi-turn refinement accumulate constraints without losing the
@@ -605,6 +619,32 @@ async function searchPersistedNearbyContractorsByZip(args: {
   }
 }
 
+// Post-merge requested-area check (Herm TASK_146): mirrors liveFind's guard
+// but also covers PERSISTED rows (a poisoned earlier scrape lives in the
+// forever DB). Coords beat text; ZIP prefix beats city words; no location
+// spoken = no filtering (the wrapper already refuses "local" claims then).
+function contractorHitMatchesRequestedArea(
+  hit: CardAnnotatedHit,
+  locationText?: string | null,
+  near?: { lat: number; lng: number } | null,
+): boolean {
+  if (!locationText) return true;
+  if (near && hit.distance_km > 0) return hit.distance_km <= 160;
+  const zip = locationText.match(/\b\d{5}\b/)?.[0];
+  if (zip) return Boolean(hit.zip?.startsWith(zip.slice(0, 3)));
+  const wanted = locationText
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !["near", "the", "and", "for"].includes(w));
+  const area = [hit.city, hit.state, hit.zip, hit.address]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return wanted.length > 0 && wanted.some((w) => area.includes(w));
+}
+
 async function handleFindContractor(args: {
   slots: IntentSlots;
   snapshot?: SurfaceSnapshot;
@@ -708,10 +748,25 @@ async function handleFindContractor(args: {
   ]);
 
   const liveHits = !live.error ? live.hits : [];
-  let merged: CardAnnotatedHit[] = dedupeContractorHits([
-    ...persistedHits,
-    ...liveHits,
-  ]).slice(0, CONTRACTOR_CARD_TARGET_COUNT);
+  const mergedRaw = dedupeContractorHits([...persistedHits, ...liveHits]);
+  // Second area guard AFTER merge (Herm TASK_146): persisted-cache rows from
+  // an earlier poisoned scrape (the 2026-07-07 "Okay, so" ride saved NYC +
+  // Hanoi rows into the forever DB) must never resurface as "your area".
+  const areaChecked = locationText
+    ? mergedRaw.filter((h) =>
+        contractorHitMatchesRequestedArea(h, locationText, near),
+      )
+    : mergedRaw;
+  if (locationText && mergedRaw.length > 0 && areaChecked.length === 0) {
+    return {
+      contextMessage: `[FIND — not spoken by user] The directory returned pros, but their cities did not match "${cleanForContext(locationText)}". In first person as 6, say you need the city or ZIP one more time before pulling local pros. Do NOT name the mismatched businesses.`,
+      pending: { kind: "find", category },
+    };
+  }
+  let merged: CardAnnotatedHit[] = areaChecked.slice(
+    0,
+    CONTRACTOR_CARD_TARGET_COUNT,
+  );
 
   // 3-card minimum (G "boom boom boom"): thin live/exact-ZIP supply fills
   // from persisted NEARBY rows, explicitly labeled — never passed off as
@@ -749,6 +804,9 @@ async function handleFindContractor(args: {
         category,
         location_text: locationText,
         hits,
+        // Every card here passed the requested-area check above (nearby-fill
+        // rows are ZIP-prefix-safe and keep their own honesty label).
+        area_verified: Boolean(locationText),
       }),
     };
   }
@@ -1608,8 +1666,19 @@ function guestTodoVariant(args: {
 // lists are sign-in-only. 6 must NEVER promise saving to an anonymous user —
 // the guest list shows on screen as temporary, and the honest line names
 // the exact path to keep it.
+// G ride 2026-07-07 (ENRAGED, 3 sessions running): the save-pitch fired on
+// EVERY guest list turn — "that feels like a trap... don't fucking say that."
+// His exact order: just make the list; say ONCE, casually, that it's for this
+// session and an account saves it — then drop it. The pitch rides ONLY on
+// list-OPEN turns (SIGN_IN_FALLBACK); every other guest list action uses the
+// QUIET lines and never mentions saving. The card's own banner already shows
+// the persistence note visually.
 const SIGN_IN_FALLBACK =
-  "the list is visible on screen as a TEMPORARY local list — it is NOT saved permanently. Never claim it was saved. Tell the user plainly: \"I can show it here for this session, but to save it for next time, set up your account — just tell me your email.\"";
+  "the list lives on screen for THIS session. Never claim it was saved. Once, casually, somewhere natural in your reply — never as a condition — you may mention that if they ever want it kept for next time, they can just tell you their email. Then drop the subject. NEVER repeat that offer on later turns, never push an account.";
+const GUEST_LIST_QUIET =
+  "the on-screen list is updated. Do NOT mention saving, accounts, email, or the list being temporary — that was said once already. Just confirm the change naturally, in first person as 6, one short sentence.";
+const GUEST_NO_LIST_QUIET =
+  "there's no list on screen to change — in first person as 6, ask what they'd like to put on a fresh list. Do NOT mention accounts or saving.";
 
 /** Shared open of the spoken-command target list. Fail-soft null.
  * createIfMissing: only ADD commands may create a list on the fly —
@@ -1638,6 +1707,39 @@ async function openTargetList(args: {
   return { list, items };
 }
 
+async function openMutationTargetList(args: {
+  user_id: string;
+  list_name?: string;
+  snapshot?: SurfaceSnapshot;
+}): Promise<{
+  list: ListRow;
+  items: ListItemRow[];
+} | null> {
+  if (
+    args.snapshot?.kind === "todo" &&
+    args.snapshot.todo &&
+    !args.snapshot.todo.transient &&
+    !args.list_name
+  ) {
+    const list = await getListById({
+      user_id: args.user_id,
+      list_id: args.snapshot.todo.list_id,
+    });
+    if (list) {
+      const items = await listOpenItems({
+        list_id: list.id,
+        user_id: args.user_id,
+      });
+      return { list, items };
+    }
+  }
+  return openTargetList({
+    user_id: args.user_id,
+    list_name: args.list_name,
+    createIfMissing: false,
+  });
+}
+
 const NO_SUCH_LIST_FALLBACK =
   "no list by that name (and nothing to do without one) — tell the user which lists they have or offer to start one";
 
@@ -1664,6 +1766,70 @@ async function handlePendingListPick(
     classification,
     variant: r.variant,
     contextMessage: r.contextMessage,
+  };
+}
+
+// G live-ride 2026-07-06 ("call this list Contractors Needed... 6 should be
+// able to change it for the user"). Renames the CURRENTLY OPEN list. Signed-in
+// users hit Supabase; local-only guest lists rename from the visible snapshot so
+// the command works before account setup too.
+async function handleRenameTodo(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+  snapshot?: SurfaceSnapshot;
+}): Promise<{ contextMessage: string; variant?: SurfaceVariant }> {
+  const newTitle = args.slots.list_name?.trim();
+  if (!newTitle) {
+    return {
+      contextMessage: wrapFallback(
+        "no new list name was caught — ask the user, in first person as 6, what they want to call it",
+      ),
+    };
+  }
+  if (!args.user_id) {
+    if (args.snapshot?.kind === "todo" && args.snapshot.todo?.transient) {
+      return {
+        variant: guestTodoVariant({
+          titles: args.snapshot.todo.items.map((item) => item.title),
+          listName: newTitle,
+        }),
+        contextMessage: wrapFallback(
+          `the on-screen list is now named "${newTitle}" — confirm this back to the user in first person as 6, one short sentence. Do NOT mention saving, accounts, or email (G 2026-07-07: the save-pitch on every list turn reads as a trap).`,
+        ),
+      };
+    }
+    return {
+      contextMessage: wrapFallback(GUEST_NO_LIST_QUIET),
+    };
+  }
+  const opened = await openTargetList({
+    user_id: args.user_id,
+    createIfMissing: false,
+  });
+  if (!opened) {
+    return {
+      contextMessage: wrapFallback(
+        "there's no open list to rename — tell the user, in first person as 6, to make a list first",
+      ),
+    };
+  }
+  const renamed = await renameList({
+    user_id: args.user_id,
+    list_id: opened.list.id,
+    title: newTitle,
+  });
+  if (!renamed) {
+    return {
+      contextMessage: wrapFallback(
+        `rename failed on the server — the list is still called "${opened.list.title}", tell the user honestly`,
+      ),
+    };
+  }
+  return {
+    variant: todoVariant(renamed, opened.items, {}),
+    contextMessage: wrapFallback(
+      `the list is now named "${renamed.title}" — confirm this back to the user in first person as 6, briefly`,
+    ),
   };
 }
 
@@ -1713,8 +1879,17 @@ async function handleAddTodo(args: {
         changed: { added: titles },
       }),
       contextMessage: wrapFallback(
-        `${SIGN_IN_FALLBACK} These items are on the screen list now: ${titles.join(", ")}.`,
+        `${GUEST_LIST_QUIET} These items are on the screen list now: ${titles.join(", ")}.`,
       ),
+      // Keep the "add more" window open (G live-ride 2026-07-06: saying 4
+      // things in a row after the list opened only caught the first one —
+      // this re-arms pendingListAdd after EVERY successful add, not just
+      // when zero items were caught, so casual "I need a lawn cutter" keeps
+      // landing turn after turn while the list stays on screen).
+      pending: {
+        kind: "list_add",
+        listName: args.slots.list_name ?? null,
+      },
     };
   }
   if (titles.length === 0) {
@@ -1761,6 +1936,9 @@ async function handleAddTodo(args: {
         listTitle: opened.list.title,
         openCount: opened.items.length,
       }),
+      // Same "keep adding" re-arm as the fresh-add branch below — a dedupe
+      // hit is still mid-conversation, not the end of it.
+      pending: { kind: "list_add", listName: opened.list.title },
     };
   }
   return {
@@ -1773,6 +1951,12 @@ async function handleAddTodo(args: {
       listTitle: opened.list.title,
       openCount: opened.items.length + inserted.length,
     }),
+    // Keep the "add more" window open (G live-ride 2026-07-06: saying 4
+    // things in a row after the list opened only caught the first one — this
+    // re-arms pendingListAdd after EVERY successful add, not just when zero
+    // items were caught, so casual "I need a lawn cutter" keeps landing turn
+    // after turn while the list stays on screen).
+    pending: { kind: "list_add", listName: opened.list.title },
   };
 }
 
@@ -1819,6 +2003,59 @@ async function handleViewTodos(args: {
   };
 }
 
+async function handleInspectTodo(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+  snapshot?: SurfaceSnapshot;
+}): Promise<{ contextMessage: string; variant?: SurfaceVariant }> {
+  const ref = args.slots.todo_ref;
+  if (!ref) {
+    return {
+      contextMessage: wrapFallback(
+        "couldn't tell which list item they asked about — ask which number",
+      ),
+    };
+  }
+
+  if (args.snapshot?.kind === "todo" && args.snapshot.todo) {
+    const target = resolveVisibleItemRef(ref, args.snapshot.todo.items);
+    if (target) {
+      return {
+        contextMessage: [
+          `[LIST ITEM LOOKUP — not spoken by user]`,
+          `The visible list item #${target.position} is: ${cleanForContext(target.title)}.`,
+          `Respond as 6 in first person with one short sentence. Do not say INTENT NOT ACTIONABLE. Do not treat this as a contractor card. Do not mention saving, accounts, or email.`,
+        ].join("\n"),
+      };
+    }
+  }
+
+  if (args.user_id) {
+    const opened = await openMutationTargetList({
+      user_id: args.user_id,
+      list_name: args.slots.list_name,
+      snapshot: args.snapshot,
+    });
+    const target = opened ? resolveItemRef(ref, opened.items) : null;
+    if (opened && target) {
+      return {
+        variant: todoVariant(opened.list, opened.items),
+        contextMessage: [
+          `[LIST ITEM LOOKUP — not spoken by user]`,
+          `The ${cleanForContext(opened.list.title)} list item #${target.position} is: ${cleanForContext(target.title)}.`,
+          `Respond as 6 in first person with one short sentence. Do not say INTENT NOT ACTIONABLE.`,
+        ].join("\n"),
+      };
+    }
+  }
+
+  return {
+    contextMessage: wrapFallback(
+      "couldn't match that number to a visible list item — read the visible list and ask which item",
+    ),
+  };
+}
+
 async function handleViewLists(args: {
   user_id: string | null;
 }): Promise<{ contextMessage: string; entries: ListIndexEntry[] }> {
@@ -1833,11 +2070,13 @@ async function handleViewLists(args: {
   };
 }
 
-/** Resolve a todo_ref (ordinal or text) against the spoken-order items. */
-function resolveItemRef(
+/** Resolve a visible todo_ref (ordinal or text) against card order. */
+type VisibleTodoItem = { id: string; title: string; position: number };
+
+function resolveVisibleItemRef(
   ref: NonNullable<IntentSlots["todo_ref"]>,
-  items: ListItemRow[],
-): ListItemRow | null {
+  items: VisibleTodoItem[],
+): VisibleTodoItem | null {
   if (ref.type === "ordinal") {
     return items[ref.position - 1] ?? null;
   }
@@ -1850,13 +2089,25 @@ function resolveItemRef(
   );
 }
 
+/** Resolve a todo_ref (ordinal or text) against the spoken-order items. */
+function resolveItemRef(
+  ref: NonNullable<IntentSlots["todo_ref"]>,
+  items: ListItemRow[],
+): ListItemRow | null {
+  return resolveVisibleItemRef(ref, items) as ListItemRow | null;
+}
+
+function transientTodoSnapshot(snapshot?: SurfaceSnapshot) {
+  return snapshot?.kind === "todo" && snapshot.todo?.transient
+    ? snapshot.todo
+    : null;
+}
+
 async function handleCompleteTodo(args: {
   slots: IntentSlots;
   user_id: string | null;
+  snapshot?: SurfaceSnapshot;
 }): Promise<{ contextMessage: string; variant?: SurfaceVariant }> {
-  if (!args.user_id) {
-    return { contextMessage: wrapFallback(SIGN_IN_FALLBACK) };
-  }
   const ref = args.slots.todo_ref;
   if (!ref) {
     return {
@@ -1865,10 +2116,35 @@ async function handleCompleteTodo(args: {
       ),
     };
   }
-  const opened = await openTargetList({
+  if (!args.user_id) {
+    const todo = transientTodoSnapshot(args.snapshot);
+    if (todo) {
+      const target = resolveVisibleItemRef(ref, todo.items);
+      if (!target) {
+        return {
+          contextMessage: wrapFallback(
+            "couldn't match that to an item on the temporary list — read the list back and ask which one",
+          ),
+        };
+      }
+      const remaining = todo.items.filter((i) => i.id !== target.id);
+      return {
+        variant: guestTodoVariant({
+          titles: remaining.map((item) => item.title),
+          listName: todo.list_title,
+          changed: { completed: [target.title] },
+        }),
+        contextMessage: wrapFallback(
+          `${GUEST_LIST_QUIET} I checked off "${target.title}".`,
+        ),
+      };
+    }
+    return { contextMessage: wrapFallback(GUEST_NO_LIST_QUIET) };
+  }
+  const opened = await openMutationTargetList({
     user_id: args.user_id,
     list_name: args.slots.list_name,
-    createIfMissing: false,
+    snapshot: args.snapshot,
   });
   if (!opened) {
     return { contextMessage: wrapFallback(NO_SUCH_LIST_FALLBACK) };
@@ -1908,14 +2184,48 @@ async function handleCompleteTodo(args: {
 async function handleRemoveTodo(args: {
   slots: IntentSlots;
   user_id: string | null;
+  snapshot?: SurfaceSnapshot;
 }): Promise<{ contextMessage: string; variant?: SurfaceVariant }> {
   if (!args.user_id) {
-    return { contextMessage: wrapFallback(SIGN_IN_FALLBACK) };
+    const todo = transientTodoSnapshot(args.snapshot);
+    if (todo) {
+      let targets: VisibleTodoItem[] = [];
+      if (args.slots.todo_positions?.length) {
+        targets = args.slots.todo_positions
+          .map((p) => todo.items[p - 1])
+          .filter((r): r is VisibleTodoItem => Boolean(r));
+      } else if (args.slots.todo_ref) {
+        const one = resolveVisibleItemRef(args.slots.todo_ref, todo.items);
+        if (one) targets = [one];
+      }
+      if (targets.length === 0) {
+        return {
+          contextMessage: wrapFallback(
+            "couldn't match that to an item on the temporary list — read the list back and ask which one",
+          ),
+        };
+      }
+      const removedIds = new Set(targets.map((t) => t.id));
+      const removed = targets.map((t) => t.title);
+      return {
+        variant: guestTodoVariant({
+          titles: todo.items
+            .filter((item) => !removedIds.has(item.id))
+            .map((item) => item.title),
+          listName: todo.list_title,
+          changed: { removed },
+        }),
+        contextMessage: wrapFallback(
+          `${GUEST_LIST_QUIET} I removed ${removed.join(", ")}.`,
+        ),
+      };
+    }
+    return { contextMessage: wrapFallback(GUEST_NO_LIST_QUIET) };
   }
-  const opened = await openTargetList({
+  const opened = await openMutationTargetList({
     user_id: args.user_id,
     list_name: args.slots.list_name,
-    createIfMissing: false,
+    snapshot: args.snapshot,
   });
   if (!opened) {
     return { contextMessage: wrapFallback(NO_SUCH_LIST_FALLBACK) };
@@ -1974,14 +2284,29 @@ async function handleRemoveTodo(args: {
 async function handleClearList(args: {
   slots: IntentSlots;
   user_id: string | null;
+  snapshot?: SurfaceSnapshot;
 }): Promise<{ contextMessage: string; variant?: SurfaceVariant }> {
   if (!args.user_id) {
-    return { contextMessage: wrapFallback(SIGN_IN_FALLBACK) };
+    const todo = transientTodoSnapshot(args.snapshot);
+    if (todo) {
+      const count = todo.items.length;
+      return {
+        variant: guestTodoVariant({
+          titles: [],
+          listName: todo.list_title,
+          changed: { cleared: count },
+        }),
+        contextMessage: wrapFallback(
+          `${GUEST_LIST_QUIET} I cleared ${count} item${count === 1 ? "" : "s"} off it.`,
+        ),
+      };
+    }
+    return { contextMessage: wrapFallback(GUEST_NO_LIST_QUIET) };
   }
-  const opened = await openTargetList({
+  const opened = await openMutationTargetList({
     user_id: args.user_id,
     list_name: args.slots.list_name,
-    createIfMissing: false,
+    snapshot: args.snapshot,
   });
   if (!opened) {
     return { contextMessage: wrapFallback(NO_SUCH_LIST_FALLBACK) };
@@ -3256,6 +3581,26 @@ export async function orchestrate(
     pendingListAdd: input.currentSurface?.pendingListAdd ?? null,
   });
   if (!classified.matched) {
+    // Catch-all: "send it by WeChat", "you should add X", "this is broken"
+    // — nothing else matched, so file it as a feature/channel/bug request
+    // instead of letting it vanish (G 2026-07-06: "an AI system that either
+    // adds these features or sends bug reports"). Fire-and-forget; never
+    // blocks or changes 6's spoken turn.
+    const featureRequest = detectFeatureRequestCapture(input.text);
+    if (featureRequest) {
+      void captureFeatureRequest({
+        sessionId: input.session_id,
+        userId: input.user_id,
+        rawText: input.text,
+        kind: featureRequest.kind,
+        requestedChannel: featureRequest.requestedChannel,
+        source: "voice",
+        context: {
+          matched_rule: featureRequest.reason,
+          orchestrator_reason: classified.reason,
+        },
+      });
+    }
     return { kind: "none", reason: classified.reason };
   }
   const { classification } = classified;
@@ -3264,6 +3609,16 @@ export async function orchestrate(
   // surfaced for diagnostic logging but doesn't fire backend calls
   // (avoids spurious surface updates on partial matches).
   if (classification.confidence !== "high") {
+    // A generic "Tell Me More" pill or utterance should never make 6 read an
+    // internal fallback when no contractor cards/details are actually in
+    // view (G 13:11 ride stumble; Herm TASK_144 Patch D). Let the main brain
+    // answer naturally instead of injecting [INTENT NOT ACTIONABLE].
+    if (
+      classification.kind === "tell_me_more" &&
+      (input.currentSurface?.contractorIds?.length ?? 0) === 0
+    ) {
+      return { kind: "none", reason: "tell_me_more_without_contractor_context" };
+    }
     return {
       kind: "action",
       classification,
@@ -3284,7 +3639,7 @@ export async function orchestrate(
         classification,
         dismissSurface: true,
         contextMessage:
-          "[SURFACE DISMISSED — not spoken by user] I cleared the visible panel. Respond in first person as 6 with one short acknowledgement, no extra explanation.",
+          "[SURFACE DISMISSED — not spoken by user] I cleared the visible panel and any pending find/list state. Respond in first person as 6 with one short acknowledgement. Do not re-offer the cleared contractors unless the user asks for a fresh search with a real city or ZIP.",
       };
     }
     case "onboard_contractor": {
@@ -3542,6 +3897,19 @@ export async function orchestrate(
         pending: r.pending,
       };
     }
+    case "rename_todo": {
+      const r = await handleRenameTodo({
+        slots: classification.slots,
+        user_id: input.user_id,
+        snapshot: input.currentSurface,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: r.variant,
+        contextMessage: r.contextMessage,
+      };
+    }
     case "view_todos": {
       const r = await handleViewTodos({
         slots: classification.slots,
@@ -3555,10 +3923,24 @@ export async function orchestrate(
         pending: r.pending,
       };
     }
+    case "inspect_todo": {
+      const r = await handleInspectTodo({
+        slots: classification.slots,
+        user_id: input.user_id,
+        snapshot: input.currentSurface,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: r.variant,
+        contextMessage: r.contextMessage,
+      };
+    }
     case "complete_todo": {
       const r = await handleCompleteTodo({
         slots: classification.slots,
         user_id: input.user_id,
+        snapshot: input.currentSurface,
       });
       return {
         kind: "action",
@@ -3571,6 +3953,7 @@ export async function orchestrate(
       const r = await handleRemoveTodo({
         slots: classification.slots,
         user_id: input.user_id,
+        snapshot: input.currentSurface,
       });
       return {
         kind: "action",
@@ -3583,6 +3966,7 @@ export async function orchestrate(
       const r = await handleClearList({
         slots: classification.slots,
         user_id: input.user_id,
+        snapshot: input.currentSurface,
       });
       return {
         kind: "action",

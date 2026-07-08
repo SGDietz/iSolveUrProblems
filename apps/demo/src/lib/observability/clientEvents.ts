@@ -11,7 +11,10 @@ export type AppEventName =
   | "call_consent_open"
   | "call_consent_yes"
   | "call_consent_dismiss"
-  | "contractor_website_tap";
+  | "contractor_website_tap"
+  | "contractor_email_consent_open"
+  | "contractor_email_consent_yes"
+  | "contractor_email_consent_dismiss";
 
 /**
  * The live avatar session id (same id conversation_messages rows carry), so

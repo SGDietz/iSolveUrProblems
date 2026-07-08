@@ -22,8 +22,8 @@ import type {
  * Env:
  *   SERPAPI_API_KEY — set when SG Dietz hands off the key after legal review
  *
- * Without the key the adapter reports `isConfigured=false` and the
- * registry falls back to the mock adapter.
+ * Without the key the adapter reports `isConfigured=false`; the registry
+ * fails closed rather than falling back to mock contractor data.
  */
 
 const SERPAPI_API_KEY = process.env.SERPAPI_API_KEY || "";
