@@ -9,7 +9,7 @@ export type {
   RawContractor,
   RawContractorReview,
 } from "./sources/types";
-export { getContractorSource, mockAdapter } from "./sources";
+export { getContractorSource } from "./sources";
 export { dedupeInBatch } from "./dedupe";
 export { refreshContractors, type RefreshResult } from "./refresh";
 export {
@@ -54,3 +54,13 @@ export {
   type DeliberateInput,
   type DeliberateResult,
 } from "./deliberate";
+export {
+  missingContractorOnboardingFields,
+  upsertSelfOnboardedContractor,
+  type ContractorOnboardingDraft,
+  type ContractorOnboardingField,
+  type SelfOnboardedContractorInput,
+  type SelfOnboardedContractorResult,
+} from "./onboard";
+export { findContractorsLive } from "./liveFind";
+export type { ContractorClaimStatus } from "./types";

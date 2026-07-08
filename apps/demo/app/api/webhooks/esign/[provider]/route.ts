@@ -209,6 +209,14 @@ export async function POST(
 
   // ─── Mock provider (dev-only) ─────────────────────────────────────
 
+  // HARD prod gate (Herm ship-blocker 2026-07-02): the mock branch has no
+  // signature verification, so in production it was an unauthenticated
+  // contract-state write. Mock e-sign exists for dev/preview wiring only —
+  // same fail-closed doctrine as getEsignProvider().
+  if (process.env.VERCEL_ENV === "production") {
+    return bad("mock e-sign webhook is disabled in production", 404);
+  }
+
   let body: EsignWebhookPayload;
   try {
     body = (await request.json()) as EsignWebhookPayload;

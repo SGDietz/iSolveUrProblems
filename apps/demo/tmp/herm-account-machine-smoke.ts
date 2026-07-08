@@ -1,0 +1,262 @@
+import { strict as assert } from "node:assert";
+import { accountSetupSpeechFlow, type SignupFlags, type SignupPorts } from "../src/lib/signup/machine.js";
+import { ACCOUNT_SETUP_TRIGGER_RE } from "../src/lib/signup/helpers.js";
+
+type State = {
+  awaitingReady: boolean;
+  awaitingEmail: boolean;
+  awaitingName: boolean;
+  awaitingSend: boolean;
+  awaitingPostSendOffer: boolean;
+  pendingEmail: string | null;
+  rejectedEmail: string | null;
+  sendEmail: string | null;
+  emailMissCount: number;
+  offerMade: boolean;
+  declinedAt: number;
+  lastParsedEmail: string | null;
+  sendArmedAt: number;
+  sendArmedByText: string | null;
+  signedIn: boolean;
+  avatarTalking: boolean;
+  name: string | null;
+  greetingCount: number;
+  chestText: string;
+  said: string[];
+  startedEmails: string[];
+};
+
+const flags: SignupFlags = {
+  accountBetaDisabled: false,
+  emailTypedFallbackEnabled: false,
+};
+
+function makePorts(initial?: Partial<State>): { state: State; ports: SignupPorts } {
+  const state: State = {
+    awaitingReady: false,
+    awaitingEmail: false,
+    awaitingName: false,
+    awaitingSend: false,
+    awaitingPostSendOffer: false,
+    pendingEmail: null,
+    rejectedEmail: null,
+    sendEmail: null,
+    emailMissCount: 0,
+    offerMade: false,
+    declinedAt: 0,
+    lastParsedEmail: null,
+    sendArmedAt: 0,
+    sendArmedByText: null,
+    signedIn: false,
+    avatarTalking: false,
+    name: null,
+    greetingCount: 0,
+    chestText: "",
+    said: [],
+    startedEmails: [],
+    ...initial,
+  };
+
+  const ports: SignupPorts = {
+    get awaitingReady() { return state.awaitingReady; },
+    set awaitingReady(v: boolean) { state.awaitingReady = v; },
+    get awaitingEmail() { return state.awaitingEmail; },
+    set awaitingEmail(v: boolean) { state.awaitingEmail = v; },
+    get awaitingName() { return state.awaitingName; },
+    set awaitingName(v: boolean) { state.awaitingName = v; },
+    get awaitingSend() { return state.awaitingSend; },
+    set awaitingSend(v: boolean) { state.awaitingSend = v; },
+    get awaitingPostSendOffer() { return state.awaitingPostSendOffer; },
+    set awaitingPostSendOffer(v: boolean) { state.awaitingPostSendOffer = v; },
+    get pendingEmail() { return state.pendingEmail; },
+    set pendingEmail(v: string | null) { state.pendingEmail = v; },
+    get rejectedEmail() { return state.rejectedEmail; },
+    set rejectedEmail(v: string | null) { state.rejectedEmail = v; },
+    get sendEmail() { return state.sendEmail; },
+    set sendEmail(v: string | null) { state.sendEmail = v; },
+    get emailMissCount() { return state.emailMissCount; },
+    set emailMissCount(v: number) { state.emailMissCount = v; },
+    get offerMade() { return state.offerMade; },
+    set offerMade(v: boolean) { state.offerMade = v; },
+    get declinedAt() { return state.declinedAt; },
+    set declinedAt(v: number) { state.declinedAt = v; },
+    get lastParsedEmail() { return state.lastParsedEmail; },
+    set lastParsedEmail(v: string | null) { state.lastParsedEmail = v; },
+    get sendArmedAt() { return state.sendArmedAt; },
+    set sendArmedAt(v: number) { state.sendArmedAt = v; },
+    get sendArmedByText() { return state.sendArmedByText; },
+    set sendArmedByText(v: string | null) { state.sendArmedByText = v; },
+    get signedIn() { return state.signedIn; },
+    get avatarTalking() { return state.avatarTalking; },
+    get userName() { return state.name; },
+    get greetingCount() { return state.greetingCount; },
+    get chestText() { return state.chestText; },
+    async say(text: string) { state.said.push(text); },
+    saveName(name: string) { state.name = name; },
+    showChest() {},
+    setChestDisplay(text: string) { state.chestText = text; },
+    async revealChars(_fromText: string, addedChars: string) { state.chestText += addedChars; },
+    clearRevealActive() {},
+    openTypedBox() {},
+    closeTypedBox() {},
+    setTypedEmail(value: string) { state.chestText = value; },
+    async startAccountSetup(email: string) { state.startedEmails.push(email); return true; },
+    clearEntry() {
+      state.awaitingReady = false;
+      state.awaitingEmail = false;
+      state.awaitingName = false;
+      state.awaitingSend = false;
+      state.awaitingPostSendOffer = false;
+      state.pendingEmail = null;
+      state.rejectedEmail = null;
+      state.sendEmail = null;
+      state.chestText = "";
+    },
+    now() { return 10_000; },
+  };
+
+  return { state, ports };
+}
+
+async function turn(ports: SignupPorts, text: string): Promise<boolean> {
+  return accountSetupSpeechFlow(ports, flags, text);
+}
+
+async function testNameAfterEmailOutOfOrder() {
+  const { state, ports } = makePorts();
+
+  assert.equal(await turn(ports, "remember me next time"), true);
+  assert.equal(state.awaitingName, true);
+  assert.match(state.said.at(-1) ?? "", /^You got it\. First - what should I call you\?$/);
+  assert.doesNotMatch(state.said.join("\n"), /Love it/i);
+
+  // User gives the email before the name. This used to strand the flow or re-ask
+  // in the wrong order. It must park the email, confirm it, then ask for the name.
+  assert.equal(await turn(ports, "my email is herm.smoke@example.com"), true);
+  assert.equal(state.pendingEmail, "herm.smoke@example.com");
+  assert.equal(state.awaitingName, false);
+  assert.match(state.said.at(-1) ?? "", /Is the email on screen correct\?/);
+
+  assert.equal(await turn(ports, "yes that's correct"), true);
+  assert.equal(state.pendingEmail, null);
+  assert.equal(state.sendEmail, "herm.smoke@example.com");
+  assert.equal(state.awaitingName, true);
+  assert.equal(state.awaitingSend, false);
+  assert.match(state.said.at(-1) ?? "", /what should I call you, so I can say hey by name next time\?/);
+
+  assert.equal(await turn(ports, "George"), true);
+  assert.equal(state.name, "George");
+  assert.equal(state.awaitingName, false);
+  assert.equal(state.awaitingSend, true);
+  assert.match(state.said.at(-1) ?? "", /Thanks, George\. Want me to send the sign-in link to that email now\?/);
+
+  assert.equal(await turn(ports, "yes send it"), true);
+  assert.deepEqual(state.startedEmails, ["herm.smoke@example.com"]);
+  assert.equal(state.awaitingSend, false);
+  assert.equal(state.sendEmail, null);
+}
+
+async function testPostSendOfferGate() {
+  const wrap = makePorts({ awaitingPostSendOffer: true });
+  assert.equal(await turn(wrap.ports, "wrap up for now"), true);
+  assert.equal(wrap.state.awaitingPostSendOffer, false);
+  assert.match(wrap.state.said.at(-1) ?? "", /You're all set\. Check your email/);
+
+  const keep = makePorts({ awaitingPostSendOffer: true });
+  assert.equal(await turn(keep.ports, "keep going"), false);
+  assert.equal(keep.state.awaitingPostSendOffer, false);
+  assert.equal(keep.state.said.length, 0);
+}
+
+async function testPostSendOfferDoesNotSwallowProblem() {
+  // Herm TASK_037 #6: a real problem at the offer gate must NOT be re-asked /
+  // swallowed — it drops the gate and hands the turn to the brain (returns false).
+  const { state, ports } = makePorts({ awaitingPostSendOffer: true });
+  assert.equal(await turn(ports, "my sink is leaking under the cabinet"), false);
+  assert.equal(state.awaitingPostSendOffer, false);
+  assert.equal(state.said.length, 0); // no "Want to keep going..." re-ask
+}
+
+async function testAwaitingNameLongSentenceDoesNotMute() {
+  // Herm TASK_037 #5: a long non-name sentence while awaiting the name must NOT
+  // return false (which would leave 6 mute with the account floor held) — it
+  // re-prompts gently and keeps the name gate armed.
+  const { state, ports } = makePorts({ awaitingName: true });
+  assert.equal(
+    await turn(ports, "can you just tell me how much all of this is going to cost"),
+    true,
+  );
+  assert.equal(state.awaitingName, true); // gate stays armed
+  assert.match(state.said.at(-1) ?? "", /just your first name when you're ready/);
+}
+
+async function testExplicitSingleLetterNameCaptured() {
+  // #3 (G's 2026-06-28 smoke): "Okay, my name is G, the letter G." MUST capture
+  // the name "G" and advance. On the smoke 6 kept looping "just your first name".
+  const { state, ports } = makePorts({ awaitingName: true });
+  assert.equal(await turn(ports, "Okay, my name is G, the letter G."), true);
+  assert.equal(state.name, "G");
+  assert.equal(state.awaitingName, false);
+  assert.doesNotMatch(state.said.at(-1) ?? "", /just your first name/i);
+}
+
+async function testEmailMetaComplaintDoesNotLoopSpell() {
+  // #4 (G's 2026-06-28 smoke): a UI bug report while awaiting the email must NOT
+  // be treated as a failed spelling and loop "Please spell it slowly."
+  const { state, ports } = makePorts({ awaitingEmail: true });
+  assert.equal(
+    await turn(
+      ports,
+      "when you say spell it slowly, the pillboxes should drop and on your chest should be the email box",
+    ),
+    true,
+  );
+  assert.equal(state.awaitingEmail, true); // gate stays armed, not torn down
+  assert.doesNotMatch(state.said.join("\n"), /Please spell it slowly/i);
+}
+
+async function testSpelledEmailWithBoxWordNotTreatedAsComplaint() {
+  // #4 false-positive fix (Herm TASK_041): a real address like "thebox at example
+  // dot com" contains "box" but IS an email — it must NOT hit the meta escape and
+  // must fall through to the spelling path.
+  const { state, ports } = makePorts({ awaitingEmail: true });
+  await turn(ports, "thebox at example dot com");
+  assert.doesNotMatch(state.said.join("\n"), /The email box is up now/i);
+}
+
+function testTriggerRegexCoverage() {
+  // Broadened trigger (2026-06-28): natural signup phrasings match...
+  for (const m of [
+    "set up an account", "remember me", "set me up", "sign me up",
+    "keep me on file", "save my info", "save my account", "remember who I am",
+    "if I close you out, will you remember me?",
+  ]) {
+    assert.ok(ACCOUNT_SETUP_TRIGGER_RE.test(m), `trigger SHOULD match: ${m}`);
+  }
+  // ...but these false-positive baits must NOT match (no muting the brain on normal talk).
+  for (const n of [
+    "keep me posted", "save my money", "save my spot", "remember to add milk",
+    "remember when we talked", "I can't remember where I put my keys",
+  ]) {
+    assert.ok(!ACCOUNT_SETUP_TRIGGER_RE.test(n), `trigger must NOT match: ${n}`);
+  }
+}
+
+async function main() {
+  testTriggerRegexCoverage();
+  await testNameAfterEmailOutOfOrder();
+  await testPostSendOfferGate();
+  await testPostSendOfferDoesNotSwallowProblem();
+  await testAwaitingNameLongSentenceDoesNotMute();
+  await testExplicitSingleLetterNameCaptured();
+  await testEmailMetaComplaintDoesNotLoopSpell();
+  await testSpelledEmailWithBoxWordNotTreatedAsComplaint();
+  console.log(
+    "PASS herm-account-machine-smoke: name-after-email, no-'Love it', send consent, post-send offer, no-swallow, name-no-mute, single-letter-name, email-meta-no-loop, box-email-not-complaint",
+  );
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

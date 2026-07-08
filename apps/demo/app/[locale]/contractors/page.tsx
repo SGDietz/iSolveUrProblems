@@ -1,4 +1,5 @@
 import { setRequestLocale, getTranslations } from "next-intl/server";
+import { notFound } from "next/navigation";
 import { Link } from "../../../src/i18n/routing";
 import SearchClient from "./SearchClient";
 
@@ -29,6 +30,12 @@ export default async function ContractorsPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Engineering-debug surface only (see banner below) — 6 drives contractor
+  // search by voice on the home page. Its bare tel:/pick/hire controls bypass
+  // the call-consent doctrine, so PRODUCTION 404s server-side before mount
+  // (Herm TASK_090). VERCEL_ENV, not NODE_ENV, on purpose: preview builds
+  // also compile with NODE_ENV=production and this stays usable there.
+  if (process.env.VERCEL_ENV === "production") notFound();
   const { locale } = await params;
   setRequestLocale(locale);
   const t = await getTranslations("contractors");

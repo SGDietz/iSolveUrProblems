@@ -102,6 +102,20 @@ export async function POST(request: NextRequest) {
       )
     : [];
 
+  // Resolve the e-sign provider BEFORE any DB write: in production with no
+  // real provider configured, getEsignProvider() THROWS (fail-closed). It
+  // used to be called after the contract insert, so every prod draft attempt
+  // left an orphan 'pending' contract row (Herm ship-blocker 2026-07-02).
+  let provider;
+  try {
+    provider = getEsignProvider();
+  } catch (e) {
+    return bad(
+      e instanceof Error ? e.message : "e-sign is not configured",
+      503,
+    );
+  }
+
   // Look up the contractor so we have their name + email for the envelope.
   const contractor = await getContractorStripeRow(body.contractor_id);
   if (!contractor) return bad("contractor not found", 404);
@@ -167,8 +181,7 @@ export async function POST(request: NextRequest) {
     platformFeeCents,
   });
 
-  // 3. Hand to the e-sign provider.
-  const provider = getEsignProvider();
+  // 3. Hand to the e-sign provider (resolved above, before the insert).
   const env = await provider.createEnvelope({
     contract_id: contract.id,
     title: `Work agreement — ${contractor.name}`,

@@ -41,12 +41,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const supabase = getSupabaseBrowser();
 
-    // Initial fetch
+    // Initial fetch. Magic-link callbacks land via a full page navigation, so
+    // the first authenticated state is often this initial getSession() result —
+    // not an onAuthStateChange SIGNED_IN event. Drain stashed LiveAvatar session
+    // ids here too, or the returned/phone session keeps user_id null until some
+    // later auth event happens.
     void supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
+      const nextSession = data.session;
+      const nextUser = nextSession?.user ?? null;
+      setSession(nextSession);
+      setUser(nextUser);
       setLoading(false);
-      setClientLoggerUser(data.session?.user?.id ?? null);
+      setClientLoggerUser(nextUser?.id ?? null);
+      if (nextUser?.id && lastLinkedRef.current !== nextUser.id) {
+        lastLinkedRef.current = nextUser.id;
+        void linkAnonymousSessions();
+      }
     });
 
     // Subscribe to changes

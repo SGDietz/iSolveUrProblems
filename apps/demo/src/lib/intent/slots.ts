@@ -31,7 +31,14 @@ const CATEGORY_WORDS: Array<{ slug: string; words: readonly string[] }> = [
   { slug: "general",    words: ["general contractor", "contractor", "builder", "renovation"] },
 ];
 
-export function extractCategory(text: string): string | undefined {
+function stripNegatedCategoryClauses(text: string): string {
+  return text.replace(
+    /\b(?:not|no|don'?t|do\s+not|didn'?t|did\s+not)\s+(?:need|want|mean|say\s+)?(?:a|an|the|any|another)?\s*(?:plumbers?|plumbing|electricians?|electrical|electric|hvac|a\s*\/\s*c|ac|air\s*condition(?:er|ing)?|heating|furnace|roofers?|roofing|roof|landscapers?|landscaping|lawn|yard|gardeners?|painters?|painting|handy\s*man|handym(?:a|e)n|carpenters?|carpentry|flooring|floor|hardwood|tile\s+floor|appliance|cleaners?|cleaning|house\s+clean|pest|exterminator|bug|garage\s+door|windows?|siding|glazier|general\s+contractor|contractors?|builders?|renovation)\b/gi,
+    " ",
+  );
+}
+
+function categoryFromText(text: string): string | undefined {
   const t = text.toLowerCase();
   for (const { slug, words } of CATEGORY_WORDS) {
     if (words.some((w) => t.includes(w))) return slug;
@@ -39,12 +46,37 @@ export function extractCategory(text: string): string | undefined {
   return undefined;
 }
 
+function extractFirstPersonCategory(text: string): string | undefined {
+  const patterns = [
+    /\b(?:i\s*(?:am|'m)|we\s*(?:are|'re)|my\s+trade\s+is|our\s+trade\s+is)\s+(?:a|an|the)?\s*([^.!?,;]{1,80})/i,
+    /\b(?:i|we)\s+do\s+([^.!?,;]{1,80})/i,
+    /\b(?:my|our)\s+business\s+(?:does|offers|is)\s+([^.!?,;]{1,80})/i,
+  ];
+  for (const pattern of patterns) {
+    const segment = text.match(pattern)?.[1];
+    if (!segment) continue;
+    const category = categoryFromText(stripNegatedCategoryClauses(segment));
+    if (category) return category;
+  }
+  return undefined;
+}
+
+export function extractCategory(text: string): string | undefined {
+  // First-person corrections must beat an earlier wrong/on-screen trade word:
+  // "why is the trade saying HVAC? I'm a landscaper" should update to
+  // landscaper, not keep the first taxonomy word in the sentence.
+  const firstPerson = extractFirstPersonCategory(text);
+  if (firstPerson) return firstPerson;
+  return categoryFromText(stripNegatedCategoryClauses(text));
+}
+
 // ─── Location extraction ────────────────────────────────────────────
 
 /**
  * Cities the test drive recognizes. If the user names a city we
- * recognize, we extract lat/lng. Otherwise the orchestrator falls back
- * to a default center (configurable below).
+ * recognize, we extract lat/lng. Unknown location = the orchestrator
+ * ASKS for city/ZIP — there is NO default-center fallback (removed
+ * 2026-07-01, Herm P0; see the note below).
  *
  * Adding a city is a 1-line change. Long term this becomes geocoding.
  */
@@ -77,7 +109,183 @@ const KNOWN_CITIES: Record<string, { lat: number; lng: number }> = {
   "shanghai":       { lat: 31.2304, lng: 121.4737 },
 };
 
-export const DEFAULT_CENTER = { lat: 30.2672, lng: -97.7431 }; // Austin
+// DEFAULT_CENTER (Austin) removed 2026-07-01 (Herm P0): every import was
+// already gone after TASK_065/066 killed the fail-open paths; the bare export
+// only invited a future "?? DEFAULT_CENTER". Unknown location = ASK, never rank
+// off a fake center.
+
+/**
+ * A ZIP the user SPOKE, mangled by speech-to-text into time/dash/space runs:
+ * "2:10:30." / "2-1-0-3-0" / "2 1 0 3 0" (G's live smoke 2026-07-02 — the ZIP
+ * never matched, the find never resumed, and the brain freestyled a fake
+ * "ABC Plumbing"). Collapse separator-broken digit runs; exactly 5 collapsed
+ * digits = a ZIP. A real clock time ("10:30") collapses to 4 digits and a
+ * phone number to 10, so neither can false-positive.
+ */
+export function collapseSpokenZip(text: string): string | undefined {
+  // Whole utterance is digits + separators (trailing punctuation ignored):
+  // "2:10:30." → 21030, "21030." → 21030, "10:30." → 1030 (no match).
+  const bare = text.trim().replace(/[.!?]+$/, "").trim();
+  if (/^[\d\s:.\-]+$/.test(bare)) {
+    const digits = bare.replace(/\D/g, "");
+    if (digits.length === 5) return digits;
+  }
+  // Embedded separator-broken run inside a longer sentence ("...understand
+  // that. 2-1-0-3-0."). Groups must be glued ONLY by [-:. space] — any letter
+  // between digit groups breaks the run, so word contexts can't merge.
+  const runs = bare.match(/\b\d+(?:[-:. ]+\d+)+\b/g);
+  for (const run of runs ?? []) {
+    const digits = run.replace(/\D/g, "");
+    if (digits.length === 5) return digits;
+  }
+  return undefined;
+}
+
+// ASR filler must never become a search area (G ride 2026-07-07 16:15: the
+// utterance "painter near Okay, so" searched the directory for "Okay" and
+// returned NYC/Hanoi as "your area" — Herm TASK_146). A state token has to be
+// a REAL state; a candidate made entirely of filler words is rejected.
+const US_STATE_ALIASES: Record<string, true> = {
+  al: true, alabama: true, ak: true, alaska: true, az: true, arizona: true,
+  ar: true, arkansas: true, ca: true, california: true, co: true, colorado: true,
+  ct: true, connecticut: true, de: true, delaware: true, dc: true,
+  fl: true, florida: true, ga: true, georgia: true, hi: true, hawaii: true,
+  id: true, idaho: true, il: true, illinois: true, in: true, indiana: true,
+  ia: true, iowa: true, ks: true, kansas: true, ky: true, kentucky: true,
+  la: true, louisiana: true, me: true, maine: true, md: true, maryland: true,
+  ma: true, massachusetts: true, mi: true, michigan: true, mn: true, minnesota: true,
+  ms: true, mississippi: true, mo: true, missouri: true, mt: true, montana: true,
+  ne: true, nebraska: true, nv: true, nevada: true, nh: true, "new hampshire": true,
+  nj: true, "new jersey": true, nm: true, "new mexico": true, ny: true,
+  "new york": true, nc: true, "north carolina": true, nd: true, "north dakota": true,
+  oh: true, ohio: true, ok: true, oklahoma: true, or: true, oregon: true,
+  pa: true, pennsylvania: true, ri: true, "rhode island": true, sc: true,
+  "south carolina": true, sd: true, "south dakota": true, tn: true, tennessee: true,
+  tx: true, texas: true, ut: true, utah: true, vt: true, vermont: true,
+  va: true, virginia: true, wa: true, washington: true, wv: true,
+  "west virginia": true, wi: true, wisconsin: true, wy: true, wyoming: true,
+};
+
+const LOCATION_FILLER_WORDS = new Set([
+  "ok", "okay", "so", "um", "uh", "er", "yeah", "yep", "yes", "no", "nope",
+  "well", "like", "actually", "basically", "just", "all", "right", "alright",
+  "you", "know",
+]);
+
+function cleanLocationCandidate(raw: string): string | undefined {
+  const cleaned = raw
+    .replace(/^[\s"'“”]+|[\s"'“”,.;:!?]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return undefined;
+  const words = cleaned
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+  if (words.length > 0 && words.every((w) => LOCATION_FILLER_WORDS.has(w))) {
+    return undefined;
+  }
+  return cleaned;
+}
+
+function isUsStateToken(value: string | undefined): boolean {
+  if (!value) return false;
+  return Boolean(
+    US_STATE_ALIASES[value.toLowerCase().replace(/\./g, "").trim()],
+  );
+}
+
+/**
+ * Raw location TEXT — NOT tied to KNOWN_CITIES. Lets us search + save ANY US
+ * city or ZIP ("48 states first, then world"), even with no coords for it.
+ * Coords still come from extractLocation() (known cities only); when we have
+ * no coords the UI + voice simply hide distance (never a fake 0.0 km).
+ */
+export function extractLocationText(text: string): string | undefined {
+  const trimmed = text.trim();
+
+  // Bare answer to "what city or ZIP?" — the WHOLE utterance is the place:
+  // "Frederick, MD" / "Frederick MD 21701" / "San Antonio TX" / "90210".
+  // The 2-letter state must be its own separated token (not a word-tail), and
+  // the phrase can't start with a preposition/verb ("based in 90210").
+  // NB: "the"/"a"/"an" are NOT rejected here — real places start with them
+  // ("The Woodlands, TX"). The required City+ST format filters command phrases.
+  const REJECT_LOC_FIRST = new Set([
+    "based", "out", "located", "serving", "in", "near", "from", "i", "we",
+    "my", "our", "do", "done", "need", "want", "find",
+    "looking", "yes", "no", "it", "its",
+  ]);
+  // State can be a 2-letter code OR a spelled-out name ("Las Vegas, Nevada"
+  // — G's ride 2026-07-07), but it must be a REAL state: "Okay, so" looks
+  // like City+ST to the shape check and must die here (Herm TASK_146).
+  const bareForm = trimmed.replace(/[.!?]+$/, "").trim();
+  const bareCityState = bareForm.match(
+    /^([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,3})(?:,\s*|\s+)([A-Za-z]{2}|[A-Za-z]+(?:\s+[A-Za-z]+)?)(?:\s+(\d{5}))?$/,
+  );
+  if (bareCityState && isUsStateToken(bareCityState[2])) {
+    const city = cleanLocationCandidate(bareCityState[1]);
+    const first = (city?.match(/^[A-Za-z']+/)?.[0] ?? "").toLowerCase();
+    if (city && !REJECT_LOC_FIRST.has(first)) {
+      return [city, bareCityState[2].trim(), bareCityState[3]]
+        .filter(Boolean)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+  }
+  const bareZip = trimmed.match(/^(\d{5})$/);
+  if (bareZip) return bareZip[1];
+
+  // "in / near / around / serving / out of / based in / located in / from
+  //  <City>[ Word][ Word][, ST][ 12345]"
+  const m = text.match(
+    /\b(?:in|near|around|serving|based\s+in|out\s+of|located\s+in|from)\s+([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2}(?:,\s*(?:[A-Za-z]{2}(?![A-Za-z])|[A-Za-z]+(?:\s+[A-Za-z]+)?))?(?:\s+\d{5})?)/i,
+  );
+  if (m) {
+    let raw = m[1].replace(/\s+/g, " ").trim();
+    // Drop trailing clause words STT often glues on ("Denver and we do…").
+    raw = raw
+      .replace(
+        /\s+(?:and|or|but|we|i|so|then|licensed|insured|please|thanks?)\b.*$/i,
+        "",
+      )
+      .replace(/[.,]+$/g, "")
+      .trim();
+    // ASR filler is never a place — "near Okay, so" must re-ask, not search
+    // (G ride 2026-07-07; Herm TASK_146).
+    raw = cleanLocationCandidate(raw) ?? "";
+    // A comma tail is only kept when it's a REAL state ("Las Vegas, Nevada",
+    // "Frederick, MD") — anything else is glued speech, keep just the city.
+    const commaSplit = raw.split(/\s*,\s*/);
+    if (commaSplit.length === 2) {
+      const tail = commaSplit[1].replace(/\s+\d{5}$/, "").trim();
+      if (tail && !isUsStateToken(tail)) {
+        raw = commaSplit[0].trim();
+      }
+    }
+    // Reject obvious non-locations ("near the end of my rope", "in my
+    // kitchen") without dropping real "The <City>" places. \b after each word
+    // protects real cities (Kitchener, Homestead).
+    const NON_LOC =
+      /^(?:my|our|this|that|here|there|end|house|home|kitchen|bathroom|bedroom|yard|garage|basement|attic|problem|issue|way|corner|side|area|place|middle|back|front|top|bottom|thing|guy|stuff)\b/i;
+    const ARTICLE_NON_LOC =
+      /^(?:the|a|an)\s+(?:end|house|home|kitchen|bathroom|bedroom|yard|garage|basement|attic|problem|issue|way|corner|side|area|place|middle|back|front|top|bottom|thing|guy|stuff|other|same|whole|rest)\b/i;
+    if (NON_LOC.test(raw) || ARTICLE_NON_LOC.test(raw)) {
+      return undefined;
+    }
+    if (raw.length >= 2 && /[A-Za-z]/.test(raw)) return raw;
+  }
+  // Bare 5-digit ZIP anywhere.
+  const zip = text.match(/\b(\d{5})\b/);
+  if (zip) return zip[1];
+  // Last resort: STT-mangled spoken ZIP ("2:10:30." / "2-1-0-3-0").
+  const spoken = collapseSpokenZip(text);
+  if (spoken) return spoken;
+  return undefined;
+}
 
 /** Extract city name + coords from a phrase like "near Austin", "in NYC". */
 export function extractLocation(

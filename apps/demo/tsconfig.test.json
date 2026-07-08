@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "outDir": ".test-dist",
+    "rootDir": "src",
+    "types": ["node"]
+  },
+  "include": [
+    "src/lib/intent/classify.ts",
+    "src/lib/intent/rules.ts",
+    "src/lib/intent/slots.ts",
+    "src/lib/intent/types.ts",
+    "src/lib/intent/contextInjector.ts",
+    "src/lib/promptBrain.ts",
+    "src/lib/promptBrain/**/*.ts",
+    "src/lib/featureRequests/**/*.ts",
+    "src/lib/apiRouteSecurity.ts",
+    "src/lib/lists/**/*.ts",
+    "src/lib/contractors/search.ts",
+    "src/lib/contractors/liveFind.ts",
+    "src/lib/contractors/types.ts",
+    "src/lib/contractors/sources/types.ts",
+    "src/lib/supabaseAdmin.ts",
+    "src/lib/appointments/extractDateTime.ts",
+    "src/lib/uiSize.ts"
+  ]
+}

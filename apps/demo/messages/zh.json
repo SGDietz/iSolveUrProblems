@@ -179,14 +179,14 @@
     },
     "picker": {
       "pickThis": "就选这位",
-      "notifying": "正在通知…",
-      "confirm": "选择此承包商后，6 会向其发送中标通知，并向其他候选人发送友好的反馈与改进建议。继续吗？",
+      "notifying": "Saving your pick…",
+      "confirm": "Save this pick? Automatic notifications aren't live yet — you can call them right after.",
       "signInRequired": "请登录后再选择承包商。",
-      "error": "通知发送失败",
-      "title": "6 已通知候选人",
+      "error": "Couldn't save the pick",
+      "title": "Your pick is saved",
       "summary": "{sent} 已发 · {failed} 失败",
       "winnerLabel": "中标",
-      "losersLabel": "{count, plural, other {另 # 位候选人已通知}}",
+      "losersLabel": "{count, plural, =1 {Other candidate shown} other {# other candidates shown}}",
       "delivered": "已送达",
       "failed": "失败"
     },
@@ -229,7 +229,20 @@
         "contract": "施工协议",
         "dispute": "争议会话",
         "call": "与 6 通话",
-        "estimate": "估价单"
+        "estimate": "估价单",
+        "todo": "你的清单",
+        "contractorOnboarding": "承包商注册",
+        "recurring": "自动循环任务"
+      },
+      "todo": {
+        "openCount": "{count} 项待办",
+        "showingCount": "显示 {count} 项待办。",
+        "empty": "这个清单是空的。",
+        "summaryAdded": "已添加：{items}",
+        "summaryCompleted": "已完成：{items}",
+        "summaryRemoved": "已移除：{items}",
+        "summaryCleared": "已清空 {count} 项",
+        "summaryAlready": "已在清单上：{items}"
       },
       "contractors": {
         "empty": "暂无匹配。",
@@ -239,7 +252,18 @@
           "sameDay": "当日",
           "locallyOwned": "本地"
         },
-        "website": "网站"
+        "website": "网站",
+        "callConsent": {
+          "title": "要拨打 {name} 吗？",
+          "body": "这通电话从你自己的手机拨出。打电话的人是你。",
+          "sixSays": "6 提醒你：我还不能加入电话通话，所以这次由你来说。你打电话时我就在这里守着笔记。如果是留言信箱接听，请你自己留言。之后回来告诉我情况。",
+          "confirm": "好，现在拨打",
+          "cancel": "先不打"
+        },
+        "cta": {
+          "call": "拨打 {phone}",
+          "email": "发邮件"
+        }
       },
       "summary": {
         "fresh": "最新",
@@ -253,10 +277,10 @@
         "basedOn": "根据 6 记得的偏好微调："
       },
       "pickResult": {
-        "title": "6 已通知候选人",
+        "title": "Payment confirmed on our side. Call them with the button below to connect.",
         "summary": "{sent} 已发 · {failed} 失败",
         "winnerLabel": "中标",
-        "losersLabel": "{count, plural, other {另 # 位候选人已通知}}",
+        "losersLabel": "Payment confirmed on our side. Call them with the button below to connect.",
         "delivered": "已送达",
         "failed": "失败"
       },
@@ -277,7 +301,8 @@
           "scheduled": "预约已安排",
           "rescheduled": "预约已改期",
           "cancelled": "预约已取消",
-          "list": "即将到来的预约"
+          "list": "即将到来的预约",
+          "no_show": "正在寻找替补"
         },
         "status": {
           "cancelled": "已取消",
@@ -327,7 +352,9 @@
           "contractor": "承包商",
           "six": "6",
           "system": "系统"
-        }
+        },
+        "titleGoBetween": "现场居间调解",
+        "modeBadgeGoBetween": "居间调解"
       },
       "estimate": {
         "title": "语音估价单",
@@ -387,6 +414,26 @@
           "escalated": "此争议已转交人工管理员，他们会与你联系。",
           "closed": "此争议已关闭。"
         }
+      },
+      "goBetween": {
+        "startCta": "开始居间调解通话",
+        "startingCta": "拨号中…",
+        "phonePrompt": "请输入你的 E.164 格式电话号码（例如 +14155551234）。6 会拨打你和承包商的电话进行居间调解。",
+        "phoneInvalid": "请输入有效的 E.164 号码（例如 +14155551234）。",
+        "errorGeneric": "无法启动居间调解通话。"
+      },
+      "recurring": {
+        "title": "自动循环任务已设置",
+        "withLabel": "对象:",
+        "upcomingLabel": "接下来的执行时间",
+        "noUpcoming": "(暂无后续执行 — 计划可能已结束)",
+        "autopilotFootnote": "每次执行将触发提醒、承包商确认,以及缺席时的备援派遣。说「暂停这个循环任务」可以停止。",
+        "status": {
+          "active": "进行中",
+          "paused": "已暂停",
+          "ended": "已结束",
+          "cancelled": "已取消"
+        }
       }
     }
   },
@@ -410,6 +457,228 @@
       "pt": "Português",
       "de": "Deutsch",
       "zh": "中文"
+    }
+  },
+  "forContractors": {
+    "kicker": "iSolveUrProblems · 承包商专区",
+    "hero": {
+      "title": "让 6 帮你打理生意。",
+      "blurb": "精筛客户线索、合同自动起草、收款迅速。6 处理琐事，你专心干活。"
+    },
+    "benefit": {
+      "leads": "屋主线索 — 中标才付费",
+      "contracts": "合同分钟内起草、电子签署",
+      "payouts": "Stripe 扣除平台费后即时到账",
+      "recurring": "周期性工作自动运行 — 每周修剪、每秋清沟",
+      "crew": "排不开时一键找帮手"
+    },
+    "cta": {
+      "signIn": "登录或注册",
+      "signInBlurb": "魔法链接登录，无需密码。"
+    },
+    "already": {
+      "title": "欢迎回来",
+      "blurb": "你的承包商账户已激活,返回控制台。",
+      "goCta": "打开控制台"
+    },
+    "claim": {
+      "title": "认领你的店铺资料",
+      "blurb": "输入你的州执照号。我们会向发证机构核验后绑定你的账户。",
+      "privacyFootnote": "你的执照号不会公开,仅用于一次性核验和「执照已验证」徽章。",
+      "stateLabel": "州",
+      "licenseLabel": "执照号",
+      "licensePlaceholder": "如 1234567",
+      "licenseHelper": "加州 CSLB 执照号。其他州即将上线。",
+      "submitCta": "核验并认领",
+      "submitting": "核验中…",
+      "errorGeneric": "核验失败,请检查后重试。",
+      "pending": {
+        "title": "差一步 — 等待审核",
+        "blurb": "找到了你的资料,但需人工确认。1 个工作日内回复。",
+        "reasonsLabel": "信号"
+      }
+    }
+  },
+  "contractor": {
+    "dashboard": {
+      "kicker": "承包商控制台",
+      "backHome": "← 返回 6",
+      "badge": {
+        "licenseVerified": "持照 · {state} {license}",
+        "payoutReady": "可收款",
+        "payoutPending": "收款待开通 — 请完成 Stripe"
+      },
+      "onboardingBanner": {
+        "title": "完成收款设置",
+        "blurb": "请先完成 Stripe,屋主才能向你付款。",
+        "onboardingCta": "用 Stripe 设置",
+        "onboardingSubmitting": "正在打开 Stripe…",
+        "errorGeneric": "无法开始,请重试。"
+      },
+      "pending": {
+        "title": "待处理邀请",
+        "blurb": "选中你的屋主 — 接受或拒绝",
+        "empty": "暂无邀请。"
+      },
+      "active": {
+        "title": "进行中工作",
+        "blurb": "已付款且即将开始",
+        "empty": "暂无进行中工作。"
+      },
+      "completed": {
+        "title": "已完成",
+        "blurb": "过往工作",
+        "empty": "暂无已完成工作。"
+      },
+      "nextAt": "下次:{when}",
+      "esignLabel": "合同",
+      "logWorkCta": "记录工作 →",
+      "coaching": {
+        "title": "来自 6 的留言",
+        "kicker": "来自 6 的留言",
+        "signoff": "— 6 只在真有事发生时才会发。回复 STOP 可静音。"
+      },
+      "crew": {
+        "title": "工友市场",
+        "silverPlus": "Silver+",
+        "gatedBadge": "Silver+",
+        "gatedBlurb": "升级到 Silver,当你排不开档期时,6 会为你找到当天可到场的帮手承包商。",
+        "errorGeneric": "出错了,请重试。",
+        "errorTier": "此功能属于 Silver 套餐。",
+        "errorAlreadyFilled": "已有其他承包商先接了。",
+        "form": {
+          "category": "所需工种",
+          "neededAt": "需要时间",
+          "radiusKm": "半径 (公里)",
+          "scope": "工作内容",
+          "scopePlaceholder": "安装 4 扇室内门,约 2 小时。",
+          "submitCta": "发送给附近同行",
+          "submitting": "发送中…"
+        },
+        "outgoing": {
+          "title": "你的公开请求",
+          "empty": "当前没有外发请求。",
+          "status": {
+            "open": "进行中",
+            "filled": "已成交",
+            "expired": "已过期",
+            "cancelled": "已取消"
+          },
+          "responseStatus": {
+            "invited": "已邀请",
+            "accepted": "已接受",
+            "declined": "已拒绝",
+            "expired": "已过期",
+            "no_response": "未回应"
+          }
+        },
+        "incoming": {
+          "title": "别人的邀请",
+          "empty": "还没有人邀请你帮忙。",
+          "acceptCta": "接受",
+          "declineCta": "拒绝",
+          "status": {
+            "invited": "待处理",
+            "accepted": "已接受",
+            "declined": "已拒绝",
+            "expired": "已过期",
+            "no_response": "未回应"
+          }
+        }
+      },
+      "checklist": {
+        "title": "出发前清单",
+        "notYetBlurb": "6 将在作业开始前 2 小时整理工具、材料和确认事项。立即生成可预览。",
+        "generateCta": "立即生成",
+        "generating": "生成中…",
+        "regenerateCta": "重新生成",
+        "regenerating": "重新生成中…",
+        "errorGeneric": "无法更新清单,请重试。",
+        "generatedBy": "由 {model} 生成",
+        "gatedBadge": "Bronze+",
+        "gatedBlurb": "升级到 Bronze 套餐,即可为每项作业获取 6 生成的出发前清单。",
+        "bucket": {
+          "tool": "工具",
+          "material": "材料",
+          "confirmation": "出发前确认"
+        }
+      }
+    },
+    "jobLog": {
+      "kicker": "作业日志",
+      "untitledAgenda": "未命名作业",
+      "backToDashboard": "← 返回仪表板",
+      "captureHeading": "拍摄",
+      "phase": {
+        "arrival": "到场",
+        "in_progress": "进行中",
+        "completion": "完工"
+      },
+      "phaseCount": "{count, plural, other {# 张照片}}",
+      "phaseEmpty": "点按拍摄",
+      "noteHeading": "添加备注",
+      "notePlaceholder": "关于本次访问,6 应该知道的信息……",
+      "addNoteCta": "添加备注",
+      "submitting": "保存中…",
+      "timelineHeading": "时间线",
+      "timelineEmpty": "尚未记录任何内容——拍一张到场照片开始吧。",
+      "noteLabel": "备注",
+      "errorGeneric": "保存失败,请重试。",
+      "tierGate": "升级到 Bronze 即可为本作业记录照片。",
+      "gatedTitle": "照片日志是付费功能",
+      "gatedBlurb": "升级到 Bronze,6 会为每张作业照片记录时间戳、GPS,并向户主呈现时间线。",
+      "gatedManageCta": "管理订阅 →",
+      "cv": {
+        "loading": "正在查找 AI 标签…",
+        "identifyCta": "用 6 识别",
+        "classifying": "6 正在查看…",
+        "predictedLabel": "6 认为:",
+        "confidence": {
+          "low": "低置信度",
+          "medium": "中等置信度",
+          "high": "高置信度"
+        },
+        "yesCta": "是",
+        "noCta": "否",
+        "correctionPlaceholder": "例如: 蒲公英",
+        "saveCorrectionCta": "保存",
+        "confirmedPrefix": "已确认:",
+        "tierGate": "AI 识别是 Gold 级功能。",
+        "errorGeneric": "无法获取 AI 标签,请重试。"
+      }
+    },
+    "subscription": {
+      "title": "当前套餐:",
+      "tier": {
+        "free": "免费",
+        "bronze": "青铜",
+        "silver": "白银",
+        "gold": "黄金"
+      },
+      "tierBlurb": {
+        "bronze": "当日优先 · 清单 · 拍照日志",
+        "silver": "青铜 + 团队市场 · 替补派遣 · 周期工作",
+        "gold": "白银 + AI 标注 · 教练 · 优先展示"
+      },
+      "status": {
+        "trialing": "试用",
+        "active": "生效中",
+        "past_due": "支付失败",
+        "canceled": "已取消",
+        "incomplete": "未完成",
+        "incomplete_expired": "配置过期",
+        "unpaid": "未支付",
+        "paused": "暂停",
+        "none": "—"
+      },
+      "trialUntil": "免费试用至 {date}",
+      "renewsOn": "{date} 续费",
+      "cancelsOn": "{date} 取消",
+      "upgradeBlurb": "升级解锁团队市场、周期工作、AI 标注等更多功能。",
+      "manageCta": "管理订阅",
+      "cancelCta": "取消",
+      "cancelConfirm": "在计费周期结束时取消吗?在此之前你仍享有权限。",
+      "errorGeneric": "出错了,请重试。"
     }
   }
 }

@@ -39,3 +39,7 @@ yarn-error.log*
 .DS_Store
 *.pem
 .env.smoketest
+
+# Local Herm/Claude smoke and Supabase CLI artifacts
+apps/demo/supabase/.temp/
+apps/demo/tmp/herm-*-smoke.ts

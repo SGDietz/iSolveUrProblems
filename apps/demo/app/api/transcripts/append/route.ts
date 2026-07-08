@@ -123,7 +123,15 @@ export async function POST(request: NextRequest) {
   // include its output in the response so the client can update the
   // assistant surface + send a context message to HeyGen's brain.
   // Avatar transcripts are persisted but never re-classified.
-  if (body.speaker === "user") {
+  // MACHINE-INJECTED context lines ride as user-role text ("[FIND — not
+  // spoken by user] …") and must NEVER be classified as the user's own
+  // speech — G's ride 2026-07-04: the contractor-onboarding intake captured
+  // "first person as" (a fragment of an injected [FIND] prompt) as a
+  // service area. Persist them, never orchestrate them.
+  const isInjectedContext = /^\s*\[[^\]]{0,120}not spoken by user\]/i.test(
+    body.text,
+  );
+  if (body.speaker === "user" && !isInjectedContext) {
     const snapshot = parseSurfaceSnapshot(body.surface_snapshot);
     try {
       const tz =
@@ -169,6 +177,11 @@ function parseSurfaceSnapshot(
     kind?: unknown;
     contractorIds?: unknown;
     deliberation?: unknown;
+    pendingFind?: unknown;
+    pendingListIndex?: unknown;
+    pendingAddOffer?: unknown;
+    pendingListAdd?: unknown;
+    todo?: unknown;
   };
   const validKinds = new Set([
     "contractors",
@@ -181,6 +194,9 @@ function parseSurfaceSnapshot(
     "dispute",
     "call",
     "estimate",
+    "todo",
+    "contractorOnboarding",
+    "recurring",
   ]);
   const kind =
     typeof r.kind === "string" && validKinds.has(r.kind)
@@ -189,6 +205,41 @@ function parseSurfaceSnapshot(
   const contractorIds = Array.isArray(r.contractorIds)
     ? r.contractorIds.filter((x): x is string => typeof x === "string")
     : [];
+
+  let todo: SurfaceSnapshot["todo"] | undefined;
+  if (kind === "todo" && typeof r.todo === "object" && r.todo !== null) {
+    const t = r.todo as {
+      list_id?: unknown;
+      list_title?: unknown;
+      items?: unknown;
+      transient?: unknown;
+    };
+    const listId = typeof t.list_id === "string" ? t.list_id.trim().slice(0, 128) : "";
+    const listTitle = typeof t.list_title === "string" ? t.list_title.trim().slice(0, 120) : "";
+    const items = Array.isArray(t.items)
+      ? t.items
+          .map((item) => {
+            if (typeof item !== "object" || item === null) return null;
+            const i = item as { id?: unknown; title?: unknown; position?: unknown };
+            const id = typeof i.id === "string" ? i.id.trim().slice(0, 128) : "";
+            const title = typeof i.title === "string" ? i.title.trim().slice(0, 120) : "";
+            const position = typeof i.position === "number" && Number.isFinite(i.position)
+              ? Math.max(1, Math.min(500, Math.floor(i.position)))
+              : 1;
+            return id && title ? { id, title, position } : null;
+          })
+          .filter((item): item is { id: string; title: string; position: number } => Boolean(item))
+          .slice(0, 100)
+      : [];
+    if (listId && listTitle) {
+      todo = {
+        list_id: listId,
+        list_title: listTitle,
+        items,
+        transient: t.transient === true,
+      };
+    }
+  }
 
   // Parse deliberation carryover (compare variant only)
   let deliberation: SurfaceSnapshot["deliberation"] | undefined;
@@ -229,5 +280,80 @@ function parseSurfaceSnapshot(
     }
   }
 
-  return { kind, contractorIds, deliberation };
+  // Parse the pending-find carryover (6 asked for city/ZIP; the client echoes
+  // the remembered category so a bare "21093" answer resumes the find).
+  let pendingFind: SurfaceSnapshot["pendingFind"] | undefined;
+  if (typeof r.pendingFind === "object" && r.pendingFind !== null) {
+    const p = r.pendingFind as { category?: unknown };
+    if (typeof p.category === "string" && p.category.trim() !== "") {
+      pendingFind = { category: p.category.trim().slice(0, 40) };
+    }
+  }
+
+  // Parse the pending list-index carryover (6 read the user's list names and
+  // asked "Which one?"). Without this, the client can remember the menu but the
+  // server never sees it, so "first one" falls through to no-op/brain.
+  let pendingListIndex: SurfaceSnapshot["pendingListIndex"] | undefined;
+  if (
+    typeof r.pendingListIndex === "object" &&
+    r.pendingListIndex !== null
+  ) {
+    const p = r.pendingListIndex as { entries?: unknown };
+    const entries = Array.isArray(p.entries)
+      ? p.entries
+          .map((entry) => {
+            if (typeof entry !== "object" || entry === null) return null;
+            const e = entry as { id?: unknown; title?: unknown };
+            if (typeof e.id !== "string" || typeof e.title !== "string") {
+              return null;
+            }
+            const id = e.id.trim().slice(0, 128);
+            const title = e.title.trim().slice(0, 120);
+            return id && title ? { id, title } : null;
+          })
+          .filter((entry): entry is { id: string; title: string } => Boolean(entry))
+          .slice(0, 20)
+      : [];
+    if (entries.length > 0) pendingListIndex = { entries };
+  }
+
+  // Parse the one-shot add-offer carryover (6 spoke "want me to add X?";
+  // the client echoes the offered items so a bare "yes" resolves them into
+  // a real, deterministic add — aiASAP ITEM 4, Herm TASK_070 blocker #2).
+  let pendingAddOffer: SurfaceSnapshot["pendingAddOffer"] | undefined;
+  if (typeof r.pendingAddOffer === "object" && r.pendingAddOffer !== null) {
+    const p = r.pendingAddOffer as { items?: unknown };
+    if (Array.isArray(p.items)) {
+      const items = p.items
+        .filter((x): x is string => typeof x === "string")
+        .map((s) => s.trim())
+        .filter((s) => s.length >= 2 && s.length <= 80)
+        .slice(0, 5);
+      if (items.length > 0) pendingAddOffer = { items };
+    }
+  }
+
+  // Parse the one-shot list-intake carryover (6 asked "what should I put on
+  // it?"; the next plain answer becomes real items — Herm TASK_094).
+  let pendingListAdd: SurfaceSnapshot["pendingListAdd"] | undefined;
+  if (typeof r.pendingListAdd === "object" && r.pendingListAdd !== null) {
+    const p = r.pendingListAdd as { listName?: unknown };
+    pendingListAdd = {
+      listName:
+        typeof p.listName === "string" && p.listName.trim() !== ""
+          ? p.listName.trim().slice(0, 60)
+          : null,
+    };
+  }
+
+  return {
+    kind,
+    contractorIds,
+    todo,
+    deliberation,
+    pendingFind,
+    pendingListIndex,
+    pendingAddOffer,
+    pendingListAdd,
+  };
 }

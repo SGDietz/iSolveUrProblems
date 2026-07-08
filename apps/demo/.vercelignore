@@ -1,0 +1,5 @@
+# Local-only Herm/Claude smoke and Supabase CLI artifacts.
+# These are useful for verification but must never ship in a Vercel payload.
+tmp/
+supabase/.temp/
+*.log

@@ -6,6 +6,7 @@ import {
   setContractorStripeConnect,
 } from "../../../../../src/lib/payments";
 import { verifyAdminBearer } from "../../../../../src/lib/apiRouteSecurity";
+import { checkRateLimit } from "../../../../../src/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -19,7 +20,14 @@ export const maxDuration = 30;
  * its acct_... id, and wire it to any contractor row to test the
  * homeowner-side hire + pay flow end-to-end.
  *
- * Auth: bearer ADMIN_SECRET.
+ * Auth: bearer ADMIN_SECRET (constant-time compare) + rate limit.
+ *
+ * DELIBERATELY no assertAllowedOrigin (audited 2026-07-02): admin routes
+ * are machine-called (curl/scripts) with an explicit secret header. A
+ * browser CSRF attack cannot attach an Authorization header, so the
+ * bearer check already blocks everything the origin guard would — while
+ * the origin guard would 403 legitimate originless curl calls in prod.
+ * Same posture as /api/contractors/[id]/onboard and the cron route.
  *
  * Body:
  *   {
@@ -39,6 +47,9 @@ function bad(msg: string, status = 400) {
 }
 
 export async function POST(request: NextRequest) {
+  const rateLimitErr = await checkRateLimit(request);
+  if (rateLimitErr) return rateLimitErr;
+
   if (!ADMIN_SECRET) return bad("ADMIN_SECRET not configured", 503);
   if (!verifyAdminBearer(request.headers.get("authorization"), ADMIN_SECRET).ok) {
     return bad("unauthorized", 401);

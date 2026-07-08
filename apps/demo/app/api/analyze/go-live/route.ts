@@ -6,7 +6,7 @@ import { checkRateLimit } from "../../../../src/lib/rateLimit";
 /**
  * /api/analyze/go-live — Real-time frame analysis for Go Live mode.
  *
- * Per Q1.3a: Gemini 2.0 Flash by default; client can request escalation
+ * Per Q1.3a: Gemini 2.5 Flash Lite by default; client can request escalation
  * to GPT-4o by passing { model: "gpt4o" } (e.g. user says "take a
  * closer look, 6").
  *
@@ -35,7 +35,13 @@ import { checkRateLimit } from "../../../../src/lib/rateLimit";
  *     user not speaking, debounce since last narration.
  */
 
-const FLASH_MODEL = "gemini-2.0-flash-exp";
+// Bound the function + both upstream caption calls (same hygiene as
+// analyze-video/analyze-image, Herm TASK_067): Go Live fires per-frame, so a
+// hung vision fetch would otherwise pile functions up to the platform ceiling.
+export const maxDuration = 15;
+const CAPTION_TIMEOUT_MS = 10_000;
+
+const FLASH_MODEL = "gemini-2.5-flash-lite";
 
 const CAPTION_PROMPT = `You are 6, an ai handyman analyzing what the user's camera is currently pointed at.
 
@@ -78,11 +84,14 @@ async function callGeminiFlash(args: {
       maxOutputTokens: 80,
     },
   };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CAPTION_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
     if (!res.ok) {
       return { error: `gemini ${res.status}` };
@@ -97,6 +106,8 @@ async function callGeminiFlash(args: {
     return { caption: text };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "gemini threw" };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -129,6 +140,8 @@ async function callGpt4o(args: {
       },
     ],
   };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CAPTION_TIMEOUT_MS);
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -137,6 +150,7 @@ async function callGpt4o(args: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
     if (!res.ok) return { error: `openai ${res.status}` };
     const data = (await res.json()) as {
@@ -146,6 +160,8 @@ async function callGpt4o(args: {
     return { caption: text };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "openai threw" };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

@@ -50,8 +50,7 @@ export function ComparePanel({ payload }: { payload: ComparePayload }) {
               </div>
               <span className="text-[11px] text-zinc-400 font-mono shrink-0">
                 {p.rating_avg != null ? `★ ${p.rating_avg.toFixed(1)}` : "★ —"}
-                {" · "}
-                {p.distance_km.toFixed(1)} km
+                {p.distance_km > 0 && ` · ${p.distance_km.toFixed(1)} km`}
                 {" · "}
                 {priceTierGlyph(p.price_tier)}
               </span>

@@ -172,12 +172,16 @@ export async function getContractorStripeRow(
   stripe_connect_account_id: string | null;
   stripe_charges_enabled: boolean;
   payouts_enabled: boolean;
+  /** M4.0c — populated when the contractor has claimed their profile.
+   *  Used by user-gated routes (e.g. /connect-onboard) to authorize
+   *  the signed-in user against the row. */
+  claimed_by_user_id: string | null;
 } | null> {
   const { url, serviceRoleKey } = getSupabaseAdminConfig();
   const res = await fetch(
     `${url}/rest/v1/contractors?id=eq.${encodeURIComponent(
       contractor_id,
-    )}&select=id,name,email,stripe_connect_account_id,stripe_charges_enabled,payouts_enabled&limit=1`,
+    )}&select=id,name,email,stripe_connect_account_id,stripe_charges_enabled,payouts_enabled,claimed_by_user_id&limit=1`,
     { headers: adminHeaders(serviceRoleKey), cache: "no-store" },
   );
   if (!res.ok) return null;
@@ -188,6 +192,7 @@ export async function getContractorStripeRow(
     stripe_connect_account_id: string | null;
     stripe_charges_enabled: boolean;
     payouts_enabled: boolean;
+    claimed_by_user_id: string | null;
   }>;
   return rows[0] ?? null;
 }

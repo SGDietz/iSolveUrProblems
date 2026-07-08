@@ -7,19 +7,56 @@ import {
   upsertContractorSummary,
   recommendContractors,
   deliberate,
+  missingContractorOnboardingFields,
+  upsertSelfOnboardedContractor,
+  type ContractorOnboardingDraft,
+  type ContractorCategorySlug,
+  type ContractorRow,
+  type ContractorSearchHit,
   type DeliberateConstraints,
 } from "../contractors";
+import { findContractorsLive } from "../contractors/liveFind";
+import { extractContactDetails } from "../contactExtraction";
+import { extractCategory, extractLocation, extractLocationText } from "./slots";
 import {
   createAppointment,
   rescheduleAppointment,
   cancelAppointment,
   listUpcomingAppointments,
+  findRecentUnfulfilledAppointment,
+  declareNoShowAndDispatch,
   type AppointmentRow,
 } from "../appointments";
-import { getSupabaseAdminConfig } from "../supabaseAdmin";
-import { classifyIntent } from "./classify";
-import { DEFAULT_CENTER } from "./slots";
 import {
+  createRecurringJob,
+  expandInstances,
+  type RecurringJobRow,
+} from "../recurring";
+import { getActiveTierForContractor, tierUnlocks } from "../billing";
+import {
+  addItems,
+  clearList,
+  findClaimedContractorId,
+  listLists,
+  listOpenItems,
+  renameList,
+  getListById,
+  resolveTargetList,
+  resolveListPick,
+  setItemStatus,
+  splitSpokenItems,
+  type ListIndexEntry,
+  type ListItemRow,
+  type ListRow,
+} from "../lists";
+import { getSupabaseAdminConfig } from "../supabaseAdmin";
+import {
+  captureFeatureRequest,
+  detectFeatureRequestCapture,
+} from "../featureRequests";
+import { classifyIntent } from "./classify";
+import {
+  cleanForContext,
   wrapAppointmentCancelled,
   wrapAppointmentRescheduled,
   wrapAppointmentScheduled,
@@ -31,12 +68,20 @@ import {
   wrapDisputeOpened,
   wrapDraftContract,
   wrapEstimateReady,
+  wrapContractorOnboardingPrompt,
+  wrapContractorProfileSaved,
   wrapFallback,
-  wrapPickResult,
   wrapRecommendationsResult,
   wrapSummaryResult,
+  wrapTodoAdded,
+  wrapTodosList,
+  wrapTodoCompleted,
+  wrapTodoRemoved,
+  wrapListCleared,
+  wrapListIndex,
+  wrapNoShowDispatched,
+  wrapRecurringScheduled,
 } from "./contextInjector";
-import { executeBook } from "./bookHandler";
 import {
   insertContract,
   setContractEsign,
@@ -69,6 +114,7 @@ import {
   patchCall,
   setCallStatus,
   signCallRecordingUrl,
+  userKnowsContractor,
 } from "../calls";
 import { getRecentTranscriptForSession } from "../transcripts/store";
 import type {
@@ -79,12 +125,15 @@ import type {
   DisputePayload,
   DisputeThreadMessage,
   EstimatePayload,
+  RecurringJobPayload,
 } from "../assistantSurface";
 import type {
   ContractorCard,
+  ContractorOnboardingField,
   RecommendationCard,
   SummaryPayload,
   SurfaceVariant,
+  TodoPayload,
 } from "../assistantSurface";
 import type {
   ContractorRef,
@@ -124,9 +173,20 @@ export type SurfaceSnapshot = {
     | "dispute"
     | "call"
     | "estimate"
+    | "todo"
+    | "contractorOnboarding"
+    | "recurring"
     | null;
   /** Ordered as displayed in the drawer. Empty for non-list variants. */
   contractorIds: string[];
+  /** Visible todo/list snapshot. Used for local-only guest list follow-ups
+   *  where there is no DB row to reopen. */
+  todo?: {
+    list_id: string;
+    list_title: string;
+    items: Array<{ id: string; title: string; position: number }>;
+    transient?: boolean;
+  };
   /**
    * Carryover state when current surface is the deliberation compare panel.
    * Lets multi-turn refinement accumulate constraints without losing the
@@ -135,6 +195,41 @@ export type SurfaceSnapshot = {
   deliberation?: {
     category: string;
     constraints: DeliberateConstraints;
+  };
+  /**
+   * Set client-side while 6 is waiting on a city/ZIP for a contractor find
+   * (G smoke 2026-07-01: bare "21093" answers went nowhere and the brain
+   * invented a plumber). The location-answer rule resumes the find with
+   * this category.
+   */
+  pendingFind?: {
+    category: string;
+  };
+  /**
+   * Set after 6 reads the user's list index and asks "Which one?". The next
+   * short pick ("first one", "Henderson") opens that list instead of falling
+   * through to the brain/no-op.
+   */
+  pendingListIndex?: {
+    entries: ListIndexEntry[];
+  };
+  /**
+   * Set client-side when 6 SPOKE an add-offer ("Want me to add milk?" —
+   * detected on the avatar transcript via ADD_OFFER_RE, items parsed with
+   * parseOfferedAddItems). One-shot: the next user utterance either resolves
+   * it (bare "yes" → deterministic list add via the add_offer rule) or kills
+   * it. aiASAP ITEM 4 behavior, now wired (Herm TASK_070 blocker #2).
+   */
+  pendingAddOffer?: {
+    items: string[];
+  };
+  /**
+   * Set client-side after 6 asked "what should I put on it?" (make-list with
+   * no items). The next plain answer becomes real list items via the
+   * relaxed pending-answer splitter (Herm TASK_094 blocker #2).
+   */
+  pendingListAdd?: {
+    listName?: string | null;
   };
 };
 
@@ -163,7 +258,15 @@ export type OrchestratorOutput =
       kind: "action";
       classification: IntentClassification;
       variant?: SurfaceVariant;
+      /** True for a voice UI-dismiss action: clear/hide the current surface. */
+      dismissSurface?: boolean;
       contextMessage?: string;
+      /** Multi-turn continuations the client must remember and echo back in
+       *  the next snapshot (e.g. a find waiting on the user's city/ZIP). */
+      pending?:
+        | { kind: "find"; category: string }
+        | { kind: "list_index"; entries: ListIndexEntry[] }
+        | { kind: "list_add"; listName?: string | null };
       debug?: Record<string, unknown>;
     };
 
@@ -201,18 +304,27 @@ async function fetchContractorById(
   } catch {
     return null;
   }
-  const res = await fetch(
-    `${url}/rest/v1/contractors?id=eq.${encodeURIComponent(
-      id,
-    )}&select=id,name&limit=1`,
-    {
-      headers: {
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
-      },
-      cache: "no-store",
+  const qs = new URLSearchParams();
+  qs.set("select", "id,name");
+  qs.set("limit", "1");
+  if (isUuid(id)) {
+    qs.set("id", `eq.${id}`);
+  } else {
+    // A non-UUID id is a live Outscraper card whose DB-UUID rehydration
+    // didn't land in time (persistence timed out/failed) — resolve it by
+    // provider source_id like fetchSnapshotContractorMeta does, so ordinal
+    // details/book still work (Herm TASK_072 #1 fallback gap). The row is
+    // returned with its real DB UUID, so everything downstream uses that.
+    qs.set("source", "eq.outscraper_live");
+    qs.set("source_id", `eq.${id}`);
+  }
+  const res = await fetch(`${url}/rest/v1/contractors?${qs.toString()}`, {
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
     },
-  );
+    cache: "no-store",
+  });
   if (!res.ok) return null;
   const rows = (await res.json()) as Array<{ id: string; name: string }>;
   return rows[0] ?? null;
@@ -257,7 +369,13 @@ function contractorRowToCard(c: {
   licensed_flag: boolean | null;
   phone: string | null;
   website: string | null;
+  email?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
   score?: number;
+  area_label?: string;
+  distance_note?: "same_area_unknown";
 }): ContractorCard {
   return {
     id: c.id,
@@ -271,39 +389,442 @@ function contractorRowToCard(c: {
     licensed_flag: c.licensed_flag,
     phone: c.phone,
     website: c.website,
+    // Real scraped/self-onboarded emails only — most rows are null and the
+    // panel renders nothing then (never invent one; Herm TASK_094 item 3).
+    email: c.email ?? null,
     score: c.score,
+    area_label: c.area_label ?? areaLabel(c),
+    distance_note: c.distance_note,
   };
 }
 
 // ─── Per-intent handlers ────────────────────────────────────────────
 
+/** Dedupe merged hits by phone (digits) then name — first wins. */
+function dedupeContractorHits(hits: ContractorSearchHit[]): ContractorSearchHit[] {
+  const seen = new Set<string>();
+  const out: ContractorSearchHit[] = [];
+  for (const h of hits) {
+    const key = h.phone?.replace(/\D/g, "") || h.name.toLowerCase().trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(h);
+  }
+  return out;
+}
+
+// Persisted REAL supply (Herm TASK_081 patch A): the sacred contractors DB
+// compounds with every search — a live Outscraper blip must never erase rows
+// we already hold. Self-onboarded rows are durable; outscraper_live rows are
+// cached live supply, bounded to recent sightings so stale pros don't serve.
+const REAL_PERSISTED_CONTRACTOR_SOURCES = ["self_onboarded", "outscraper_live"];
+const OUTSCRAPER_PERSISTED_FALLBACK_DAYS = 14;
+
+function extractZipOnly(locationText?: string | null): string | null {
+  const m = locationText?.trim().match(/^\d{5}$/);
+  return m?.[0] ?? null;
+}
+
+function scorePersistedContractor(row: ContractorRow): number {
+  const ratingScore =
+    typeof row.rating_avg === "number"
+      ? Math.max(0, Math.min(1, (row.rating_avg - 1) / 4))
+      : 0;
+  const confidence =
+    typeof row.rating_count === "number" ? Math.min(1, row.rating_count / 25) : 0;
+  return ratingScore * (0.6 + 0.4 * confidence);
+}
+
+function persistedRowToUnknownDistanceHit(row: ContractorRow): ContractorSearchHit {
+  return {
+    ...row,
+    // ZIP-only fallback has no user coords. Keep distance unknown; UI/voice
+    // already hide 0 instead of saying fake-local miles/km.
+    distance_km: 0,
+    score: scorePersistedContractor(row),
+  };
+}
+
+async function searchPersistedContractorsByZip(args: {
+  category: string;
+  zip: string;
+  limit?: number;
+}): Promise<ContractorSearchHit[] | null> {
+  let url: string;
+  let serviceRoleKey: string;
+  try {
+    ({ url, serviceRoleKey } = getSupabaseAdminConfig());
+  } catch {
+    return null;
+  }
+
+  const limit = Math.min(Math.max(args.limit ?? 3, 1), 20);
+  const since = new Date(
+    Date.now() - OUTSCRAPER_PERSISTED_FALLBACK_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  const qs = new URLSearchParams();
+  qs.set("select", "*");
+  qs.append("categories", `cs.{${args.category}}`);
+  qs.set("zip", `eq.${args.zip}`);
+  qs.append("source", `in.(${REAL_PERSISTED_CONTRACTOR_SOURCES.join(",")})`);
+  qs.append("source", "not.in.(mock,seed)");
+  // Self-onboarded rows are durable supply. Outscraper rows are cached live
+  // supply, so bound them to recent sightings to avoid stale marketplace cards.
+  qs.set("or", `(source.eq.self_onboarded,last_seen_at.gte.${since})`);
+  qs.set("limit", String(limit));
+  qs.set("order", "rating_avg.desc.nullslast");
+
+  try {
+    const res = await fetch(`${url}/rest/v1/contractors?${qs.toString()}`, {
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as ContractorRow[];
+    return rows
+      .filter(
+        (row) =>
+          row.source === "self_onboarded" ||
+          Date.parse(row.last_seen_at) >= Date.parse(since),
+      )
+      .map(persistedRowToUnknownDistanceHit)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+  } catch {
+    return null;
+  }
+}
+
+async function searchPersistedRealContractors(args: {
+  category: string;
+  locationText?: string | null;
+  near: { lat: number; lng: number } | null;
+  limit?: number;
+}): Promise<ContractorSearchHit[]> {
+  const limit = args.limit ?? 3;
+  // Bound the DB side so a Supabase stall can't delay the live results.
+  const fallback = new Promise<null>((resolve) =>
+    setTimeout(() => resolve(null), 4000),
+  );
+
+  const result = await Promise.race([
+    args.near
+      ? searchContractors({
+          category: args.category,
+          near: args.near,
+          radius_km: 80,
+          limit,
+          sources: REAL_PERSISTED_CONTRACTOR_SOURCES,
+        }).then((r) => (r.error ? null : r.hits))
+      : (() => {
+          const zip = extractZipOnly(args.locationText);
+          return zip
+            ? searchPersistedContractorsByZip({
+                category: args.category,
+                zip,
+                limit,
+              })
+            : Promise.resolve(null);
+        })(),
+    fallback,
+  ]).catch(() => null);
+
+  return result ?? [];
+}
+
+// G's 3-card minimum (voice note 2026-07-02: "definitely three of those
+// boxes... boom boom boom"). When live + exact-ZIP persisted supply comes up
+// short, fill from persisted NEARBY rows (same 3-digit ZIP prefix) — LABELED
+// "same area, distance unknown" so neither the UI nor the brain ever passes
+// them off as exact-local (Herm TASK_086 patch; his 082 deferral superseded
+// by G's directive).
+const CONTRACTOR_CARD_TARGET_COUNT = 3;
+
+type CardAnnotatedHit = ContractorSearchHit & {
+  area_label?: string;
+  distance_note?: "same_area_unknown";
+};
+
+function areaLabel(row: {
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+}): string | undefined {
+  const cityState = [row.city, row.state].filter(Boolean).join(", ");
+  return [cityState, row.zip].filter(Boolean).join(" ") || undefined;
+}
+
+function markNearbyFill(hit: ContractorSearchHit): CardAnnotatedHit {
+  return {
+    ...hit,
+    distance_km: 0,
+    area_label: areaLabel(hit) ?? "Same area",
+    distance_note: "same_area_unknown",
+  };
+}
+
+async function searchPersistedNearbyContractorsByZip(args: {
+  category: string;
+  zip: string;
+  excludeIds: Set<string>;
+  limit: number;
+}): Promise<CardAnnotatedHit[]> {
+  const prefix = args.zip.slice(0, 3);
+  if (prefix.length !== 3) return [];
+  let url: string;
+  let serviceRoleKey: string;
+  try {
+    ({ url, serviceRoleKey } = getSupabaseAdminConfig());
+  } catch {
+    return [];
+  }
+  const since = new Date(
+    Date.now() - OUTSCRAPER_PERSISTED_FALLBACK_DAYS * 86400000,
+  ).toISOString();
+  const qs = new URLSearchParams();
+  qs.set("select", "*");
+  qs.append("categories", `cs.{${args.category}}`);
+  qs.set("zip", `like.${prefix}%`);
+  qs.append("source", `in.(${REAL_PERSISTED_CONTRACTOR_SOURCES.join(",")})`);
+  qs.append("source", "not.in.(mock,seed)");
+  qs.set("or", `(source.eq.self_onboarded,last_seen_at.gte.${since})`);
+  qs.set("order", "rating_avg.desc.nullslast");
+  qs.set("limit", String(Math.min(args.limit + args.excludeIds.size + 8, 24)));
+
+  try {
+    const res = await fetch(`${url}/rest/v1/contractors?${qs.toString()}`, {
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const rows = (await res.json()) as ContractorRow[];
+    return rows
+      .filter((row) => row.zip !== args.zip)
+      .filter(
+        (row) =>
+          !args.excludeIds.has(row.id) && !args.excludeIds.has(row.source_id),
+      )
+      .map((row) => markNearbyFill(persistedRowToUnknownDistanceHit(row)))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, args.limit);
+  } catch {
+    return [];
+  }
+}
+
+// Post-merge requested-area check (Herm TASK_146): mirrors liveFind's guard
+// but also covers PERSISTED rows (a poisoned earlier scrape lives in the
+// forever DB). Coords beat text; ZIP prefix beats city words; no location
+// spoken = no filtering (the wrapper already refuses "local" claims then).
+function contractorHitMatchesRequestedArea(
+  hit: CardAnnotatedHit,
+  locationText?: string | null,
+  near?: { lat: number; lng: number } | null,
+): boolean {
+  if (!locationText) return true;
+  if (near && hit.distance_km > 0) return hit.distance_km <= 160;
+  const zip = locationText.match(/\b\d{5}\b/)?.[0];
+  if (zip) return Boolean(hit.zip?.startsWith(zip.slice(0, 3)));
+  const wanted = locationText
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !["near", "the", "and", "for"].includes(w));
+  const area = [hit.city, hit.state, hit.zip, hit.address]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return wanted.length > 0 && wanted.some((w) => area.includes(w));
+}
+
 async function handleFindContractor(args: {
   slots: IntentSlots;
-}): Promise<{ variant: SurfaceVariant; contextMessage: string }> {
+  snapshot?: SurfaceSnapshot;
+}): Promise<{
+  variant?: SurfaceVariant;
+  contextMessage: string;
+  pending?: { kind: "find"; category: string };
+}> {
+  // "Show me more" (G Droid smoke 2026-07-02): re-run the find around what's
+  // already ON SCREEN — category/area come from the first visible card's
+  // persisted row, the pull goes deeper, and only genuinely NEW pros count.
+  // Honest when the deeper pull finds nothing fresh — never pad the list.
+  if (args.slots.more) {
+    const screenIds = args.snapshot?.contractorIds ?? [];
+    const meta = screenIds[0]
+      ? await fetchSnapshotContractorMeta(screenIds[0])
+      : null;
+    const moreCategory = args.slots.category ?? meta?.categories?.[0] ?? "general";
+    const moreLocationText =
+      meta?.zip ||
+      [meta?.city, meta?.state].filter(Boolean).join(", ") ||
+      undefined;
+    const moreNear =
+      meta?.lat != null && meta?.lng != null
+        ? { lat: meta.lat, lng: meta.lng }
+        : null;
+    if (!moreLocationText && !moreNear) {
+      return {
+        contextMessage: wrapFallback(
+          "wanted more pros but couldn't tell the area from the cards on screen — ask for their city or ZIP",
+        ),
+      };
+    }
+    const [moreLive, morePersisted] = await Promise.all([
+      findContractorsLive({
+        category: moreCategory,
+        locationText: moreLocationText,
+        near: moreNear,
+        limit: 8,
+      }),
+      searchPersistedRealContractors({
+        category: moreCategory,
+        locationText: moreLocationText,
+        near: moreNear,
+        limit: 8,
+      }),
+    ]);
+    const moreLiveHits = !moreLive.error ? moreLive.hits : [];
+    const moreMerged = dedupeContractorHits([
+      ...morePersisted,
+      ...moreLiveHits,
+    ]).slice(0, 8);
+    const screen = new Set(screenIds);
+    const fresh = moreMerged.filter(
+      (h) => !screen.has(h.id) && !screen.has(h.source_id),
+    );
+    if (fresh.length === 0) {
+      return {
+        contextMessage: `[FIND MORE — not spoken by user] The user asked for more ${cleanForContext(moreCategory)}s, but a deeper pull found no NEW real pros beyond the ones already on screen. Say honestly that's every real one you could pull right now — never invent or pad the list.`,
+      };
+    }
+    const moreHits: ContractorCard[] = fresh.slice(0, 8).map(contractorRowToCard);
+    return {
+      variant: {
+        kind: "contractors",
+        hits: moreHits,
+        total_considered: moreHits.length,
+      },
+      contextMessage: wrapContractorsResult({
+        category: moreCategory,
+        location_text: moreLocationText,
+        hits: moreHits,
+      }),
+    };
+  }
+
   const category = args.slots.category ?? "general";
-  const near = args.slots.location ?? DEFAULT_CENTER;
-  const result = await searchContractors({
-    category,
-    near,
-    radius_km: 25,
-    min_rating: args.slots.filters?.min_rating,
-    max_price_tier: args.slots.filters?.max_price_tier,
-    locally_owned: args.slots.filters?.locally_owned,
-    same_day: args.slots.filters?.same_day,
-    limit: 10,
-  });
-  const hits: ContractorCard[] = result.hits.map(contractorRowToCard);
-  return {
-    variant: {
-      kind: "contractors",
-      hits,
-      total_considered: result.total_considered,
-    },
-    contextMessage: wrapContractorsResult({
+  const locationText = args.slots.location_text;
+  const near = args.slots.location ?? null;
+
+  // REAL supply only (G 2026-06-30: real or nothing). Live Outscraper pull PLUS
+  // persisted REAL supply: self-onboarded rows and recently seen Outscraper rows
+  // already saved to the sacred contractors DB (Herm TASK_081: a live provider
+  // blip/zero must not erase real rows we already know about — G's 21093 smoke
+  // heard "no plumbers" while the DB held three). NEVER mock/seed. Coords give
+  // real distance; ZIP-only fallback hides distance rather than inventing one.
+  // Ask BOTH sources for 8, not 3 (G iPad smoke 2026-07-03: "2 fucking
+  // painters. Where the fuck is 3 fucking painters"). Outscraper returns up
+  // to 20 real businesses; asking for only 3 left thin areas short after
+  // dedup. Pulling 8 gets enough REAL local pros to fill the 3 cards with
+  // genuine supply instead of leaning on the nearby-fill band-aid. Still
+  // capped to CONTRACTOR_CARD_TARGET_COUNT for display.
+  const [live, persistedHits] = await Promise.all([
+    findContractorsLive({ category, locationText, near, limit: 8 }),
+    searchPersistedRealContractors({
       category,
-      location_text: args.slots.location_text,
-      hits,
+      locationText,
+      near,
+      limit: 8,
     }),
+  ]);
+
+  const liveHits = !live.error ? live.hits : [];
+  const mergedRaw = dedupeContractorHits([...persistedHits, ...liveHits]);
+  // Second area guard AFTER merge (Herm TASK_146): persisted-cache rows from
+  // an earlier poisoned scrape (the 2026-07-07 "Okay, so" ride saved NYC +
+  // Hanoi rows into the forever DB) must never resurface as "your area".
+  const areaChecked = locationText
+    ? mergedRaw.filter((h) =>
+        contractorHitMatchesRequestedArea(h, locationText, near),
+      )
+    : mergedRaw;
+  if (locationText && mergedRaw.length > 0 && areaChecked.length === 0) {
+    return {
+      contextMessage: `[FIND — not spoken by user] The directory returned pros, but their cities did not match "${cleanForContext(locationText)}". In first person as 6, say you need the city or ZIP one more time before pulling local pros. Do NOT name the mismatched businesses.`,
+      pending: { kind: "find", category },
+    };
+  }
+  let merged: CardAnnotatedHit[] = areaChecked.slice(
+    0,
+    CONTRACTOR_CARD_TARGET_COUNT,
+  );
+
+  // 3-card minimum (G "boom boom boom"): thin live/exact-ZIP supply fills
+  // from persisted NEARBY rows, explicitly labeled — never passed off as
+  // exact-local (Herm TASK_086).
+  const fillZip = extractZipOnly(locationText);
+  if (
+    fillZip &&
+    merged.length < CONTRACTOR_CARD_TARGET_COUNT
+  ) {
+    const excludeIds = new Set<string>();
+    for (const h of merged) {
+      excludeIds.add(h.id);
+      if (h.source_id) excludeIds.add(h.source_id);
+    }
+    // NO state filter: live cards say "MD" while persisted rows say
+    // "Maryland" — the eq. filter silently zeroed the fill (G's smoke #6:
+    // 2 painters, not 3). The 3-digit ZIP prefix is already state-safe.
+    const nearby = await searchPersistedNearbyContractorsByZip({
+      category,
+      zip: fillZip,
+      excludeIds,
+      limit: CONTRACTOR_CARD_TARGET_COUNT - merged.length,
+    });
+    merged = dedupeContractorHits([...merged, ...nearby]).slice(
+      0,
+      CONTRACTOR_CARD_TARGET_COUNT,
+    ) as CardAnnotatedHit[];
+  }
+
+  if (merged.length > 0) {
+    const hits: ContractorCard[] = merged.map(contractorRowToCard);
+    return {
+      variant: { kind: "contractors", hits, total_considered: hits.length },
+      contextMessage: wrapContractorsResult({
+        category,
+        location_text: locationText,
+        hits,
+        // Every card here passed the requested-area check above (nearby-fill
+        // rows are ZIP-prefix-safe and keep their own honesty label).
+        area_verified: Boolean(locationText),
+      }),
+    };
+  }
+
+  // No pros: if we don't have the user's area, ask for it; otherwise report
+  // the hiccup honestly. NEVER invent contractors, NEVER serve seed/mock data.
+  if (!locationText) {
+    return {
+      contextMessage: `[FIND — not spoken by user] The user wants a ${cleanForContext(category)} but you don't have their area yet. In first person as 6, ask what city or ZIP they're in so you can pull REAL local pros. Do NOT invent or name any contractors — the moment they answer, the real list arrives on its own.`,
+      // The client remembers this and echoes it back in the next snapshot,
+      // so a bare "21093" answer resumes THIS find (G smoke 2026-07-01).
+      pending: { kind: "find", category },
+    };
+  }
+  // locationText is raw user speech — cleaned before it reaches the brain
+  // (Herm TASK_072 blocker #9).
+  return {
+    contextMessage: `[FIND — not spoken by user] The live directory returned no ${cleanForContext(category)}s near "${cleanForContext(locationText)}" right now (temporary). Warmly tell them you couldn't pull any this second and offer to try again. Do NOT invent or name any contractors.`,
   };
 }
 
@@ -367,6 +888,18 @@ async function handleTellMeMore(args: {
       reviews: data.reviews,
     });
     if (!fresh.ok) {
+      // HONEST gate (Herm release blocker #2): live-scraped pros carry a real
+      // star rating + review COUNT but no review TEXT corpus yet. 6 must say
+      // exactly that — never synthesize what reviewers "say".
+      if (fresh.reason === "too_few_reviews") {
+        return {
+          contextMessage: [
+            `[REVIEW SUMMARY UNAVAILABLE — not spoken by user]`,
+            `${cleanForContext(resolved.name)} has no review text on file with us yet — only the overall star rating and review count already shown on their card.`,
+            `Respond as 6 in first person: point at the star rating and review count on the card as the real signal, and say you don't have their written reviews on file yet. NEVER invent, paraphrase, or imply specific review content. One or two sentences.`,
+          ].join("\n"),
+        };
+      }
       return {
         contextMessage: wrapFallback(
           `couldn't summarize ${resolved.name} (${fresh.reason})`,
@@ -395,6 +928,41 @@ async function handleTellMeMore(args: {
   };
 }
 
+/**
+ * Shared LIVE-supply fallback (G doctrine 2026-07-03: Outscraper is PRIMARY,
+ * the DB is a near-empty cache). Any DB-backed handler that comes up empty or
+ * thin re-runs the live directory and shows REAL cards instead of dead-ending.
+ * Returns null when there's no place string to search or live returns nothing
+ * — the caller then keeps its own honest "offer to pull fresh" message.
+ */
+async function liveContractorsFallbackVariant(args: {
+  category: string | null;
+  locationText: string | null;
+  near: { lat: number; lng: number } | null;
+}): Promise<{ variant: SurfaceVariant; contextMessage: string } | null> {
+  const locationText = args.locationText?.trim() || null;
+  if (!locationText) return null;
+  const category = args.category ?? "general";
+  const live = await findContractorsLive({
+    category,
+    locationText,
+    near: args.near,
+    limit: 8,
+  });
+  if (live.error || live.hits.length === 0) return null;
+  const hits: ContractorCard[] = live.hits
+    .slice(0, CONTRACTOR_CARD_TARGET_COUNT)
+    .map(contractorRowToCard);
+  return {
+    variant: { kind: "contractors", hits, total_considered: hits.length },
+    contextMessage: wrapContractorsResult({
+      category,
+      location_text: locationText,
+      hits,
+    }),
+  };
+}
+
 async function handleRecommend(args: {
   slots: IntentSlots;
   user_id: string | null;
@@ -403,12 +971,26 @@ async function handleRecommend(args: {
   | { variant: SurfaceVariant; contextMessage: string }
   | { contextMessage: string }
 > {
-  // If we have a current contractor list, use its category from the snapshot
-  // (best-effort) — otherwise fall back to "general" + default center.
-  const category = args.slots.category ?? "general";
-  const near = args.slots.location ?? DEFAULT_CENTER;
+  // Use the category + area from the contractors already on screen so
+  // "which one?" ranks near what the user is looking at. If we can't resolve a
+  // real location (user's coords OR the on-screen list's), ASK for city/ZIP —
+  // never rank near a default center (Herm TASK_064 #3 / TASK_065 #3).
+  const category =
+    args.slots.category ?? (await inferCategoryFromSnapshot(args.snapshot));
+  const inferredNear = args.slots.location
+    ? null
+    : await inferLocationFromSnapshot(args.snapshot);
+  const near = args.slots.location ?? inferredNear;
+  if (!near) {
+    return {
+      contextMessage:
+        `[RECOMMEND — not spoken by user] No usable location — nothing on screen resolves to a place and the user hasn't given a city/ZIP. Respond as 6 in first person: ask what city or ZIP they're in (or offer to pull up some pros first) so you recommend REAL local options. One sentence. Do NOT default to any city.`,
+    };
+  }
   const result = await recommendContractors({
     userId: args.user_id,
+    // Only speak distance when we know the USER's own coords (not inferred).
+    distance_known: !!args.slots.location,
     searchInput: {
       category,
       near,
@@ -416,11 +998,26 @@ async function handleRecommend(args: {
       min_rating: 4.5,
     },
   });
-  if (result.picks.length === 0) {
-    return {
-      contextMessage: wrapFallback(
-        "no recommendations could be produced (engine returned empty)",
-      ),
+  // THIN (not just empty) → go live (G doctrine 2026-07-03: DB is a
+  // near-empty cache, so a DB rank of 0-2 picks must pull REAL supply, not
+  // show a lonely card). Outscraper is the primary engine.
+  if (result.picks.length < CONTRACTOR_CARD_TARGET_COUNT) {
+    const fallback = await liveContractorsFallbackVariant({
+      category,
+      locationText: args.slots.location_text ?? null,
+      near,
+    });
+    if (fallback) return fallback;
+    // Live had nothing usable AND the DB rank was thin — but if the DB DID
+    // produce at least one real pick, show those rather than nothing.
+    if (result.picks.length > 0) {
+      // fall through to the picks render below
+    } else return {
+      contextMessage: [
+        `[RECOMMEND — not spoken by user]`,
+        `Nothing is saved for that trade near them yet, and no live pull ran (no confirmed place name).`,
+        `Respond as 6 in first person: offer to pull up fresh, real local pros right now — confirm their city or ZIP in the same breath. One sentence. Do NOT name or invent any contractor.`,
+      ].join("\n"),
     };
   }
   const picks: RecommendationCard[] = result.picks.map((p) => ({
@@ -456,32 +1053,90 @@ async function handleRecommend(args: {
  * screen. Used by deliberate_open when the first utterance is "I can't
  * decide" with no prior compare state.
  */
+function isUuid(v: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    v,
+  );
+}
+
+/**
+ * Resolve category + coords for a contractor that's currently on screen.
+ * Live Outscraper cards carry the provider place_id as their `id`, while the
+ * persisted DB row's `id` is a UUID and `source_id` = the place_id. So we look
+ * up by `id` for a UUID and by `source_id` otherwise (Herm TASK_065 #3).
+ */
+async function fetchSnapshotContractorMeta(
+  firstId: string,
+): Promise<{
+  categories: string[] | null;
+  lat: number | null;
+  lng: number | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+} | null> {
+  try {
+    const { url, serviceRoleKey } = getSupabaseAdminConfig();
+    const qs = new URLSearchParams();
+    qs.set("select", "categories,lat,lng,city,state,zip");
+    qs.set("limit", "1");
+    if (isUuid(firstId)) {
+      qs.set("id", `eq.${firstId}`);
+    } else {
+      // A non-UUID visible id is always a live Outscraper card (place_id).
+      // Pin the source so another source can't win the source_id match.
+      qs.set("source", "eq.outscraper_live");
+      qs.set("source_id", `eq.${firstId}`);
+    }
+    const res = await fetch(`${url}/rest/v1/contractors?${qs.toString()}`, {
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as Array<{
+      categories: string[] | null;
+      lat: number | null;
+      lng: number | null;
+      city: string | null;
+      state: string | null;
+      zip: string | null;
+    }>;
+    return rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function inferCategoryFromSnapshot(
   snapshot?: SurfaceSnapshot,
 ): Promise<string> {
   if (snapshot?.deliberation?.category) return snapshot.deliberation.category;
-  if (!snapshot?.contractorIds?.length) return "general";
-  const firstId = snapshot.contractorIds[0];
-  try {
-    const { url, serviceRoleKey } = getSupabaseAdminConfig();
-    const res = await fetch(
-      `${url}/rest/v1/contractors?id=eq.${encodeURIComponent(
-        firstId,
-      )}&select=categories&limit=1`,
-      {
-        headers: {
-          apikey: serviceRoleKey,
-          Authorization: `Bearer ${serviceRoleKey}`,
-        },
-        cache: "no-store",
-      },
-    );
-    if (!res.ok) return "general";
-    const rows = (await res.json()) as Array<{ categories: string[] | null }>;
-    return rows[0]?.categories?.[0] ?? "general";
-  } catch {
-    return "general";
+  const firstId = snapshot?.contractorIds?.[0];
+  if (!firstId) return "general";
+  const meta = await fetchSnapshotContractorMeta(firstId);
+  return meta?.categories?.[0] ?? "general";
+}
+
+/**
+ * Infer the search area from the contractors currently on screen (the first
+ * one's coords) so a follow-up "which one?" / "compare them" ranks near the
+ * list the user is looking at instead of a default center. This is the RANKING
+ * geometry only — we still never SPEAK a distance unless we know the user's own
+ * coords (distance_known stays tied to slots.location).
+ */
+async function inferLocationFromSnapshot(
+  snapshot?: SurfaceSnapshot,
+): Promise<{ lat: number; lng: number } | null> {
+  const firstId = snapshot?.contractorIds?.[0];
+  if (!firstId) return null;
+  const meta = await fetchSnapshotContractorMeta(firstId);
+  if (meta?.lat != null && meta?.lng != null) {
+    return { lat: meta.lat, lng: meta.lng };
   }
+  return null;
 }
 
 async function handleDeliberateOpen(args: {
@@ -495,15 +1150,33 @@ async function handleDeliberateOpen(args: {
   const category =
     args.slots.category ??
     (await inferCategoryFromSnapshot(args.snapshot));
-  const near = args.slots.location ?? DEFAULT_CENTER;
+  const inferredNear = args.slots.location
+    ? null
+    : await inferLocationFromSnapshot(args.snapshot);
+  const near = args.slots.location ?? inferredNear;
+  if (!near) {
+    return {
+      contextMessage:
+        `[COMPARE — not spoken by user] No usable location — nothing on screen resolves to a place and the user hasn't given a city/ZIP. Respond as 6 in first person: ask what city or ZIP they're in (or offer to pull up some pros first) so you compare REAL local options. One sentence. Do NOT default to any city.`,
+    };
+  }
   const result = await deliberate({
     user_id: args.user_id,
     category,
     near,
+    distance_known: !!args.slots.location,
     constraints: args.snapshot?.deliberation?.constraints ?? {},
     current_pick_ids: args.snapshot?.contractorIds,
   });
   if (!result.ok) {
+    // Empty DB must not dead-end a compare (G doctrine 2026-07-03): pull
+    // REAL live pros to compare against instead of erroring.
+    const fallback = await liveContractorsFallbackVariant({
+      category,
+      locationText: args.slots.location_text ?? null,
+      near,
+    });
+    if (fallback) return fallback;
     return {
       contextMessage: wrapFallback(`deliberate_open: ${result.reason}`),
     };
@@ -582,13 +1255,34 @@ async function handleDeliberateRefine(args: {
   if (args.slots.exclude_ref) changedBits.push("excluding the prior one");
   const changed = changedBits.join(", ") || "constraints unchanged";
 
+  const inferredNear = args.slots.location
+    ? null
+    : await inferLocationFromSnapshot(args.snapshot);
+  const near = args.slots.location ?? inferredNear;
+  if (!near) {
+    return {
+      contextMessage:
+        `[REFINE — not spoken by user] No usable location — nothing on screen resolves to a place and the user hasn't given a city/ZIP. Respond as 6 in first person: ask what city or ZIP they're in so you can pull REAL local options first. One sentence. Do NOT default to any city.`,
+    };
+  }
   const result = await deliberate({
     user_id: args.user_id,
     category,
+    near,
+    distance_known: !!args.slots.location,
     constraints: merged,
     current_pick_ids: args.snapshot?.contractorIds,
   });
   if (!result.ok) {
+    // Empty DB must not dead-end a refine (G doctrine 2026-07-03): pull REAL
+    // live pros so the user still has something to narrow. The spoken
+    // constraints ride the brain context; the cards are the honest supply.
+    const fallback = await liveContractorsFallbackVariant({
+      category,
+      locationText: args.slots.location_text ?? null,
+      near,
+    });
+    if (fallback) return fallback;
     return {
       contextMessage: wrapFallback(
         `refinement (${changed}) returned no candidates`,
@@ -631,21 +1325,17 @@ async function handleBook(args: {
     };
   }
 
-  const { payload } = await executeBook({
-    winner_id: resolved.id,
-    winner_name: resolved.name,
-    candidate_ids: args.snapshot?.contractorIds ?? [],
-    user_id: args.user_id,
-  });
-
+  // REALITY DOCTRINE (G 2026-07-02: no fake data, ever): the M2.6 win/lose
+  // fan-out isn't wired yet, and the old handler FAKED a "booked + everyone
+  // notified" confirmation (delivered:true on nothing sent). Until real
+  // dispatch ships, 6 tells the truth and routes to the actions that DO
+  // work today: tap-to-call on the card, or 6 placing the call himself.
   return {
-    variant: { kind: "pickResult", payload },
-    contextMessage: wrapPickResult({
-      winner_name: resolved.name,
-      loser_count: payload.losers.length,
-      delivered_count: payload.total_sent,
-      failed_count: payload.total_failed,
-    }),
+    contextMessage: [
+      `[BOOKING NOT DISPATCHED — not spoken by user]`,
+      `The user picked ${cleanForContext(resolved.name)}. Automatic booking/notification is NOT live yet — nothing was sent to anyone, and you must NOT claim it was.`,
+      `Respond as 6 in first person: solid choice — offer to get them on the phone right now ("want me to call them?"), or point at the Call button on their card. Never say they were booked or notified. Two sentences max, warm.`,
+    ].join("\n"),
   };
 }
 
@@ -884,6 +1574,758 @@ async function handleViewAppointments(args: {
       payload: { appointments: cards, intent_kind: "list" },
     },
     contextMessage: wrapAppointmentsList({ appointments: cards }),
+  };
+}
+
+// ─── Lists (G 2026-07-01: 6-led, voice-first; ported from aiASAP) ────
+// Voice-first AND visible (Herm TASK_082 — lists were voice-only and G never
+// SAW them: "I want those pillboxes to go down"): every successful list
+// mutation/read also returns a `todo` surface variant so the panel shows the
+// live list. Data lives in `lists` + `list_items` (20260701_lists.sql). All
+// paths still fail SOFT into a spoken fallback so a missing table never
+// breaks the talk flow.
+
+/** Build the visible list panel payload from the list + its OPEN items. */
+function todoVariant(
+  list: ListRow,
+  items: ListItemRow[],
+  changed?: TodoPayload["changed"],
+): SurfaceVariant {
+  const sorted = [...items].sort(
+    (a, b) =>
+      a.position - b.position || a.created_at.localeCompare(b.created_at),
+  );
+  return {
+    kind: "todo",
+    payload: {
+      list_id: list.id,
+      list_title: list.title,
+      items: sorted.map((item) => ({
+        id: item.id,
+        title: item.title,
+        position: item.position,
+      })),
+      changed,
+    },
+  };
+}
+
+// GUEST STAGING (G live smoke 2026-07-04: "I need to see it on your chest
+// right now" while anonymous — the old sign-in-only path showed NOTHING):
+// anonymous list turns render a LOCAL, session-only todo panel so the list
+// is visible on 6's chest, with a loud not-saved banner. ZERO db writes —
+// the client (context.tsx) accumulates items across turns.
+const LOCAL_TODO_LIST_ID_PREFIX = "local-unsaved-list";
+
+function localTodoSlug(raw: string, fallback: string): string {
+  return (
+    raw
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || fallback
+  );
+}
+
+function localTodoListId(listTitle: string): string {
+  // Keep guest/temp list identity per spoken list title. A single hard-coded
+  // id merged "shopping" and "contractor" guest lists together in one
+  // anonymous session (TASK_107 follow-on seam). Default empty make-list turns
+  // still share the stable Your-list bucket across the ask→answer turn.
+  return `${LOCAL_TODO_LIST_ID_PREFIX}-${localTodoSlug(listTitle, "default")}`;
+}
+
+function localTodoItemId(title: string, index: number): string {
+  return `local-${index + 1}-${localTodoSlug(title, "item")}`;
+}
+
+function guestTodoVariant(args: {
+  titles: string[];
+  listName?: string | null;
+  changed?: TodoPayload["changed"];
+}): SurfaceVariant {
+  const title = args.listName?.trim() || "Your list";
+  return {
+    kind: "todo",
+    payload: {
+      list_id: localTodoListId(title),
+      list_title: title,
+      transient: true,
+      persistence_note: "Not saved yet — tell me your email to keep it.",
+      items: args.titles.map((itemTitle, index) => ({
+        id: localTodoItemId(itemTitle, index),
+        title: itemTitle,
+        position: index + 1,
+      })),
+      ...(args.changed ? { changed: args.changed } : {}),
+    },
+  };
+}
+
+// BETA LIST POLICY (G/Herm TASK_098 item 10, amended TASK_106): durable
+// lists are sign-in-only. 6 must NEVER promise saving to an anonymous user —
+// the guest list shows on screen as temporary, and the honest line names
+// the exact path to keep it.
+// G ride 2026-07-07 (ENRAGED, 3 sessions running): the save-pitch fired on
+// EVERY guest list turn — "that feels like a trap... don't fucking say that."
+// His exact order: just make the list; say ONCE, casually, that it's for this
+// session and an account saves it — then drop it. The pitch rides ONLY on
+// list-OPEN turns (SIGN_IN_FALLBACK); every other guest list action uses the
+// QUIET lines and never mentions saving. The card's own banner already shows
+// the persistence note visually.
+const SIGN_IN_FALLBACK =
+  "the list lives on screen for THIS session. Never claim it was saved. Once, casually, somewhere natural in your reply — never as a condition — you may mention that if they ever want it kept for next time, they can just tell you their email. Then drop the subject. NEVER repeat that offer on later turns, never push an account.";
+const GUEST_LIST_QUIET =
+  "the on-screen list is updated. Do NOT mention saving, accounts, email, or the list being temporary — that was said once already. Just confirm the change naturally, in first person as 6, one short sentence.";
+const GUEST_NO_LIST_QUIET =
+  "there's no list on screen to change — in first person as 6, ask what they'd like to put on a fresh list. Do NOT mention accounts or saving.";
+
+/** Shared open of the spoken-command target list. Fail-soft null.
+ * createIfMissing: only ADD commands may create a list on the fly —
+ * read/complete/remove/clear must never conjure an empty list and then
+ * pretend the user's old list was empty. */
+async function openTargetList(args: {
+  user_id: string;
+  list_name?: string;
+  createIfMissing?: boolean;
+}): Promise<{
+  list: ListRow;
+  items: ListItemRow[];
+} | null> {
+  const contractorId = await findClaimedContractorId(args.user_id);
+  const list = await resolveTargetList({
+    user_id: args.user_id,
+    contractor_id: contractorId,
+    list_name: args.list_name ?? null,
+    createIfMissing: args.createIfMissing,
+  });
+  if (!list) return null;
+  const items = await listOpenItems({
+    list_id: list.id,
+    user_id: args.user_id,
+  });
+  return { list, items };
+}
+
+async function openMutationTargetList(args: {
+  user_id: string;
+  list_name?: string;
+  snapshot?: SurfaceSnapshot;
+}): Promise<{
+  list: ListRow;
+  items: ListItemRow[];
+} | null> {
+  if (
+    args.snapshot?.kind === "todo" &&
+    args.snapshot.todo &&
+    !args.snapshot.todo.transient &&
+    !args.list_name
+  ) {
+    const list = await getListById({
+      user_id: args.user_id,
+      list_id: args.snapshot.todo.list_id,
+    });
+    if (list) {
+      const items = await listOpenItems({
+        list_id: list.id,
+        user_id: args.user_id,
+      });
+      return { list, items };
+    }
+  }
+  return openTargetList({
+    user_id: args.user_id,
+    list_name: args.list_name,
+    createIfMissing: false,
+  });
+}
+
+const NO_SUCH_LIST_FALLBACK =
+  "no list by that name (and nothing to do without one) — tell the user which lists they have or offer to start one";
+
+async function handlePendingListPick(
+  input: OrchestratorInput,
+): Promise<OrchestratorOutput | null> {
+  const entries = input.currentSurface?.pendingListIndex?.entries ?? [];
+  if (!input.user_id || entries.length === 0) return null;
+  const picked = resolveListPick(input.text, entries);
+  if (!picked) return null;
+
+  const classification: IntentClassification = {
+    kind: "view_todos",
+    slots: { list_name: picked.title },
+    confidence: "high",
+    matched_rule: "todo.lists.pick",
+  };
+  const r = await handleViewTodos({
+    slots: classification.slots,
+    user_id: input.user_id,
+  });
+  return {
+    kind: "action",
+    classification,
+    variant: r.variant,
+    contextMessage: r.contextMessage,
+  };
+}
+
+// G live-ride 2026-07-06 ("call this list Contractors Needed... 6 should be
+// able to change it for the user"). Renames the CURRENTLY OPEN list. Signed-in
+// users hit Supabase; local-only guest lists rename from the visible snapshot so
+// the command works before account setup too.
+async function handleRenameTodo(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+  snapshot?: SurfaceSnapshot;
+}): Promise<{ contextMessage: string; variant?: SurfaceVariant }> {
+  const newTitle = args.slots.list_name?.trim();
+  if (!newTitle) {
+    return {
+      contextMessage: wrapFallback(
+        "no new list name was caught — ask the user, in first person as 6, what they want to call it",
+      ),
+    };
+  }
+  if (!args.user_id) {
+    if (args.snapshot?.kind === "todo" && args.snapshot.todo?.transient) {
+      return {
+        variant: guestTodoVariant({
+          titles: args.snapshot.todo.items.map((item) => item.title),
+          listName: newTitle,
+        }),
+        contextMessage: wrapFallback(
+          `the on-screen list is now named "${newTitle}" — confirm this back to the user in first person as 6, one short sentence. Do NOT mention saving, accounts, or email (G 2026-07-07: the save-pitch on every list turn reads as a trap).`,
+        ),
+      };
+    }
+    return {
+      contextMessage: wrapFallback(GUEST_NO_LIST_QUIET),
+    };
+  }
+  const opened = await openTargetList({
+    user_id: args.user_id,
+    createIfMissing: false,
+  });
+  if (!opened) {
+    return {
+      contextMessage: wrapFallback(
+        "there's no open list to rename — tell the user, in first person as 6, to make a list first",
+      ),
+    };
+  }
+  const renamed = await renameList({
+    user_id: args.user_id,
+    list_id: opened.list.id,
+    title: newTitle,
+  });
+  if (!renamed) {
+    return {
+      contextMessage: wrapFallback(
+        `rename failed on the server — the list is still called "${opened.list.title}", tell the user honestly`,
+      ),
+    };
+  }
+  return {
+    variant: todoVariant(renamed, opened.items, {}),
+    contextMessage: wrapFallback(
+      `the list is now named "${renamed.title}" — confirm this back to the user in first person as 6, briefly`,
+    ),
+  };
+}
+
+async function handleAddTodo(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+}): Promise<{
+  contextMessage: string;
+  variant?: SurfaceVariant;
+  pending?: { kind: "list_add"; listName?: string | null };
+}> {
+  const raw = args.slots.todo_text?.trim();
+  // Pre-split titles come from the pending-answer rule (relaxed splitter —
+  // trade nouns allowed on that one turn, Herm TASK_094); everything else
+  // goes through aiASAP's strict junk gate.
+  const preSplit = (args.slots.todo_titles ?? []).filter(
+    (t) => typeof t === "string" && t.trim().length > 0,
+  );
+  const titles =
+    preSplit.length > 0
+      ? preSplit.slice(0, 5)
+      : raw
+        ? splitSpokenItems(raw)
+        : [];
+  if (!args.user_id) {
+    // GUEST STAGING (Herm TASK_106): show the local list on 6's chest —
+    // honest banner, zero db writes. The client merges items across turns.
+    if (titles.length === 0) {
+      return {
+        variant: guestTodoVariant({
+          titles: [],
+          listName: args.slots.list_name ?? null,
+        }),
+        contextMessage: wrapFallback(
+          `${SIGN_IN_FALLBACK} The empty temporary list is on screen — ask the user, in first person as 6, what to put on it (their next plain answer WILL show on it).`,
+        ),
+        pending: {
+          kind: "list_add",
+          listName: args.slots.list_name ?? null,
+        },
+      };
+    }
+    return {
+      variant: guestTodoVariant({
+        titles,
+        listName: args.slots.list_name ?? null,
+        changed: { added: titles },
+      }),
+      contextMessage: wrapFallback(
+        `${GUEST_LIST_QUIET} These items are on the screen list now: ${titles.join(", ")}.`,
+      ),
+      // Keep the "add more" window open (G live-ride 2026-07-06: saying 4
+      // things in a row after the list opened only caught the first one —
+      // this re-arms pendingListAdd after EVERY successful add, not just
+      // when zero items were caught, so casual "I need a lawn cutter" keeps
+      // landing turn after turn while the list stays on screen).
+      pending: {
+        kind: "list_add",
+        listName: args.slots.list_name ?? null,
+      },
+    };
+  }
+  if (titles.length === 0) {
+    // Ask-and-REMEMBER (Herm TASK_094 blocker #2): without the pending
+    // marker the user's plain answer ("a painter, a plumber, and a roofer")
+    // matched nothing and the brain claimed a save that never happened.
+    return {
+      contextMessage: wrapFallback(
+        "the list is ready but no items were caught — ask the user, in first person as 6, what to put on it (their next plain answer WILL be added for real)",
+      ),
+      pending: {
+        kind: "list_add",
+        listName: args.slots.list_name ?? null,
+      },
+    };
+  }
+  const opened = await openTargetList({
+    user_id: args.user_id,
+    list_name: args.slots.list_name,
+  });
+  if (!opened) {
+    return {
+      contextMessage: wrapFallback(
+        "couldn't open the list — see server logs (lists tables live?)",
+      ),
+    };
+  }
+  const inserted = await addItems({
+    list: opened.list,
+    user_id: args.user_id,
+    titles,
+  });
+  if (inserted.length === 0) {
+    // Everything was already on the list (dedupe) — tell 6 the truth, and
+    // SHOW the current list anyway (visible proof beats voice-only "already
+    // there", Herm TASK_082).
+    return {
+      variant: todoVariant(opened.list, opened.items, {
+        already_there: titles,
+      }),
+      contextMessage: wrapTodoAdded({
+        titles: [],
+        alreadyThere: titles,
+        listTitle: opened.list.title,
+        openCount: opened.items.length,
+      }),
+      // Same "keep adding" re-arm as the fresh-add branch below — a dedupe
+      // hit is still mid-conversation, not the end of it.
+      pending: { kind: "list_add", listName: opened.list.title },
+    };
+  }
+  return {
+    variant: todoVariant(opened.list, [...opened.items, ...inserted], {
+      added: inserted.map((i) => i.title),
+    }),
+    contextMessage: wrapTodoAdded({
+      titles: inserted.map((i) => i.title),
+      alreadyThere: [],
+      listTitle: opened.list.title,
+      openCount: opened.items.length + inserted.length,
+    }),
+    // Keep the "add more" window open (G live-ride 2026-07-06: saying 4
+    // things in a row after the list opened only caught the first one — this
+    // re-arms pendingListAdd after EVERY successful add, not just when zero
+    // items were caught, so casual "I need a lawn cutter" keeps landing turn
+    // after turn while the list stays on screen).
+    pending: { kind: "list_add", listName: opened.list.title },
+  };
+}
+
+async function handleViewTodos(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+}): Promise<{
+  contextMessage: string;
+  variant?: SurfaceVariant;
+  pending?: { kind: "list_add"; listName?: string | null };
+}> {
+  if (!args.user_id) {
+    // GUEST STAGING (Herm TASK_106): "I want to see the list on your chest"
+    // while anonymous opens the local panel — even empty — so the chest
+    // list is REAL on screen; the next plain answer fills it.
+    return {
+      variant: guestTodoVariant({
+        titles: [],
+        listName: args.slots.list_name ?? null,
+      }),
+      contextMessage: wrapFallback(
+        `${SIGN_IN_FALLBACK} The temporary list is open on screen now — ask the user what to put on it.`,
+      ),
+      pending: {
+        kind: "list_add",
+        listName: args.slots.list_name ?? null,
+      },
+    };
+  }
+  const opened = await openTargetList({
+    user_id: args.user_id,
+    list_name: args.slots.list_name,
+    createIfMissing: false,
+  });
+  if (!opened) {
+    return { contextMessage: wrapFallback(NO_SUCH_LIST_FALLBACK) };
+  }
+  return {
+    variant: todoVariant(opened.list, opened.items),
+    contextMessage: wrapTodosList({
+      listTitle: opened.list.title,
+      titles: opened.items.map((r) => r.title),
+    }),
+  };
+}
+
+async function handleInspectTodo(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+  snapshot?: SurfaceSnapshot;
+}): Promise<{ contextMessage: string; variant?: SurfaceVariant }> {
+  const ref = args.slots.todo_ref;
+  if (!ref) {
+    return {
+      contextMessage: wrapFallback(
+        "couldn't tell which list item they asked about — ask which number",
+      ),
+    };
+  }
+
+  if (args.snapshot?.kind === "todo" && args.snapshot.todo) {
+    const target = resolveVisibleItemRef(ref, args.snapshot.todo.items);
+    if (target) {
+      return {
+        contextMessage: [
+          `[LIST ITEM LOOKUP — not spoken by user]`,
+          `The visible list item #${target.position} is: ${cleanForContext(target.title)}.`,
+          `Respond as 6 in first person with one short sentence. Do not say INTENT NOT ACTIONABLE. Do not treat this as a contractor card. Do not mention saving, accounts, or email.`,
+        ].join("\n"),
+      };
+    }
+  }
+
+  if (args.user_id) {
+    const opened = await openMutationTargetList({
+      user_id: args.user_id,
+      list_name: args.slots.list_name,
+      snapshot: args.snapshot,
+    });
+    const target = opened ? resolveItemRef(ref, opened.items) : null;
+    if (opened && target) {
+      return {
+        variant: todoVariant(opened.list, opened.items),
+        contextMessage: [
+          `[LIST ITEM LOOKUP — not spoken by user]`,
+          `The ${cleanForContext(opened.list.title)} list item #${target.position} is: ${cleanForContext(target.title)}.`,
+          `Respond as 6 in first person with one short sentence. Do not say INTENT NOT ACTIONABLE.`,
+        ].join("\n"),
+      };
+    }
+  }
+
+  return {
+    contextMessage: wrapFallback(
+      "couldn't match that number to a visible list item — read the visible list and ask which item",
+    ),
+  };
+}
+
+async function handleViewLists(args: {
+  user_id: string | null;
+}): Promise<{ contextMessage: string; entries: ListIndexEntry[] }> {
+  if (!args.user_id) {
+    return { contextMessage: wrapFallback(SIGN_IN_FALLBACK), entries: [] };
+  }
+  const rows = await listLists({ user_id: args.user_id });
+  const entries = rows.map((l) => ({ id: l.id, title: l.title }));
+  return {
+    contextMessage: wrapListIndex({ titles: entries.map((l) => l.title) }),
+    entries,
+  };
+}
+
+/** Resolve a visible todo_ref (ordinal or text) against card order. */
+type VisibleTodoItem = { id: string; title: string; position: number };
+
+function resolveVisibleItemRef(
+  ref: NonNullable<IntentSlots["todo_ref"]>,
+  items: VisibleTodoItem[],
+): VisibleTodoItem | null {
+  if (ref.type === "ordinal") {
+    return items[ref.position - 1] ?? null;
+  }
+  const needle = ref.text.toLowerCase();
+  return (
+    items.find((r) => {
+      const hay = r.title.toLowerCase();
+      return hay.includes(needle) || needle.includes(hay);
+    }) ?? null
+  );
+}
+
+/** Resolve a todo_ref (ordinal or text) against the spoken-order items. */
+function resolveItemRef(
+  ref: NonNullable<IntentSlots["todo_ref"]>,
+  items: ListItemRow[],
+): ListItemRow | null {
+  return resolveVisibleItemRef(ref, items) as ListItemRow | null;
+}
+
+function transientTodoSnapshot(snapshot?: SurfaceSnapshot) {
+  return snapshot?.kind === "todo" && snapshot.todo?.transient
+    ? snapshot.todo
+    : null;
+}
+
+async function handleCompleteTodo(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+  snapshot?: SurfaceSnapshot;
+}): Promise<{ contextMessage: string; variant?: SurfaceVariant }> {
+  const ref = args.slots.todo_ref;
+  if (!ref) {
+    return {
+      contextMessage: wrapFallback(
+        "couldn't tell which item to check off — ask the user which one",
+      ),
+    };
+  }
+  if (!args.user_id) {
+    const todo = transientTodoSnapshot(args.snapshot);
+    if (todo) {
+      const target = resolveVisibleItemRef(ref, todo.items);
+      if (!target) {
+        return {
+          contextMessage: wrapFallback(
+            "couldn't match that to an item on the temporary list — read the list back and ask which one",
+          ),
+        };
+      }
+      const remaining = todo.items.filter((i) => i.id !== target.id);
+      return {
+        variant: guestTodoVariant({
+          titles: remaining.map((item) => item.title),
+          listName: todo.list_title,
+          changed: { completed: [target.title] },
+        }),
+        contextMessage: wrapFallback(
+          `${GUEST_LIST_QUIET} I checked off "${target.title}".`,
+        ),
+      };
+    }
+    return { contextMessage: wrapFallback(GUEST_NO_LIST_QUIET) };
+  }
+  const opened = await openMutationTargetList({
+    user_id: args.user_id,
+    list_name: args.slots.list_name,
+    snapshot: args.snapshot,
+  });
+  if (!opened) {
+    return { contextMessage: wrapFallback(NO_SUCH_LIST_FALLBACK) };
+  }
+  if (opened.items.length === 0) {
+    return { contextMessage: wrapFallback("the list is already empty") };
+  }
+  const target = resolveItemRef(ref, opened.items);
+  if (!target) {
+    return {
+      contextMessage: wrapFallback(
+        "couldn't match that to an item on the list — read the list back and ask which one",
+      ),
+    };
+  }
+  const row = await setItemStatus({
+    item_id: target.id,
+    user_id: args.user_id,
+    status: "done",
+  });
+  if (!row) {
+    return {
+      contextMessage: wrapFallback("couldn't update the item — see server logs"),
+    };
+  }
+  const remaining = opened.items.filter((i) => i.id !== target.id);
+  return {
+    variant: todoVariant(opened.list, remaining, { completed: [row.title] }),
+    contextMessage: wrapTodoCompleted({
+      title: row.title,
+      listTitle: opened.list.title,
+      openCount: remaining.length,
+    }),
+  };
+}
+
+async function handleRemoveTodo(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+  snapshot?: SurfaceSnapshot;
+}): Promise<{ contextMessage: string; variant?: SurfaceVariant }> {
+  if (!args.user_id) {
+    const todo = transientTodoSnapshot(args.snapshot);
+    if (todo) {
+      let targets: VisibleTodoItem[] = [];
+      if (args.slots.todo_positions?.length) {
+        targets = args.slots.todo_positions
+          .map((p) => todo.items[p - 1])
+          .filter((r): r is VisibleTodoItem => Boolean(r));
+      } else if (args.slots.todo_ref) {
+        const one = resolveVisibleItemRef(args.slots.todo_ref, todo.items);
+        if (one) targets = [one];
+      }
+      if (targets.length === 0) {
+        return {
+          contextMessage: wrapFallback(
+            "couldn't match that to an item on the temporary list — read the list back and ask which one",
+          ),
+        };
+      }
+      const removedIds = new Set(targets.map((t) => t.id));
+      const removed = targets.map((t) => t.title);
+      return {
+        variant: guestTodoVariant({
+          titles: todo.items
+            .filter((item) => !removedIds.has(item.id))
+            .map((item) => item.title),
+          listName: todo.list_title,
+          changed: { removed },
+        }),
+        contextMessage: wrapFallback(
+          `${GUEST_LIST_QUIET} I removed ${removed.join(", ")}.`,
+        ),
+      };
+    }
+    return { contextMessage: wrapFallback(GUEST_NO_LIST_QUIET) };
+  }
+  const opened = await openMutationTargetList({
+    user_id: args.user_id,
+    list_name: args.slots.list_name,
+    snapshot: args.snapshot,
+  });
+  if (!opened) {
+    return { contextMessage: wrapFallback(NO_SUCH_LIST_FALLBACK) };
+  }
+  if (opened.items.length === 0) {
+    return { contextMessage: wrapFallback("the list is already empty") };
+  }
+  // Positions resolve against the SPOKEN order, all at once, BEFORE any
+  // drop mutates the list (aiASAP: "remove both 1 and 2" must never drop
+  // 1 then re-index and drop the wrong second item).
+  let targets: ListItemRow[] = [];
+  if (args.slots.todo_positions?.length) {
+    targets = args.slots.todo_positions
+      .map((p) => opened.items[p - 1])
+      .filter((r): r is ListItemRow => Boolean(r));
+  } else if (args.slots.todo_ref) {
+    const one = resolveItemRef(args.slots.todo_ref, opened.items);
+    if (one) targets = [one];
+  }
+  if (targets.length === 0) {
+    return {
+      contextMessage: wrapFallback(
+        "couldn't match that to an item on the list — read the list back and ask which one",
+      ),
+    };
+  }
+  const removed: string[] = [];
+  const removedIds = new Set<string>();
+  for (const t of targets) {
+    const row = await setItemStatus({
+      item_id: t.id,
+      user_id: args.user_id,
+      status: "dropped",
+    });
+    if (row) {
+      removed.push(row.title);
+      removedIds.add(t.id);
+    }
+  }
+  if (removed.length === 0) {
+    return {
+      contextMessage: wrapFallback("couldn't update the items — see server logs"),
+    };
+  }
+  const remaining = opened.items.filter((i) => !removedIds.has(i.id));
+  return {
+    variant: todoVariant(opened.list, remaining, { removed }),
+    contextMessage: wrapTodoRemoved({
+      titles: removed,
+      listTitle: opened.list.title,
+      openCount: remaining.length,
+    }),
+  };
+}
+
+async function handleClearList(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+  snapshot?: SurfaceSnapshot;
+}): Promise<{ contextMessage: string; variant?: SurfaceVariant }> {
+  if (!args.user_id) {
+    const todo = transientTodoSnapshot(args.snapshot);
+    if (todo) {
+      const count = todo.items.length;
+      return {
+        variant: guestTodoVariant({
+          titles: [],
+          listName: todo.list_title,
+          changed: { cleared: count },
+        }),
+        contextMessage: wrapFallback(
+          `${GUEST_LIST_QUIET} I cleared ${count} item${count === 1 ? "" : "s"} off it.`,
+        ),
+      };
+    }
+    return { contextMessage: wrapFallback(GUEST_NO_LIST_QUIET) };
+  }
+  const opened = await openMutationTargetList({
+    user_id: args.user_id,
+    list_name: args.slots.list_name,
+    snapshot: args.snapshot,
+  });
+  if (!opened) {
+    return { contextMessage: wrapFallback(NO_SUCH_LIST_FALLBACK) };
+  }
+  const cleared = await clearList({
+    list_id: opened.list.id,
+    user_id: args.user_id,
+  });
+  if (cleared < 0) {
+    return {
+      contextMessage: wrapFallback("couldn't clear the list — see server logs"),
+    };
+  }
+  return {
+    variant: todoVariant(opened.list, [], { cleared }),
+    contextMessage: wrapListCleared({
+      listTitle: opened.list.title,
+      count: cleared,
+    }),
   };
 }
 
@@ -1295,9 +2737,291 @@ async function handleFileDispute(args: {
   };
 }
 
+// ─── M4.4 no-show report (merged per plan v2; handler verbatim-Bert) ──
+
+async function handleReportNoShow(args: {
+  user_id: string | null;
+  raw_text: string;
+}): Promise<
+  | { variant: SurfaceVariant; contextMessage: string }
+  | { contextMessage: string }
+> {
+  if (!args.user_id) {
+    return { contextMessage: wrapFallback("no-show reports require sign-in") };
+  }
+  const target = await findRecentUnfulfilledAppointment({
+    user_id: args.user_id,
+  });
+  if (!target) {
+    return {
+      contextMessage: wrapFallback(
+        "no recent appointment found to flag as no-show",
+      ),
+    };
+  }
+  const result = await declareNoShowAndDispatch({
+    appointment_id: target.id,
+    trigger: "homeowner_report",
+    reasonContext: {
+      reported_by_user_id: args.user_id,
+      via: "voice_intent",
+      raw_text: args.raw_text,
+      reported_at: new Date().toISOString(),
+    },
+  });
+  const contractorName = await fetchContractorNameSafe(target.contractor_id);
+  const card = appointmentRowToCard(target, contractorName);
+  const invited_count = result.invited.filter((i) => i.delivered).length;
+  return {
+    variant: {
+      kind: "appointment",
+      payload: { appointments: [card], intent_kind: "no_show" },
+    },
+    contextMessage: wrapNoShowDispatched({
+      appointment: card,
+      invited_count,
+      skipped_reason: result.skipped_reason,
+    }),
+  };
+}
+
+// ─── M4.7 recurring autopilot (merged per plan v2; verbatim-Bert) ─────
+
+function humanizeSchedule(row: RecurringJobRow): string {
+  const sch = row.schedule;
+  const dayNames: Record<string, string> = {
+    SU: "Sunday", MO: "Monday", TU: "Tuesday", WE: "Wednesday",
+    TH: "Thursday", FR: "Friday", SA: "Saturday",
+  };
+  const monthNames = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const everyN = sch.interval > 1 ? `Every ${sch.interval} ` : "Every ";
+
+  let head = "";
+  if (sch.freq === "WEEKLY") {
+    if (sch.byday && sch.byday.length > 0) {
+      const days = sch.byday.map((d) => dayNames[d]).join(" + ");
+      head = sch.interval > 1
+        ? `${everyN}weeks on ${days}`
+        : `Every ${days}`;
+    } else {
+      head = `${everyN}week`;
+    }
+  } else if (sch.freq === "MONTHLY") {
+    if (sch.bymonthday && sch.bymonthday.length > 0) {
+      head = `${everyN}month on the ${sch.bymonthday.join(", ")}`;
+    } else {
+      head = `${everyN}month`;
+    }
+  } else {
+    head = sch.interval > 1 ? `${everyN}days` : "Every day";
+  }
+
+  const hh = sch.byhour;
+  const ampm = hh >= 12 ? "PM" : "AM";
+  const dh = ((hh + 11) % 12) + 1;
+  const mm = sch.byminute.toString().padStart(2, "0");
+  const time = `${dh}:${mm} ${ampm}`;
+
+  let tail = "";
+  if (sch.bymonth && sch.bymonth.length > 0) {
+    const first = sch.bymonth[0];
+    const last = sch.bymonth[sch.bymonth.length - 1];
+    tail = `, ${monthNames[first - 1]} through ${monthNames[last - 1]}`;
+  }
+  if (sch.until) {
+    const u = new Date(sch.until);
+    tail += `, until ${u.toLocaleDateString()}`;
+  } else if (sch.count) {
+    tail += `, ${sch.count} times`;
+  }
+
+  return `${head} at ${time}${tail}`;
+}
+
+async function handleScheduleRecurring(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+  snapshot?: SurfaceSnapshot;
+  tz?: string | null;
+}): Promise<
+  | { variant: SurfaceVariant; contextMessage: string }
+  | { contextMessage: string }
+> {
+  if (!args.user_id) {
+    return {
+      contextMessage: wrapFallback(
+        "scheduling recurring jobs requires sign-in",
+      ),
+    };
+  }
+  if (!args.slots.recurring) {
+    return {
+      contextMessage: wrapFallback(
+        "couldn't extract a recurring schedule from the request — say e.g. 'every Tuesday at 10am'",
+      ),
+    };
+  }
+
+  // Resolve contractor — same precedence as place_call:
+  //   1. explicit contractor_ref slot
+  //   2. top of the current surface (snapshot.contractorIds[0])
+  //   3. null (homeowner-only recurring — rare but allowed)
+  let contractorId: string | null = null;
+  let contractorName: string | null = null;
+  if (args.slots.contractor_ref) {
+    const resolved = await resolveContractorRef({
+      ref: args.slots.contractor_ref,
+      snapshot: args.snapshot,
+    });
+    contractorId = resolved?.id ?? null;
+    contractorName = resolved?.name ?? null;
+  } else if (args.snapshot?.contractorIds?.length) {
+    const firstId = args.snapshot.contractorIds[0];
+    const resolved = await fetchContractorById(firstId);
+    contractorId = resolved?.id ?? null;
+    contractorName = resolved?.name ?? null;
+  }
+
+  // Silver-tier gate: this contractor must be on silver+ for the
+  // homeowner to schedule recurring jobs THROUGH them.
+  if (contractorId) {
+    const tier = await getActiveTierForContractor(contractorId);
+    if (!tierUnlocks(tier, "recurring_jobs")) {
+      return {
+        contextMessage: wrapFallback(
+          `${contractorName ?? "that contractor"} is on the ${tier} plan; recurring jobs are a Silver+ feature. Pick another contractor or offer them an upgrade.`,
+        ),
+      };
+    }
+  }
+
+  const tz =
+    args.tz && typeof args.tz === "string" && args.tz.length > 0
+      ? args.tz
+      : "UTC";
+
+  const row = await createRecurringJob({
+    user_id: args.user_id,
+    contractor_id: contractorId,
+    title: args.slots.recurring.title,
+    agenda: args.slots.agenda ?? args.slots.recurring.title,
+    duration_minutes: 60,
+    timezone: tz,
+    schedule: args.slots.recurring.schedule,
+    context: {
+      source: "voice_intent",
+      matched_phrase: args.slots.recurring.matched_phrase,
+    },
+  });
+  if (!row) {
+    return {
+      contextMessage: wrapFallback(
+        "recurring job insert failed — see server logs",
+      ),
+    };
+  }
+
+  // Next 3 instances so 6 can read one out + the panel shows the cadence.
+  const now = new Date();
+  const lookAhead = new Date(now.getTime() + 90 * 86_400_000); // 90d
+  const next = expandInstances({
+    schedule: row.schedule,
+    timezone: row.timezone,
+    anchor: new Date(row.active_from),
+    from: now,
+    to: lookAhead,
+  }).slice(0, 3);
+
+  const payload: RecurringJobPayload = {
+    recurring_job_id: row.id,
+    title: row.title,
+    agenda: row.agenda,
+    contractor_name: contractorName,
+    schedule_human: humanizeSchedule(row),
+    timezone: row.timezone,
+    next_instances: next,
+    status: row.status,
+  };
+
+  return {
+    variant: { kind: "recurring", payload },
+    contextMessage: wrapRecurringScheduled({ payload }),
+  };
+}
+
+// ─── M4.9 go-between — REWRITTEN FAIL-CLOSED (plan v2 A4 / Herm) ──────
+// Bert's original dialed both phone legs straight from a spoken command.
+// Doctrine: a voice intent NEVER dials. This handler only (a) names the
+// right contractor via the on-screen allowlist (Bert's good detail kept:
+// stale appointment/contract panels must not pick the wrong person), and
+// (b) returns honest guidance / a consent path. Actual dialing lives in
+// the /api/calls routes behind the all-party consent ledger, and only
+// once FEATURE_GO_BETWEEN_CALLS is flipped after legal + G approval.
+
+async function handleGoBetweenMode(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+  snapshot?: SurfaceSnapshot;
+}): Promise<{ contextMessage: string }> {
+  const CONTRACTOR_ON_SCREEN_KINDS = new Set([
+    "contractors",
+    "summary",
+    "picks",
+    "pickResult",
+    "compare",
+  ]);
+  const ref = args.slots.contractor_ref;
+  const snapshotContractorId =
+    args.snapshot && CONTRACTOR_ON_SCREEN_KINDS.has(args.snapshot.kind ?? "")
+      ? args.snapshot.contractorIds?.[0]
+      : undefined;
+  const resolved = ref
+    ? await resolveContractorRef({ ref, snapshot: args.snapshot })
+    : snapshotContractorId
+      ? await fetchContractorById(snapshotContractorId)
+      : null;
+  const who = resolved?.name ? cleanForContext(resolved.name) : "the contractor";
+
+  if (!GO_BETWEEN_CALLS_ENABLED) {
+    return {
+      contextMessage: wrapFallback(
+        `go-between mode isn't live yet — tell the user plainly, in first person as 6: "I can't join the conversation with ${who} by phone yet — that part of me is still being wired up. For now, tap the Call button on their card and I'll keep helping right here." NEVER claim a call was started.`,
+      ),
+    };
+  }
+  // Flag on: a spoken request is still NOT consent (all-party consent
+  // ledger required — MD §10-402). Point at the consent surface; the
+  // ledgered /api/calls path does the dialing after explicit YES taps.
+  return {
+    contextMessage: wrapFallback(
+      `go-between needs explicit consent from everyone on the call before any dialing — ask the user to tap the Call button on ${who}'s card and confirm the consent sheet; the call connects from there, never from a spoken command alone.`,
+    ),
+  };
+}
+
 // ─── Phone call + estimate (M3.1 / M3.6) ────────────────────────────
 
 const E164_RE = /^\+[1-9]\d{6,14}$/;
+
+// TASK_061 — AI call automation is GATED OFF by default.
+// Human-initiated tel: calls (the on-screen "Call" button) are fine. An AI
+// 3-way conference that records/transcribes/estimates from the call needs
+// ALL-PARTY consent (Maryland is an all-party state), TCPA review of the
+// artificial-voice rules, and G's explicit approval. Until that consent +
+// legal work ships, 6 hands the number to the user to tap-call. The M3.1
+// Twilio conference path below stays dormant behind this flag (dormant-default
+// pattern) — flip FEATURE_AI_CONFERENCE_CALLS=1 only after consent gating +
+// G approval.
+const AI_CONFERENCE_CALLS_ENABLED =
+  process.env.FEATURE_AI_CONFERENCE_CALLS === "1";
+
+// M4.9 go-between (in-person mediation) — SAME dormant-default doctrine.
+// Flip only after all-party consent UX + legal review + G approval.
+const GO_BETWEEN_CALLS_ENABLED =
+  process.env.FEATURE_GO_BETWEEN_CALLS === "1";
 
 async function fetchUserPhone(userId: string): Promise<string | null> {
   try {
@@ -1353,6 +3077,45 @@ async function handlePlaceCall(args: {
   | { variant: SurfaceVariant; contextMessage: string }
   | { contextMessage: string }
 > {
+  // Consent/legal gate: no AI-placed conference calls until consent + legal
+  // work + G's approval. Hand the user to a human-initiated tap-to-call —
+  // but only claim a card is on screen when one actually is (Herm #7).
+  if (!AI_CONFERENCE_CALLS_ENABLED) {
+    const contractorOnScreen =
+      !!args.slots.contractor_ref ||
+      (args.snapshot?.contractorIds?.length ?? 0) > 0;
+    const guidance = contractorOnScreen
+      ? `Tell them to tap "Call" on the contractor's card on screen to ring the pro themselves, and offer to stay on to help.`
+      : `Ask which contractor they mean (there isn't one on screen yet) — once it's up, they can tap "Call" on that pro's card.`;
+    return {
+      contextMessage: [
+        `[CALL — not spoken by user]`,
+        `6 does NOT place automated AI calls yet (consent + legal gate).`,
+        `Respond as 6 in first person: ${guidance} One or two short sentences. Do NOT claim you dialed or called anyone.`,
+      ].join("\n"),
+    };
+  }
+
+  // Defense in depth: even if FEATURE_AI_CONFERENCE_CALLS is accidentally
+  // enabled, a *spoken* "call them" command is not enough consent for 6 to
+  // create a call row or dial legs. The only safe future path is a UI consent
+  // sheet that passes an explicit call_consent token; today's classifier never
+  // sets this, so the voice-intent side-effect path remains fail-closed.
+  if (args.slots.call_consent?.homeowner !== true) {
+    const contractorOnScreen =
+      !!args.slots.contractor_ref ||
+      (args.snapshot?.contractorIds?.length ?? 0) > 0;
+    const guidance = contractorOnScreen
+      ? `Tell them to tap "Call" on the contractor's card and approve the consent sheet before any AI-assisted call can start.`
+      : `Ask which contractor they mean (there isn't one on screen yet) — once it's up, they can tap "Call" on that pro's card and approve the consent sheet.`;
+    return {
+      contextMessage: [
+        `[CALL — not spoken by user]`,
+        `6 did NOT place an automated AI call. A spoken call request is not explicit call consent.`,
+        `Respond as 6 in first person: ${guidance} One or two short sentences. Do NOT claim you dialed or called anyone.`,
+      ].join("\n"),
+    };
+  }
   if (!isTwilioVoiceConfigured()) {
     return {
       contextMessage: wrapFallback(
@@ -1382,6 +3145,22 @@ async function handlePlaceCall(args: {
     return {
       contextMessage: wrapFallback(
         "couldn't identify the contractor to call",
+      ),
+    };
+  }
+
+  // Defense-in-depth with /api/calls/start (Herm TASK_116 P1): every future
+  // dial path must prove the homeowner already has a real relationship with
+  // this contractor before we fetch phones, create a call row, or spend
+  // Twilio money.
+  const knows = await userKnowsContractor({
+    user_id: args.user_id,
+    contractor_id: resolved.id,
+  });
+  if (!knows) {
+    return {
+      contextMessage: wrapFallback(
+        "no existing relationship with this contractor — calls can only be placed to pros you have a contract, appointment, or prior call with",
       ),
     };
   }
@@ -1557,13 +3336,271 @@ async function handleGenerateEstimate(args: {
   };
 }
 
+// ─── Contractor self-onboarding (TASK_061 — SUPPLY side) ────────────
+//
+// 6 interviews a trade pro by voice and builds their profile — no form.
+// Fields are extracted deterministically from the running transcript; the
+// row is saved ONLY when the required fields are present (6 must never say
+// "you're in" without a real DB row).
+
+const REQUIRED_CONTRACTOR_ONBOARDING_FIELDS =
+  new Set<ContractorOnboardingField>([
+    "business_name",
+    "trade",
+    "service_area",
+    "phone_or_email",
+  ]);
+
+function asYesNo(text: string, yes: RegExp, no: RegExp): boolean | undefined {
+  if (no.test(text)) return false;
+  if (yes.test(text)) return true;
+  return undefined;
+}
+
+function extractBusinessName(text: string): string | undefined {
+  // NOTE: longer alternatives first ("is called" before "is") so the verb
+  // isn't captured into the name ("...is called Reliant" → "Reliant").
+  const patterns = [
+    /\b(?:my|our)\s+business\s+(?:is\s+called|name\s+is|is)\s+([A-Z0-9][\w&'.\- ]{1,80})/i,
+    /\b(?:company|business)\s+name\s+(?:is\s+called|is)\s+([A-Z0-9][\w&'.\- ]{1,80})/i,
+    /\b(?:it'?s|its|we'?re|we are)\s+called\s+([A-Z0-9][\w&'.\- ]{1,80})/i,
+    /\b(?:i\s+run|we\s+run|i\s+own|we\s+own)\s+([A-Z0-9][\w&'.\- ]{1,80})/i,
+    /^\s*(?:It\s+is|It's|That\s+is|That's)\s+([A-Z0-9][\w&'.\- ]{1,80})\s*[.!?]?\s*$/,
+  ];
+  for (const pattern of patterns) {
+    const value = match1(pattern, text);
+    if (value && value.length >= 2) return value;
+  }
+  return undefined;
+}
+
+function match1(pattern: RegExp, text: string): string | undefined {
+  return text
+    .match(pattern)?.[1]
+    // Drop a leftover leading verb the alternation may have kept.
+    ?.replace(/^(?:called|is)\s+/i, "")
+    // Stop the name at the service-area clause or a trailing conjunction so
+    // "Bright Spark Electric out of Denver" saves as "Bright Spark Electric".
+    .replace(
+      /\s+(?:out\s+of|based\s+in|located\s+in|serving|near|around|in|and|but|we|i)\b.*$/i,
+      "",
+    )
+    .replace(/[.!?,;:]+$/g, "")
+    .trim();
+}
+
+function extractState(text: string): string | undefined {
+  const match = text.match(
+    /\b(?:in|near|around|serving|out\s+of|based\s+in)\s+[A-Za-z .'-]{2,40},\s*([A-Z]{2})\b/,
+  );
+  return match?.[1]?.toUpperCase();
+}
+
+function buildContractorOnboardingDraft(text: string): ContractorOnboardingDraft {
+  const contact = extractContactDetails(text);
+  const category = extractCategory(text);
+  const location = extractLocation(text);
+  return {
+    business_name: extractBusinessName(text),
+    categories: category ? [category as ContractorCategorySlug] : undefined,
+    // Raw text captures ANY city/ZIP (nationwide); coords only for known cities.
+    city: extractLocationText(text) ?? location?.text,
+    state: extractState(text),
+    // REAL coords only (recognized city). Never a DEFAULT_CENTER / Austin
+    // fake — the city string alone satisfies service_area.
+    lat: location?.coords.lat,
+    lng: location?.coords.lng,
+    phone: contact.phone ?? undefined,
+    email: contact.email ?? undefined,
+    licensed_flag: asYesNo(
+      text,
+      /\b(licensed|license\s+is\s+active|fully\s+licensed)\b/i,
+      /\b(not\s+licensed|unlicensed|no\s+license|not\s+yet\s+licensed)\b/i,
+    ),
+    same_day_flag: asYesNo(
+      text,
+      /\b(same[- ]day|emergency|asap)\b/i,
+      /\b(no\s+same[- ]day|not\s+same[- ]day|scheduled\s+only)\b/i,
+    ),
+    locally_owned: asYesNo(
+      text,
+      /\b(locally\s+owned|local\s+business|family\s+owned|owner[- ]operated)\b/i,
+      /\b(franchise|not\s+local|national\s+chain)\b/i,
+    ),
+  };
+}
+
+function mergeDrafts(
+  earlier: ContractorOnboardingDraft,
+  later: ContractorOnboardingDraft,
+): ContractorOnboardingDraft {
+  return {
+    business_name: later.business_name ?? earlier.business_name,
+    categories: later.categories?.length ? later.categories : earlier.categories,
+    city: later.city ?? earlier.city,
+    state: later.state ?? earlier.state,
+    lat: later.lat ?? earlier.lat,
+    lng: later.lng ?? earlier.lng,
+    phone: later.phone ?? earlier.phone,
+    email: later.email ?? earlier.email,
+    licensed_flag: later.licensed_flag ?? earlier.licensed_flag,
+    same_day_flag: later.same_day_flag ?? earlier.same_day_flag,
+    locally_owned: later.locally_owned ?? earlier.locally_owned,
+  };
+}
+
+async function getContractorOnboardingDraft(args: {
+  session_id: string;
+  slots: IntentSlots;
+}): Promise<{ draft: ContractorOnboardingDraft; sourceText: string }> {
+  const rows = await getRecentTranscriptForSession({
+    session_id: args.session_id,
+    limit: 80,
+  });
+  const userLines = rows
+    .filter((r) => r.speaker === "user")
+    .map((r) => r.text.trim())
+    .filter(Boolean);
+  const sourceText = userLines.join("\n");
+  let draft: ContractorOnboardingDraft = {};
+  for (const line of userLines) {
+    draft = mergeDrafts(draft, buildContractorOnboardingDraft(line));
+  }
+  // Backfill from the triggering utterance's slots if the transcript scan
+  // missed the trade/city (e.g. the very first turn before it's persisted).
+  if (!draft.categories?.length && args.slots.category) {
+    draft.categories = [args.slots.category as ContractorCategorySlug];
+  }
+  if (!draft.business_name && args.slots.business_name) {
+    draft.business_name = args.slots.business_name;
+  }
+  if (!draft.phone && args.slots.phone) {
+    draft.phone = args.slots.phone;
+  }
+  if (!draft.email && args.slots.email) {
+    draft.email = args.slots.email;
+  }
+  if (!draft.city && args.slots.location_text) {
+    draft.city = args.slots.location_text;
+    draft.lat = args.slots.location?.lat;
+    draft.lng = args.slots.location?.lng;
+  }
+  return { draft, sourceText };
+}
+
+async function handleOnboardContractor(args: {
+  session_id: string;
+  slots: IntentSlots;
+}): Promise<{ variant: SurfaceVariant; contextMessage: string }> {
+  const { draft } = await getContractorOnboardingDraft({
+    session_id: args.session_id,
+    slots: args.slots,
+  });
+  const payload = {
+    status: "collecting" as const,
+    draft,
+    missing_fields: missingContractorOnboardingFields(draft),
+  };
+  return {
+    variant: { kind: "contractorOnboarding", payload },
+    contextMessage: wrapContractorOnboardingPrompt({ payload }),
+  };
+}
+
+async function handleSaveContractorProfile(args: {
+  session_id: string;
+  user_id: string | null;
+  slots: IntentSlots;
+}): Promise<{ variant: SurfaceVariant; contextMessage: string }> {
+  const { draft, sourceText } = await getContractorOnboardingDraft({
+    session_id: args.session_id,
+    slots: args.slots,
+  });
+  const missing = missingContractorOnboardingFields(draft);
+  const criticalMissing = missing.filter((field) =>
+    REQUIRED_CONTRACTOR_ONBOARDING_FIELDS.has(field),
+  );
+  if (criticalMissing.length > 0) {
+    const payload = {
+      status: "collecting" as const,
+      draft,
+      missing_fields: missing,
+    };
+    return {
+      variant: { kind: "contractorOnboarding", payload },
+      contextMessage: wrapContractorOnboardingPrompt({ payload }),
+    };
+  }
+
+  const saved = await upsertSelfOnboardedContractor({
+    ...draft,
+    session_id: args.session_id,
+    user_id: args.user_id,
+    source_text: sourceText,
+  });
+  if (!saved.ok) {
+    const payload = {
+      status: "collecting" as const,
+      draft,
+      missing_fields: missing,
+    };
+    return {
+      variant: { kind: "contractorOnboarding", payload },
+      contextMessage: wrapFallback(
+        `contractor profile save failed: ${saved.reason}`,
+      ),
+    };
+  }
+
+  const payload = {
+    status: "saved" as const,
+    draft,
+    missing_fields: [] as ContractorOnboardingField[],
+    contractor_id: saved.contractor_id,
+    confirmation: `You're in, ${saved.name}.`,
+  };
+  return {
+    variant: { kind: "contractorOnboarding", payload },
+    contextMessage: wrapContractorProfileSaved({ payload }),
+  };
+}
+
 // ─── Top-level orchestrator ────────────────────────────────────────
 
 export async function orchestrate(
   input: OrchestratorInput,
 ): Promise<OrchestratorOutput> {
-  const classified = classifyIntent(input.text, { tz: input.tz ?? null });
+  const pendingListPick = await handlePendingListPick(input);
+  if (pendingListPick) return pendingListPick;
+
+  const classified = classifyIntent(input.text, {
+    tz: input.tz ?? null,
+    currentSurfaceKind: input.currentSurface?.kind ?? null,
+    pendingFindCategory: input.currentSurface?.pendingFind?.category ?? null,
+    pendingAddOfferItems: input.currentSurface?.pendingAddOffer?.items ?? null,
+    pendingListAdd: input.currentSurface?.pendingListAdd ?? null,
+  });
   if (!classified.matched) {
+    // Catch-all: "send it by WeChat", "you should add X", "this is broken"
+    // — nothing else matched, so file it as a feature/channel/bug request
+    // instead of letting it vanish (G 2026-07-06: "an AI system that either
+    // adds these features or sends bug reports"). Fire-and-forget; never
+    // blocks or changes 6's spoken turn.
+    const featureRequest = detectFeatureRequestCapture(input.text);
+    if (featureRequest) {
+      void captureFeatureRequest({
+        sessionId: input.session_id,
+        userId: input.user_id,
+        rawText: input.text,
+        kind: featureRequest.kind,
+        requestedChannel: featureRequest.requestedChannel,
+        source: "voice",
+        context: {
+          matched_rule: featureRequest.reason,
+          orchestrator_reason: classified.reason,
+        },
+      });
+    }
     return { kind: "none", reason: classified.reason };
   }
   const { classification } = classified;
@@ -1572,6 +3609,16 @@ export async function orchestrate(
   // surfaced for diagnostic logging but doesn't fire backend calls
   // (avoids spurious surface updates on partial matches).
   if (classification.confidence !== "high") {
+    // A generic "Tell Me More" pill or utterance should never make 6 read an
+    // internal fallback when no contractor cards/details are actually in
+    // view (G 13:11 ride stumble; Herm TASK_144 Patch D). Let the main brain
+    // answer naturally instead of injecting [INTENT NOT ACTIONABLE].
+    if (
+      classification.kind === "tell_me_more" &&
+      (input.currentSurface?.contractorIds?.length ?? 0) === 0
+    ) {
+      return { kind: "none", reason: "tell_me_more_without_contractor_context" };
+    }
     return {
       kind: "action",
       classification,
@@ -1586,13 +3633,51 @@ export async function orchestrate(
   }
 
   switch (classification.kind) {
-    case "find_contractor": {
-      const r = await handleFindContractor({ slots: classification.slots });
+    case "dismiss_surface": {
+      return {
+        kind: "action",
+        classification,
+        dismissSurface: true,
+        contextMessage:
+          "[SURFACE DISMISSED — not spoken by user] I cleared the visible panel and any pending find/list state. Respond in first person as 6 with one short acknowledgement. Do not re-offer the cleared contractors unless the user asks for a fresh search with a real city or ZIP.",
+      };
+    }
+    case "onboard_contractor": {
+      const r = await handleOnboardContractor({
+        session_id: input.session_id,
+        slots: classification.slots,
+      });
       return {
         kind: "action",
         classification,
         variant: r.variant,
         contextMessage: r.contextMessage,
+      };
+    }
+    case "save_contractor_profile": {
+      const r = await handleSaveContractorProfile({
+        session_id: input.session_id,
+        user_id: input.user_id,
+        slots: classification.slots,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: r.variant,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "find_contractor": {
+      const r = await handleFindContractor({
+        slots: classification.slots,
+        snapshot: input.currentSurface,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: r.variant,
+        contextMessage: r.contextMessage,
+        pending: r.pending,
       };
     }
     case "tell_me_more": {
@@ -1696,6 +3781,45 @@ export async function orchestrate(
         contextMessage: r.contextMessage,
       };
     }
+    case "schedule_recurring": {
+      const r = await handleScheduleRecurring({
+        slots: classification.slots,
+        user_id: input.user_id,
+        snapshot: input.currentSurface,
+        tz: input.tz,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: "variant" in r ? r.variant : undefined,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "report_no_show": {
+      const r = await handleReportNoShow({
+        user_id: input.user_id,
+        raw_text: input.text,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: "variant" in r ? r.variant : undefined,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "go_between_mode": {
+      // Fail-closed by design (plan v2 A4): never dials; guidance only.
+      const r = await handleGoBetweenMode({
+        slots: classification.slots,
+        user_id: input.user_id,
+        snapshot: input.currentSurface,
+      });
+      return {
+        kind: "action",
+        classification,
+        contextMessage: r.contextMessage,
+      };
+    }
     case "view_appointments": {
       const r = await handleViewAppointments({
         user_id: input.user_id,
@@ -1758,6 +3882,110 @@ export async function orchestrate(
         classification,
         variant: "variant" in r ? r.variant : undefined,
         contextMessage: r.contextMessage,
+      };
+    }
+    case "add_todo": {
+      const r = await handleAddTodo({
+        slots: classification.slots,
+        user_id: input.user_id,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: r.variant,
+        contextMessage: r.contextMessage,
+        pending: r.pending,
+      };
+    }
+    case "rename_todo": {
+      const r = await handleRenameTodo({
+        slots: classification.slots,
+        user_id: input.user_id,
+        snapshot: input.currentSurface,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: r.variant,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "view_todos": {
+      const r = await handleViewTodos({
+        slots: classification.slots,
+        user_id: input.user_id,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: r.variant,
+        contextMessage: r.contextMessage,
+        pending: r.pending,
+      };
+    }
+    case "inspect_todo": {
+      const r = await handleInspectTodo({
+        slots: classification.slots,
+        user_id: input.user_id,
+        snapshot: input.currentSurface,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: r.variant,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "complete_todo": {
+      const r = await handleCompleteTodo({
+        slots: classification.slots,
+        user_id: input.user_id,
+        snapshot: input.currentSurface,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: r.variant,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "remove_todo": {
+      const r = await handleRemoveTodo({
+        slots: classification.slots,
+        user_id: input.user_id,
+        snapshot: input.currentSurface,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: r.variant,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "clear_list": {
+      const r = await handleClearList({
+        slots: classification.slots,
+        user_id: input.user_id,
+        snapshot: input.currentSurface,
+      });
+      return {
+        kind: "action",
+        classification,
+        variant: r.variant,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "view_lists": {
+      const r = await handleViewLists({
+        user_id: input.user_id,
+      });
+      return {
+        kind: "action",
+        classification,
+        contextMessage: r.contextMessage,
+        pending: r.entries.length > 0
+          ? { kind: "list_index", entries: r.entries }
+          : undefined,
       };
     }
   }

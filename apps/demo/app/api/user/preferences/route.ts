@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getUserId } from "../../../../src/lib/auth/getUser";
 import { getSupabaseAdminConfig } from "../../../../src/lib/supabaseAdmin";
 import { locales, type Locale } from "../../../../src/i18n/routing";
+import { assertAllowedOrigin } from "../../../../src/lib/apiRouteSecurity";
+import { checkRateLimit } from "../../../../src/lib/rateLimit";
 
 /**
  * Persist user preferences. Anonymous callers get a silent 204 — the
@@ -59,6 +61,11 @@ function validateChannelPatch(input: unknown): ChannelPatch | null {
 }
 
 export async function PATCH(request: NextRequest) {
+  const originErr = assertAllowedOrigin(request);
+  if (originErr) return originErr;
+  const rateLimitErr = await checkRateLimit(request);
+  if (rateLimitErr) return rateLimitErr;
+
   const userId = await getUserId();
   if (!userId) {
     return new NextResponse(null, { status: 204 });

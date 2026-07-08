@@ -1,10 +1,16 @@
 import {
+  assertAllowedOrigin,
   authorizationBearerHeader,
   parseSafeBearerToken,
 } from "../../../src/lib/apiRouteSecurity";
+import { checkRateLimit } from "../../../src/lib/rateLimit";
 import { API_URL } from "../secrets";
 
 export async function POST(request: Request) {
+  const originErr = assertAllowedOrigin(request);
+  if (originErr) return originErr;
+  const rateLimitErr = await checkRateLimit(request);
+  if (rateLimitErr) return rateLimitErr;
   try {
     const body = await request.json();
     const token = parseSafeBearerToken(body?.session_token);

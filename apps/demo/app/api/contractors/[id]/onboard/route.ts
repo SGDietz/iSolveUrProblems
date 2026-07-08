@@ -8,6 +8,7 @@ import {
   setContractorStripeConnect,
 } from "../../../../../src/lib/payments";
 import { verifyAdminBearer } from "../../../../../src/lib/apiRouteSecurity";
+import { checkRateLimit } from "../../../../../src/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -43,6 +44,10 @@ export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
+  // Admin-bearer route: rate-limit only (an Origin check would break G's
+  // curl-driven admin use; the bearer is the auth).
+  const rateLimitErr = await checkRateLimit(request);
+  if (rateLimitErr) return rateLimitErr;
   if (!ADMIN_SECRET) {
     return bad("ADMIN_SECRET not configured", 503);
   }

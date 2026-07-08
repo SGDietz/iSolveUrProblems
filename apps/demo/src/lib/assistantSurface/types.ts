@@ -31,8 +31,19 @@ export type ContractorCard = {
   licensed_flag: boolean | null;
   phone: string | null;
   website: string | null;
+  /** Real scraped/self-onboarded email or null — the panel renders an email
+   * line ONLY when this is a real address (most rows are null; never
+   * invented — Herm TASK_094 item 3, G's Call/Email pillbox ask). */
+  email?: string | null;
   /** Optional composite score 0..1 from the recommender. */
   score?: number;
+  /** "Timonium, Maryland 21093" — shown under the reviews line (Herm
+   * TASK_086 card-contents v1; honesty anchor for nearby-fill cards). */
+  area_label?: string;
+  /** Set on nearby persisted fill cards (3-minimum, G "boom boom boom"):
+   * same broader area, exact distance unknown — UI + brain must never
+   * present these as exact-local. */
+  distance_note?: "same_area_unknown";
 };
 
 /** A single recommendation pick — same as ContractorCard plus a reason. */
@@ -127,7 +138,7 @@ export type AppointmentCard = {
 export type AppointmentSurfacePayload = {
   appointments: AppointmentCard[];
   /** What just happened — used by the panel header copy. */
-  intent_kind: "scheduled" | "rescheduled" | "cancelled" | "list";
+  intent_kind: "scheduled" | "rescheduled" | "cancelled" | "list" | "no_show";
 };
 
 /**
@@ -233,6 +244,31 @@ export type CallPayload = {
   estimate_id: string | null;
   started_at: string | null;
   ended_at: string | null;
+  /**
+   * M4.9 — Distinguishes a remote 3-way (default) from a go-between
+   * mediation where the homeowner + contractor are physically together
+   * and 6 joins via one or both phones. The transcript surface renders
+   * a "shared transcript" affordance in go_between mode.
+   */
+  mode?: "remote" | "go_between";
+};
+
+/**
+ * M4.7 — Recurring job confirmation panel. Renders the schedule's
+ * human-readable summary + the next 3 materialized instances so the
+ * homeowner can confirm the cadence is right.
+ */
+export type RecurringJobPayload = {
+  recurring_job_id: string;
+  title: string;
+  agenda: string;
+  contractor_name: string | null;
+  /** Human-readable summary like "Every Tuesday at 10:00 AM, May through October". */
+  schedule_human: string;
+  timezone: string;
+  /** Next 3 ISO UTC instances the cron will materialize. */
+  next_instances: string[];
+  status: "active" | "paused" | "ended" | "cancelled";
 };
 
 /**
@@ -259,6 +295,72 @@ export type EstimatePayload = {
   status: "draft" | "sent" | "accepted" | "declined" | "expired";
 };
 
+/**
+ * TASK_061 — contractor self-onboarding surface. 6 collects a trade pro's
+ * profile by voice; this panel mirrors what's captured + what's still needed.
+ */
+export type ContractorOnboardingField =
+  | "business_name"
+  | "trade"
+  | "service_area"
+  | "phone_or_email"
+  | "licensed"
+  | "same_day"
+  | "locally_owned";
+
+export type ContractorOnboardingDraft = {
+  business_name?: string;
+  categories?: string[];
+  city?: string;
+  state?: string;
+  lat?: number;
+  lng?: number;
+  phone?: string;
+  email?: string;
+  licensed_flag?: boolean;
+  same_day_flag?: boolean;
+  locally_owned?: boolean;
+};
+
+export type ContractorOnboardingPayload = {
+  status: "collecting" | "saved";
+  draft: ContractorOnboardingDraft;
+  missing_fields: ContractorOnboardingField[];
+  contractor_id?: string;
+  confirmation?: string;
+};
+
+/** One open item on the visible list panel (Herm TASK_082: lists were
+ * voice-only — persisted + spoken but never SHOWN; G: "I want those
+ * pillboxes to go down"). */
+export type TodoSurfaceItem = {
+  id: string;
+  title: string;
+  position: number;
+};
+
+export type TodoPayload = {
+  list_id: string;
+  list_title: string;
+  items: TodoSurfaceItem[];
+  /** What just changed — drives the panel's one-line confirmation. */
+  changed?: {
+    added?: string[];
+    completed?: string[];
+    removed?: string[];
+    cleared?: number;
+    already_there?: string[];
+  };
+  /**
+   * True when the panel renders a LOCAL-ONLY guest list (G live smoke
+   * 2026-07-04: an anonymous rider must still SEE the list on 6's chest).
+   * Never treated as persisted DB state — zero rows exist for it.
+   */
+  transient?: boolean;
+  /** User-visible honesty banner, e.g. "Not saved yet" for guest lists. */
+  persistence_note?: string;
+};
+
 /** The variant union — discriminated by `kind`. */
 export type SurfaceVariant =
   | { kind: "contractors"; hits: ContractorCard[]; total_considered: number }
@@ -274,6 +376,9 @@ export type SurfaceVariant =
   | { kind: "contract"; payload: ContractPayload }
   | { kind: "dispute"; payload: DisputePayload }
   | { kind: "call"; payload: CallPayload }
-  | { kind: "estimate"; payload: EstimatePayload };
+  | { kind: "estimate"; payload: EstimatePayload }
+  | { kind: "todo"; payload: TodoPayload }
+  | { kind: "contractorOnboarding"; payload: ContractorOnboardingPayload }
+  | { kind: "recurring"; payload: RecurringJobPayload };
 
 export type SurfaceVariantKind = SurfaceVariant["kind"];

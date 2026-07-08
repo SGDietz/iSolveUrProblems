@@ -17,6 +17,11 @@ export {
   createEstimate,
   getEstimateById,
   setEstimateStatus,
+  recordCallConsent,
+  getCallConsents,
+  type CallConsentParty,
+  type CallConsentMethod,
+  type CallConsentRow,
 } from "./store";
 export {
   isTwilioVoiceConfigured,
@@ -30,3 +35,5 @@ export {
   mirrorTwilioRecordingToStorage,
   signCallRecordingUrl,
 } from "./recordings";
+// M4 nuisance-call defense (plan v2 3b): relationship gate for all dial paths.
+export { userKnowsContractor } from "./authz";

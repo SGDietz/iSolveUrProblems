@@ -50,6 +50,8 @@ export async function send<TData>(args: {
   sessionId?: string | null;
   locale?: Locale;
   isFallback?: boolean;
+  /** Optional durable dedupe key. Duplicate active keys skip provider dispatch. */
+  idempotencyKey?: string | null;
   /** Optional extra context echoed into notifications_sent.context. */
   context?: Record<string, unknown>;
 }): Promise<DeliveryResult> {
@@ -58,7 +60,7 @@ export async function send<TData>(args: {
     | NotificationTemplate<TData>
     | null;
 
-  const rowId = await insertNotification({
+  const insertResult = await insertNotification({
     user_id: args.userId ?? null,
     session_id: args.sessionId ?? null,
     channel: args.channel,
@@ -67,8 +69,18 @@ export async function send<TData>(args: {
     locale,
     status: "queued",
     is_fallback: args.isFallback ?? false,
+    idempotency_key: args.idempotencyKey ?? null,
     context: args.context ?? {},
   });
+  if (insertResult.status === "duplicate") {
+    return {
+      ok: true,
+      channel: args.channel,
+      provider_id: "already-sent",
+      row_id: insertResult.rowId ?? "already-sent",
+    };
+  }
+  const rowId = insertResult.rowId;
 
   if (!template) {
     const error = `unknown template: ${args.templateId}`;

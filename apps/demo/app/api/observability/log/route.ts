@@ -3,6 +3,7 @@ import { checkRateLimit } from "../../../../src/lib/rateLimit";
 import { getUserId } from "../../../../src/lib/auth/getUser";
 import { captureServerError } from "../../../../src/lib/observability/serverLogger";
 import type { ClientLogPayload, LogLevel } from "../../../../src/lib/observability/types";
+import { assertAllowedOrigin } from "../../../../src/lib/apiRouteSecurity";
 
 const VALID_LEVELS: ReadonlySet<LogLevel> = new Set(["error", "warn", "info"]);
 const MAX_MESSAGE = 4000;
@@ -25,6 +26,9 @@ function clamp(s: unknown, max: number): string | undefined {
  * server-side logger which writes to public.error_logs via service role.
  */
 export async function POST(request: NextRequest) {
+  const originErr = assertAllowedOrigin(request);
+  if (originErr) return originErr;
+
   // Rate-limit so a buggy client loop can't fill the table.
   const limitErr = await checkRateLimit(request);
   if (limitErr) return limitErr;

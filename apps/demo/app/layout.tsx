@@ -9,7 +9,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="bg-[radial-gradient(circle_at_center,#3a2108_0%,#1f1208_58%,#0a0604_100%)] flex min-h-screen flex-col text-white justify-center items-center">
+      <body className="site-bg flex min-h-screen flex-col text-white justify-center items-center">
         {/* <main className="w-full flex-1">{children}</main> */}
         <AuthProvider>{children}</AuthProvider>
         {/* <footer className="w-full border-t border-white/10 px-4 py-4 text-center text-xs sm:text-sm text-zinc-300">

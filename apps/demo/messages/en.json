@@ -1,10 +1,10 @@
 {
   "home": {
-    "title": "iSolveUrProblems.ai - beta",
-    "subtitle": "Your Ai-Powered Home & Garden Solution Center",
+    "title": "iSolveUrProblems",
+    "subtitle": "Your Ai-Powered Solution Center",
     "loading": "Loading...",
     "sessionEnded": "Session Ended",
-    "thankYou": "Thank you for using iSolveUrProblems.ai",
+    "thankYou": "Thank you for using iSolveUrProblems!",
     "restartPrompt": "Wanna use again? Press the button below 👇",
     "restart": "Restart",
     "retry": "Retry",
@@ -178,14 +178,14 @@
     },
     "picker": {
       "pickThis": "Pick this one",
-      "notifying": "Notifying…",
-      "confirm": "Picking this contractor will send a win notification to them and a 'thanks, here's how to win next time' note to every other candidate. Continue?",
+      "notifying": "Saving your pick…",
+      "confirm": "Save this pick? Automatic notifications aren't live yet — you can call them right after.",
       "signInRequired": "Sign in to pick a contractor.",
-      "error": "Couldn't dispatch notifications",
-      "title": "6 has notified the candidates",
+      "error": "Couldn't save the pick",
+      "title": "Your pick is saved",
       "summary": "{sent} sent · {failed} failed",
       "winnerLabel": "Winner",
-      "losersLabel": "{count, plural, =1 {Other candidate notified} other {# other candidates notified}}",
+      "losersLabel": "{count, plural, =1 {Other candidate shown} other {# other candidates shown}}",
       "delivered": "delivered",
       "failed": "failed"
     },
@@ -201,8 +201,8 @@
         "kicker": "iSolveUrProblems · Checkout",
         "titleSuccess": "Payment received",
         "titleCanceled": "Checkout canceled",
-        "subtitlePaid": "6 confirmed the payment. The contractor has been notified and we'll connect you.",
-        "subtitleProcessing": "Thanks — Stripe is finalizing the charge. 6 will notify the contractor as soon as it's confirmed.",
+        "subtitlePaid": "6 confirmed the payment. Call them with the button below to connect.",
+        "subtitleProcessing": "Payment confirmed on our side. Call them with the button below to connect.",
         "subtitleCanceled": "No charge was made. You can pick someone else or come back later.",
         "contractId": "Contract",
         "category": "Category",
@@ -228,7 +228,20 @@
         "contract": "Work agreement",
         "dispute": "Dispute thread",
         "call": "Phone call with 6",
-        "estimate": "Estimate"
+        "estimate": "Estimate",
+        "todo": "Your list",
+        "contractorOnboarding": "Contractor sign-up",
+        "recurring": "Autopilot job"
+      },
+      "todo": {
+        "openCount": "{count} open",
+        "showingCount": "Showing {count} open.",
+        "empty": "This list is empty.",
+        "summaryAdded": "Added: {items}",
+        "summaryCompleted": "Checked off: {items}",
+        "summaryRemoved": "Removed: {items}",
+        "summaryCleared": "Cleared {count} items",
+        "summaryAlready": "Already on the list: {items}"
       },
       "contractors": {
         "empty": "No matches yet.",
@@ -238,7 +251,31 @@
           "sameDay": "Same day",
           "locallyOwned": "Locally owned"
         },
-        "website": "Website"
+        "website": "Website",
+        "callConsent": {
+          "title": "Call {name}?",
+          "body": "This call goes out from your own phone. You are the caller.",
+          "sixSays": "Heads-up from 6: I can't join phone calls yet, so the talking is all you. I'll stay right here with the notes while you call. If a machine answers, you leave the message yourself. Then come back and tell me how it went.",
+          "confirm": "Yes, call now",
+          "cancel": "Not yet"
+        },
+        "emailConsent": {
+          "title": "Email {name}?",
+          "body": "6 will send a clean intro from iSolve instead of opening your mail app.",
+          "disclosure": "Your account email is shared so the contractor can reply directly. Nothing sends until you tap Yes.",
+          "messageLabel": "Optional note",
+          "placeholder": "Example: I need help with a leaking sink this week.",
+          "confirm": "Yes, email them",
+          "cancel": "Not yet",
+          "sending": "Sending…",
+          "sent": "Sent — they can reply to your account email.",
+          "failed": "Email could not be sent yet.",
+          "signInRequired": "Sign in so 6 can send from iSolve."
+        },
+        "cta": {
+          "call": "Call {phone}",
+          "email": "Email them"
+        }
       },
       "summary": {
         "fresh": "Fresh",
@@ -252,10 +289,10 @@
         "basedOn": "Tuned by what 6 remembers:"
       },
       "pickResult": {
-        "title": "6 has notified the candidates",
+        "title": "Your pick is saved",
         "summary": "{sent} sent · {failed} failed",
         "winnerLabel": "Winner",
-        "losersLabel": "{count, plural, =1 {Other candidate notified} other {# other candidates notified}}",
+        "losersLabel": "{count, plural, =1 {Other candidate shown} other {# other candidates shown}}",
         "delivered": "delivered",
         "failed": "failed"
       },
@@ -276,7 +313,8 @@
           "scheduled": "Appointment scheduled",
           "rescheduled": "Appointment moved",
           "cancelled": "Appointment cancelled",
-          "list": "Upcoming appointments"
+          "list": "Upcoming appointments",
+          "no_show": "Dispatching a substitute"
         },
         "status": {
           "cancelled": "Cancelled",
@@ -326,7 +364,9 @@
           "contractor": "Contractor",
           "six": "6",
           "system": "System"
-        }
+        },
+        "titleGoBetween": "In-person go-between",
+        "modeBadgeGoBetween": "Go-between"
       },
       "estimate": {
         "title": "Voice estimate",
@@ -386,6 +426,26 @@
           "escalated": "This dispute has been handed to a human admin. They'll be in touch.",
           "closed": "This dispute is closed."
         }
+      },
+      "goBetween": {
+        "startCta": "Start go-between call",
+        "startingCta": "Dialing…",
+        "phonePrompt": "Enter your phone number in E.164 (e.g. +14155551234). 6 will dial you and the contractor into a mediation call.",
+        "phoneInvalid": "Please enter a valid E.164 number (e.g. +14155551234).",
+        "errorGeneric": "Couldn't start the go-between call."
+      },
+      "recurring": {
+        "title": "Autopilot job scheduled",
+        "withLabel": "With",
+        "upcomingLabel": "Next instances",
+        "noUpcoming": "(No upcoming instances — schedule may already have ended)",
+        "autopilotFootnote": "Each instance fires reminders, contractor confirmation, and the no-show backup dispatcher. Say \"pause that recurring job\" any time to stop.",
+        "status": {
+          "active": "Active",
+          "paused": "Paused",
+          "ended": "Ended",
+          "cancelled": "Cancelled"
+        }
       }
     }
   },
@@ -409,6 +469,228 @@
       "pt": "Português",
       "de": "Deutsch",
       "zh": "中文"
+    }
+  },
+  "forContractors": {
+    "kicker": "iSolveUrProblems · For Contractors",
+    "hero": {
+      "title": "Run your business with 6 in your corner.",
+      "blurb": "Get vetted leads, draft contracts, paid out same-week. No more chasing — 6 handles the busywork so you focus on the job."
+    },
+    "benefit": {
+      "leads": "Homeowner leads ranked + delivered — pay only when you win the job",
+      "contracts": "Work agreements drafted + e-signed in minutes",
+      "payouts": "Stripe payouts net of platform fee, hits your account fast",
+      "recurring": "Recurring jobs put on autopilot — mow every Tuesday, gutters every fall",
+      "crew": "Find sub-contractors when you're double-booked"
+    },
+    "cta": {
+      "signIn": "Sign in or create an account",
+      "signInBlurb": "Magic-link sign-in. We email you a one-time link — no password to remember."
+    },
+    "already": {
+      "title": "Welcome back",
+      "blurb": "Your contractor account is active. Jump back into the dashboard.",
+      "goCta": "Open dashboard"
+    },
+    "claim": {
+      "title": "Claim your business profile",
+      "blurb": "Enter your state license number. We'll verify it against the issuing board and link your account.",
+      "privacyFootnote": "We never publish your license number. It's used only for one-time verification + the License-Verified badge on your profile.",
+      "stateLabel": "State",
+      "licenseLabel": "License number",
+      "licensePlaceholder": "e.g. 1234567",
+      "licenseHelper": "California CSLB number. Other states coming soon.",
+      "submitCta": "Verify and claim",
+      "submitting": "Verifying…",
+      "errorGeneric": "Couldn't verify. Check the number and try again.",
+      "pending": {
+        "title": "Almost there — pending review",
+        "blurb": "We found your profile but need a human to confirm. We'll email you within 1 business day.",
+        "reasonsLabel": "Signals"
+      }
+    }
+  },
+  "contractor": {
+    "dashboard": {
+      "kicker": "Contractor dashboard",
+      "backHome": "← Back to 6",
+      "badge": {
+        "licenseVerified": "Licensed · {state} {license}",
+        "payoutReady": "Payout ready",
+        "payoutPending": "Payout pending — finish Stripe onboarding"
+      },
+      "onboardingBanner": {
+        "title": "Complete payment setup",
+        "blurb": "You need to finish Stripe onboarding before homeowners can pay you.",
+        "onboardingCta": "Onboard with Stripe",
+        "onboardingSubmitting": "Opening Stripe…",
+        "errorGeneric": "Couldn't start onboarding. Try again."
+      },
+      "pending": {
+        "title": "Pending invitations",
+        "blurb": "Homeowners who picked you — accept or decline",
+        "empty": "No open invitations right now."
+      },
+      "active": {
+        "title": "Active jobs",
+        "blurb": "Paid + upcoming work",
+        "empty": "No active jobs."
+      },
+      "completed": {
+        "title": "Completed",
+        "blurb": "Past jobs",
+        "empty": "No completed jobs yet."
+      },
+      "nextAt": "Next: {when}",
+      "esignLabel": "Contract",
+      "logWorkCta": "Log work →",
+      "coaching": {
+        "title": "A note from 6",
+        "kicker": "A note from 6",
+        "signoff": "— 6 only sends these when something real happens. Reply STOP to mute."
+      },
+      "crew": {
+        "title": "Crew marketplace",
+        "silverPlus": "Silver+",
+        "gatedBadge": "Silver+",
+        "gatedBlurb": "Upgrade to Silver and 6 will find you a same-day helper contractor when you're double-booked.",
+        "errorGeneric": "Something went wrong. Try again.",
+        "errorTier": "This is a Silver-tier feature.",
+        "errorAlreadyFilled": "Another contractor accepted first.",
+        "form": {
+          "category": "Trade needed",
+          "neededAt": "Needed at",
+          "radiusKm": "Radius (km)",
+          "scope": "What's the job?",
+          "scopePlaceholder": "Set 4 interior doors, ~2 hours.",
+          "submitCta": "Post to nearby helpers",
+          "submitting": "Posting…"
+        },
+        "outgoing": {
+          "title": "Your open requests",
+          "empty": "No outgoing requests right now.",
+          "status": {
+            "open": "Open",
+            "filled": "Filled",
+            "expired": "Expired",
+            "cancelled": "Cancelled"
+          },
+          "responseStatus": {
+            "invited": "Invited",
+            "accepted": "Accepted",
+            "declined": "Passed",
+            "expired": "Expired",
+            "no_response": "No response"
+          }
+        },
+        "incoming": {
+          "title": "Invitations for you",
+          "empty": "No one has invited you to help yet.",
+          "acceptCta": "Accept",
+          "declineCta": "Decline",
+          "status": {
+            "invited": "Awaiting",
+            "accepted": "Accepted",
+            "declined": "Declined",
+            "expired": "Expired",
+            "no_response": "No response"
+          }
+        }
+      },
+      "checklist": {
+        "title": "Pre-departure checklist",
+        "notYetBlurb": "6 will draft tools, materials, and confirmations 2h before this job. Generate now to preview.",
+        "generateCta": "Generate now",
+        "generating": "Generating…",
+        "regenerateCta": "Regenerate",
+        "regenerating": "Regenerating…",
+        "errorGeneric": "Couldn't update the checklist. Try again.",
+        "generatedBy": "by {model}",
+        "gatedBadge": "Bronze+",
+        "gatedBlurb": "Upgrade to Bronze to get a 6-generated pre-departure checklist for each job.",
+        "bucket": {
+          "tool": "Tools",
+          "material": "Materials",
+          "confirmation": "Confirm before you go"
+        }
+      }
+    },
+    "jobLog": {
+      "kicker": "Job log",
+      "untitledAgenda": "Untitled job",
+      "backToDashboard": "← Back to dashboard",
+      "captureHeading": "Capture",
+      "phase": {
+        "arrival": "Arrival",
+        "in_progress": "In progress",
+        "completion": "Completion"
+      },
+      "phaseCount": "{count, plural, one {# photo} other {# photos}}",
+      "phaseEmpty": "tap to capture",
+      "noteHeading": "Add note",
+      "notePlaceholder": "Anything 6 should know about this visit…",
+      "addNoteCta": "Add note",
+      "submitting": "Saving…",
+      "timelineHeading": "Timeline",
+      "timelineEmpty": "Nothing logged yet — capture an arrival photo to start.",
+      "noteLabel": "Note",
+      "errorGeneric": "Couldn't save. Try again.",
+      "tierGate": "Upgrade to Bronze to log photos against this job.",
+      "gatedTitle": "Photo logging is a paid feature",
+      "gatedBlurb": "Upgrade to Bronze and 6 stores every photo against this job, with timestamps, GPS, and a homeowner-facing timeline.",
+      "gatedManageCta": "Manage subscription →",
+      "cv": {
+        "loading": "Checking for AI label…",
+        "identifyCta": "Identify with 6",
+        "classifying": "6 is looking…",
+        "predictedLabel": "6 thinks:",
+        "confidence": {
+          "low": "low confidence",
+          "medium": "medium confidence",
+          "high": "high confidence"
+        },
+        "yesCta": "Yes",
+        "noCta": "No",
+        "correctionPlaceholder": "e.g. dandelion",
+        "saveCorrectionCta": "Save",
+        "confirmedPrefix": "Confirmed:",
+        "tierGate": "AI identification is a Gold-tier feature.",
+        "errorGeneric": "Couldn't get an AI label. Try again."
+      }
+    },
+    "subscription": {
+      "title": "Your plan:",
+      "tier": {
+        "free": "Free",
+        "bronze": "Bronze",
+        "silver": "Silver",
+        "gold": "Gold"
+      },
+      "tierBlurb": {
+        "bronze": "Same-day priority · checklists · photo log",
+        "silver": "Bronze + crew marketplace · backup dispatcher · recurring",
+        "gold": "Silver + AI labeling · coaching · featured slots"
+      },
+      "status": {
+        "trialing": "Trial",
+        "active": "Active",
+        "past_due": "Payment failed",
+        "canceled": "Canceled",
+        "incomplete": "Setup incomplete",
+        "incomplete_expired": "Setup expired",
+        "unpaid": "Unpaid",
+        "paused": "Paused",
+        "none": "—"
+      },
+      "trialUntil": "Free trial through {date}",
+      "renewsOn": "Renews on {date}",
+      "cancelsOn": "Cancels on {date}",
+      "upgradeBlurb": "Upgrade to unlock crew marketplace, recurring jobs, AI labeling, and more.",
+      "manageCta": "Manage subscription",
+      "cancelCta": "Cancel",
+      "cancelConfirm": "Cancel at the end of your billing period? You keep access until then.",
+      "errorGeneric": "Something went wrong. Try again."
     }
   }
 }

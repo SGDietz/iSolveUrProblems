@@ -261,8 +261,10 @@ export async function notifyNewLead(
     .join("\n");
   void sendTelegram(tgChatId, tgLines);
 
-  // Email — richer
-  const toAddr = process.env.LEAD_ALERT_EMAIL_TO ?? "sgdietz@pm.me";
+  // Email — richer. Beta: leads go to G's business inbox (he fields them himself
+  // and reaches out directly — the $0 concierge connect). Override via env
+  // LEAD_ALERT_EMAIL_TO if needed (G 2026-06-29).
+  const toAddr = process.env.LEAD_ALERT_EMAIL_TO ?? "SG@iSolveUrProblems.ai";
   const fromAddr =
     process.env.LEAD_ALERT_EMAIL_FROM ?? "iSolve Leads <onboarding@resend.dev>";
   const subject = `🎯 New iSolve lead: ${name}`;

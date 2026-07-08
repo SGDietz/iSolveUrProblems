@@ -207,12 +207,12 @@ export default function LegalPage() {
   return (
     <div className="w-full px-4 py-8 sm:px-6 lg:px-8">
       <BackToPreviousButton />
-      <article className="mx-auto w-full max-w-4xl rounded-xl border border-white/10 bg-zinc-900/70 p-5 shadow-lg backdrop-blur sm:p-8">
-        
-        <h1 className="text-3xl font-bold tracking-wide text-white sm:text-4xl">Terms</h1>
-        <p className="mt-3 text-sm text-zinc-300 sm:text-base">Effective Date: Jan 01, 2026</p>
+      <article className="mx-auto w-full max-w-4xl rounded-xl border-2 border-[#e0aa62]/85 bg-gradient-to-b from-[#341d07]/90 to-[#130a03]/90 p-5 shadow-[inset_0_1px_10px_rgba(255,255,255,0.10),0_10px_28px_rgba(0,0,0,0.5)] backdrop-blur-[3px] sm:p-8">
 
-        <div className="mt-6 space-y-4 text-sm leading-relaxed text-zinc-200 sm:text-base">
+        <h1 className="brand-grad-text text-3xl font-bold tracking-wide sm:text-4xl">Terms</h1>
+        <p className="mt-3 text-sm text-[#e8b96a]/80 sm:text-base">Effective Date: Jan 01, 2026</p>
+
+        <div className="mt-6 space-y-4 text-sm leading-relaxed text-[#ffe9c2]/90 sm:text-base">
           <p>
             Welcome to iSolveUrProblems.ai ("Company," "we," "our," or "us"). By accessing or using this website,
             platform, or any associated services (collectively, the "Service"), you agree to the following terms.
@@ -223,14 +223,14 @@ export default function LegalPage() {
         <div className="mt-8 space-y-8">
           {sections.map((section) => (
             <section key={section.title}>
-              <h2 className="text-lg font-semibold text-white sm:text-xl">{section.title}</h2>
+              <h2 className="brand-grad-text text-lg font-semibold sm:text-xl">{section.title}</h2>
               {section.paragraphs?.map((paragraph) => (
-                <p key={paragraph} className="mt-3 text-sm leading-relaxed text-zinc-200 sm:text-base">
+                <p key={paragraph} className="mt-3 text-sm leading-relaxed text-[#ffe9c2]/90 sm:text-base">
                   {paragraph}
                 </p>
               ))}
               {section.bullets && (
-                <ul className="mt-3 list-disc space-y-1 pl-6 text-sm leading-relaxed text-zinc-200 sm:text-base">
+                <ul className="mt-3 list-disc space-y-1 pl-6 text-sm leading-relaxed text-[#ffe9c2]/90 sm:text-base">
                   {section.bullets.map((bullet) => (
                     <li key={`${section.title}-${bullet}`}>{bullet}</li>
                   ))}
@@ -240,12 +240,12 @@ export default function LegalPage() {
           ))}
         </div>
 
-        <section className="mt-10 border-t border-white/10 pt-6">
-          <h2 className="text-lg font-semibold text-white sm:text-xl">FINAL NOTE</h2>
-          <p className="mt-3 text-sm leading-relaxed text-zinc-200 sm:text-base">
+        <section className="mt-10 border-t border-[#e0aa62]/30 pt-6">
+          <h2 className="brand-grad-text text-lg font-semibold sm:text-xl">FINAL NOTE</h2>
+          <p className="mt-3 text-sm leading-relaxed text-[#ffe9c2]/90 sm:text-base">
             This platform is a tool to assist with thinking and problem-solving.
           </p>
-          <p className="mt-2 text-sm leading-relaxed text-zinc-200 sm:text-base">
+          <p className="mt-2 text-sm leading-relaxed text-[#ffe9c2]/90 sm:text-base">
             It is not a substitute for professional judgment, experience, or licensed expertise.
           </p>
         </section>

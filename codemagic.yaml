@@ -1,0 +1,48 @@
+# Codemagic CI — builds the iSolveUrProblems Capacitor iOS app on a cloud Mac
+# (no Mac of your own needed) and ships it to TestFlight → your iPad.
+#
+# ONE-TIME SETUP IN CODEMAGIC (UI):
+#   1. codemagic.io → sign in with GitHub → add the SGDietz/iSolveUrProblems repo.
+#   2. Add an "App Store Connect API key" integration (Teams → Integrations →
+#      App Store Connect). Name it exactly: "iSolve ASC Key" (or change the name
+#      below to match). Upload the .p8 + Key ID + Issuer ID from App Store Connect.
+#   3. Register Bundle ID `ai.isolveurproblems.app` in App Store Connect + create
+#      the app record there. Put its numeric Apple ID in APP_STORE_APPLE_ID below.
+#
+# Tunable bits are marked TODO. This is a standard Capacitor iOS workflow.
+workflows:
+  ios-capacitor:
+    name: iSolve iOS (Capacitor → TestFlight)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: iSolve ASC Key # TODO: match the integration name you create
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: ai.isolveurproblems.app
+      vars:
+        APP_STORE_APPLE_ID: 0000000000 # TODO: your app's numeric Apple ID from App Store Connect
+      node: 22
+    scripts:
+      - name: Install pnpm + workspace deps
+        script: |
+          npm i -g pnpm@9
+          pnpm install --frozen-lockfile=false
+      - name: Add + sync the iOS platform (Capacitor)
+        working_directory: apps/demo
+        script: |
+          npx cap add ios || true
+          npx cap sync ios
+      - name: Use signing profiles
+        script: xcode-project use-profiles
+      - name: Build the IPA
+        working_directory: apps/demo/ios/App
+        script: |
+          xcode-project build-ipa --workspace "App.xcworkspace" --scheme "App"
+    artifacts:
+      - apps/demo/ios/App/build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

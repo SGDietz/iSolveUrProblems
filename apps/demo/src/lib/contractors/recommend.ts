@@ -39,6 +39,12 @@ const ALGO_TOP_N = 5;
 export type RecommendInput = {
   userId: string | null;
   searchInput: ContractorSearchInput;
+  /**
+   * Whether the user's location is actually known. When false (we fell back to
+   * a default center because no city was given), we NEVER expose or speak a
+   * distance — a defaulted distance is a fake fact (Herm TASK_063 #3).
+   */
+  distance_known?: boolean;
 };
 
 export type RecommendationPick = {
@@ -191,7 +197,8 @@ function buildTemplatedReason(
   } else if (pick.rating_avg != null) {
     bits.push(`★ ${pick.rating_avg.toFixed(1)}`);
   }
-  bits.push(`${pick.distance_km.toFixed(1)} km away`);
+  // Only state a distance we actually know (> 0). Never "0.0 km away".
+  if (pick.distance_km > 0) bits.push(`${pick.distance_km.toFixed(1)} km away`);
   if (pick.locally_owned) bits.push("locally owned");
   if (pick.same_day_flag) bits.push("does same-day");
   if (pick.licensed_flag) bits.push("licensed");
@@ -208,6 +215,9 @@ type ScoredCandidate = {
 export async function recommendContractors(
   input: RecommendInput,
 ): Promise<RecommendResult> {
+  // When location is defaulted (unknown), distance is a fake fact — never
+  // expose or speak it (Herm TASK_063 #3).
+  const distanceKnown = input.distance_known !== false;
   // 1. Personalization — pull preference facts (best-effort).
   const prefs = input.userId
     ? await fetchPreferenceFacts(input.userId)
@@ -269,7 +279,7 @@ export async function recommendContractors(
         name: c.hit.name,
         rating_avg: c.hit.rating_avg,
         rating_count: c.hit.rating_count,
-        distance_km: Number(c.hit.distance_km.toFixed(2)),
+        distance_km: distanceKnown ? Number(c.hit.distance_km.toFixed(2)) : 0,
         price_tier: c.hit.price_tier,
         locally_owned: c.hit.locally_owned,
         same_day_flag: c.hit.same_day_flag,
@@ -298,7 +308,10 @@ export async function recommendContractors(
     name: c.hit.name,
     rating_avg: c.hit.rating_avg,
     rating_count: c.hit.rating_count,
-    distance_km: Number(c.hit.distance_km.toFixed(1)),
+    distance_km:
+      distanceKnown && c.hit.distance_km > 0
+        ? Number(c.hit.distance_km.toFixed(1))
+        : null,
     price_tier: c.hit.price_tier,
     locally_owned: c.hit.locally_owned,
     same_day_flag: c.hit.same_day_flag,
@@ -376,7 +389,12 @@ Each reason MUST be one sentence under 140 characters, written in first person (
         name: candidate.hit.name,
         rating_avg: candidate.hit.rating_avg,
         rating_count: candidate.hit.rating_count,
-        distance_km: Number(candidate.hit.distance_km.toFixed(2)),
+        // Same honesty rule as the fallback picks: never expose a distance we
+        // don't actually know (unknown location → 0, hidden downstream).
+        distance_km:
+          distanceKnown && candidate.hit.distance_km > 0
+            ? Number(candidate.hit.distance_km.toFixed(2))
+            : 0,
         price_tier: candidate.hit.price_tier,
         locally_owned: candidate.hit.locally_owned,
         same_day_flag: candidate.hit.same_day_flag,

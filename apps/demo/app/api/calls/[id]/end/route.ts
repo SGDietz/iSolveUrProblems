@@ -6,6 +6,7 @@ import {
   getCallById,
   setCallStatus,
 } from "../../../../../src/lib/calls";
+import { checkRateLimit } from "../../../../../src/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,8 @@ export async function POST(
 ) {
   const originErr = assertAllowedOrigin(request);
   if (originErr) return originErr;
+  const rateLimitErr = await checkRateLimit(request);
+  if (rateLimitErr) return rateLimitErr;
 
   const userId = await getUserId();
   if (!userId) {

@@ -14,6 +14,8 @@ import type {
 } from "../../../../../src/lib/notifications/types";
 import { defaultLocale, type Locale } from "../../../../../src/i18n/routing";
 import type { ReportDeliveryData } from "../../../../../src/lib/notifications/templates/report-delivery";
+import { assertAllowedOrigin } from "../../../../../src/lib/apiRouteSecurity";
+import { checkRateLimit } from "../../../../../src/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -48,6 +50,10 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const originErr = assertAllowedOrigin(request);
+  if (originErr) return originErr;
+  const rateLimitErr = await checkRateLimit(request);
+  if (rateLimitErr) return rateLimitErr;
   const { id } = await params;
   if (!isUuid(id)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });

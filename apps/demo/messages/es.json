@@ -178,14 +178,14 @@
     },
     "picker": {
       "pickThis": "Elegir a este",
-      "notifying": "Notificando…",
-      "confirm": "Al elegir a este contratista, se le enviará una notificación de victoria y a los demás candidatos una nota amable con consejos para mejorar. ¿Continuar?",
+      "notifying": "Saving your pick…",
+      "confirm": "Save this pick? Automatic notifications aren't live yet — you can call them right after.",
       "signInRequired": "Inicia sesión para elegir un contratista.",
-      "error": "No se pudieron enviar las notificaciones",
-      "title": "6 ha notificado a los candidatos",
+      "error": "Couldn't save the pick",
+      "title": "Your pick is saved",
       "summary": "{sent} enviados · {failed} fallidos",
       "winnerLabel": "Ganador",
-      "losersLabel": "{count, plural, =1 {Otro candidato notificado} other {# otros candidatos notificados}}",
+      "losersLabel": "{count, plural, =1 {Other candidate shown} other {# other candidates shown}}",
       "delivered": "entregado",
       "failed": "fallido"
     },
@@ -201,8 +201,8 @@
         "kicker": "iSolveUrProblems · Pago",
         "titleSuccess": "Pago recibido",
         "titleCanceled": "Pago cancelado",
-        "subtitlePaid": "6 confirmó el pago. Se ha notificado al contratista y te pondremos en contacto.",
-        "subtitleProcessing": "Gracias — Stripe está procesando el cargo. 6 notificará al contratista en cuanto se confirme.",
+        "subtitlePaid": "Payment confirmed on our side. Call them with the button below to connect.",
+        "subtitleProcessing": "Payment confirmed on our side. Call them with the button below to connect.",
         "subtitleCanceled": "No se realizó ningún cargo. Puedes elegir a otra persona o volver más tarde.",
         "contractId": "Contrato",
         "category": "Categoría",
@@ -228,7 +228,20 @@
         "contract": "Acuerdo de trabajo",
         "dispute": "Hilo de disputa",
         "call": "Llamada con 6",
-        "estimate": "Presupuesto"
+        "estimate": "Presupuesto",
+        "todo": "Tu lista",
+        "contractorOnboarding": "Registro de profesional",
+        "recurring": "Trabajo en piloto automático"
+      },
+      "todo": {
+        "openCount": "{count} pendientes",
+        "showingCount": "Mostrando {count} pendientes.",
+        "empty": "Esta lista está vacía.",
+        "summaryAdded": "Añadido: {items}",
+        "summaryCompleted": "Marcado: {items}",
+        "summaryRemoved": "Quitado: {items}",
+        "summaryCleared": "Se borraron {count} elementos",
+        "summaryAlready": "Ya en la lista: {items}"
       },
       "contractors": {
         "empty": "Aún no hay coincidencias.",
@@ -238,7 +251,31 @@
           "sameDay": "Mismo día",
           "locallyOwned": "Local"
         },
-        "website": "Sitio web"
+        "website": "Sitio web",
+        "callConsent": {
+          "title": "¿Llamar a {name}?",
+          "body": "Esta llamada sale de tu propio teléfono. Tú haces la llamada.",
+          "sixSays": "Aviso de 6: todavía no puedo unirme a llamadas de teléfono, así que hablar te toca a ti. Yo me quedo aquí con las notas mientras llamas. Si contesta una máquina, deja tú el mensaje. Después cuéntame cómo fue.",
+          "confirm": "Sí, llamar ahora",
+          "cancel": "Todavía no"
+        },
+        "emailConsent": {
+          "title": "¿Enviar correo a {name}?",
+          "body": "6 enviará una presentación limpia desde iSolve en vez de abrir tu app de correo.",
+          "disclosure": "Se comparte el correo de tu cuenta para que el contratista pueda responderte directamente. No se envía nada hasta que toques Sí.",
+          "messageLabel": "Nota opcional",
+          "placeholder": "Ejemplo: Necesito ayuda con un fregadero que gotea esta semana.",
+          "confirm": "Sí, enviar correo",
+          "cancel": "Todavía no",
+          "sending": "Enviando…",
+          "sent": "Enviado — pueden responder al correo de tu cuenta.",
+          "failed": "Aún no se pudo enviar el correo.",
+          "signInRequired": "Inicia sesión para que 6 pueda enviar desde iSolve."
+        },
+        "cta": {
+          "call": "Llamar al {phone}",
+          "email": "Enviar correo"
+        }
       },
       "summary": {
         "fresh": "Nuevo",
@@ -252,10 +289,10 @@
         "basedOn": "Ajustado por lo que 6 recuerda:"
       },
       "pickResult": {
-        "title": "6 ha notificado a los candidatos",
+        "title": "Payment confirmed on our side. Call them with the button below to connect.",
         "summary": "{sent} enviados · {failed} fallidos",
         "winnerLabel": "Ganador",
-        "losersLabel": "{count, plural, =1 {Otro candidato notificado} other {# otros candidatos notificados}}",
+        "losersLabel": "Payment confirmed on our side. Call them with the button below to connect.",
         "delivered": "entregado",
         "failed": "fallido"
       },
@@ -276,7 +313,8 @@
           "scheduled": "Cita agendada",
           "rescheduled": "Cita reprogramada",
           "cancelled": "Cita cancelada",
-          "list": "Próximas citas"
+          "list": "Próximas citas",
+          "no_show": "Buscando un reemplazo"
         },
         "status": {
           "cancelled": "Cancelada",
@@ -326,7 +364,9 @@
           "contractor": "Contratista",
           "six": "6",
           "system": "Sistema"
-        }
+        },
+        "titleGoBetween": "Intermediario en persona",
+        "modeBadgeGoBetween": "Intermediario"
       },
       "estimate": {
         "title": "Presupuesto por voz",
@@ -386,6 +426,26 @@
           "escalated": "Esta disputa fue enviada a un administrador humano. Se pondrán en contacto.",
           "closed": "Esta disputa está cerrada."
         }
+      },
+      "goBetween": {
+        "startCta": "Iniciar llamada de intermediario",
+        "startingCta": "Marcando…",
+        "phonePrompt": "Ingresa tu número en formato E.164 (por ejemplo +14155551234). 6 los llamará a ti y al contratista para mediar.",
+        "phoneInvalid": "Ingresa un número E.164 válido (por ejemplo +14155551234).",
+        "errorGeneric": "No se pudo iniciar la llamada de intermediario."
+      },
+      "recurring": {
+        "title": "Trabajo en piloto automático programado",
+        "withLabel": "Con",
+        "upcomingLabel": "Próximas instancias",
+        "noUpcoming": "(Sin próximas instancias — el calendario puede haber terminado)",
+        "autopilotFootnote": "Cada instancia dispara recordatorios, confirmación del contratista y el sustituto si hay falta. Di \"pausa ese trabajo recurrente\" para detenerlo.",
+        "status": {
+          "active": "Activo",
+          "paused": "Pausado",
+          "ended": "Terminado",
+          "cancelled": "Cancelado"
+        }
       }
     }
   },
@@ -409,6 +469,228 @@
       "pt": "Português",
       "de": "Deutsch",
       "zh": "中文"
+    }
+  },
+  "forContractors": {
+    "kicker": "iSolveUrProblems · Para Contratistas",
+    "hero": {
+      "title": "Gestiona tu negocio con 6 de tu lado.",
+      "blurb": "Recibe leads filtrados, contratos redactados y cobros rápidos. 6 hace lo administrativo — tú haces el trabajo."
+    },
+    "benefit": {
+      "leads": "Leads de propietarios — pagas solo cuando ganas el trabajo",
+      "contracts": "Acuerdos de trabajo redactados y firmados en minutos",
+      "payouts": "Pagos por Stripe neto de comisión, llegan rápido",
+      "recurring": "Trabajos recurrentes en piloto automático — corte semanal, canales en otoño",
+      "crew": "Encuentra subcontratistas cuando tengas doble agenda"
+    },
+    "cta": {
+      "signIn": "Inicia sesión o crea una cuenta",
+      "signInBlurb": "Inicio con enlace mágico. Te enviamos un enlace único por correo — sin contraseña."
+    },
+    "already": {
+      "title": "Bienvenido de vuelta",
+      "blurb": "Tu cuenta de contratista está activa. Vuelve al panel.",
+      "goCta": "Abrir panel"
+    },
+    "claim": {
+      "title": "Reclama tu perfil",
+      "blurb": "Ingresa tu número de licencia estatal. Lo verificamos contra el órgano emisor y vinculamos tu cuenta.",
+      "privacyFootnote": "Nunca publicamos tu número de licencia. Se usa solo para verificación + la insignia Licencia Verificada en tu perfil.",
+      "stateLabel": "Estado",
+      "licenseLabel": "Número de licencia",
+      "licensePlaceholder": "ej. 1234567",
+      "licenseHelper": "Número CSLB de California. Otros estados próximamente.",
+      "submitCta": "Verificar y reclamar",
+      "submitting": "Verificando…",
+      "errorGeneric": "No se pudo verificar. Revisa el número e intenta de nuevo.",
+      "pending": {
+        "title": "Casi listo — revisión pendiente",
+        "blurb": "Encontramos tu perfil pero necesitamos confirmación humana. Te escribimos en 1 día hábil.",
+        "reasonsLabel": "Señales"
+      }
+    }
+  },
+  "contractor": {
+    "dashboard": {
+      "kicker": "Panel de contratista",
+      "backHome": "← Volver a 6",
+      "badge": {
+        "licenseVerified": "Licenciado · {state} {license}",
+        "payoutReady": "Pagos listos",
+        "payoutPending": "Pagos pendientes — completa Stripe"
+      },
+      "onboardingBanner": {
+        "title": "Completa la configuración de pago",
+        "blurb": "Termina Stripe antes de que los propietarios puedan pagarte.",
+        "onboardingCta": "Configurar con Stripe",
+        "onboardingSubmitting": "Abriendo Stripe…",
+        "errorGeneric": "No se pudo iniciar. Inténtalo de nuevo."
+      },
+      "pending": {
+        "title": "Invitaciones pendientes",
+        "blurb": "Propietarios que te eligieron — acepta o rechaza",
+        "empty": "No hay invitaciones por ahora."
+      },
+      "active": {
+        "title": "Trabajos activos",
+        "blurb": "Pagados y próximos",
+        "empty": "No hay trabajos activos."
+      },
+      "completed": {
+        "title": "Completados",
+        "blurb": "Trabajos pasados",
+        "empty": "Aún no hay trabajos completados."
+      },
+      "nextAt": "Próximo: {when}",
+      "esignLabel": "Contrato",
+      "logWorkCta": "Registrar trabajo →",
+      "coaching": {
+        "title": "Una nota de 6",
+        "kicker": "Una nota de 6",
+        "signoff": "— 6 solo envía esto cuando pasa algo real. Responde STOP para silenciarlas."
+      },
+      "crew": {
+        "title": "Mercado de refuerzos",
+        "silverPlus": "Plata+",
+        "gatedBadge": "Plata+",
+        "gatedBlurb": "Mejora a Plata y 6 te buscará un contratista de refuerzo en el mismo día cuando estés doblemente reservado.",
+        "errorGeneric": "Algo salió mal. Intenta de nuevo.",
+        "errorTier": "Esta es una función del nivel Plata.",
+        "errorAlreadyFilled": "Otro contratista aceptó primero.",
+        "form": {
+          "category": "Oficio necesario",
+          "neededAt": "Necesario para",
+          "radiusKm": "Radio (km)",
+          "scope": "¿Cuál es el trabajo?",
+          "scopePlaceholder": "Colocar 4 puertas interiores, ~2 horas.",
+          "submitCta": "Enviar a colegas cercanos",
+          "submitting": "Enviando…"
+        },
+        "outgoing": {
+          "title": "Tus solicitudes abiertas",
+          "empty": "No hay solicitudes salientes ahora.",
+          "status": {
+            "open": "Abierta",
+            "filled": "Cubierta",
+            "expired": "Expirada",
+            "cancelled": "Cancelada"
+          },
+          "responseStatus": {
+            "invited": "Invitado",
+            "accepted": "Aceptó",
+            "declined": "Pasó",
+            "expired": "Expiró",
+            "no_response": "Sin respuesta"
+          }
+        },
+        "incoming": {
+          "title": "Invitaciones para ti",
+          "empty": "Nadie te ha invitado a ayudar aún.",
+          "acceptCta": "Aceptar",
+          "declineCta": "Rechazar",
+          "status": {
+            "invited": "En espera",
+            "accepted": "Aceptada",
+            "declined": "Rechazada",
+            "expired": "Expirada",
+            "no_response": "Sin respuesta"
+          }
+        }
+      },
+      "checklist": {
+        "title": "Lista previa a la salida",
+        "notYetBlurb": "6 preparará herramientas, materiales y confirmaciones 2 h antes de este trabajo. Generar ahora para previsualizar.",
+        "generateCta": "Generar ahora",
+        "generating": "Generando…",
+        "regenerateCta": "Regenerar",
+        "regenerating": "Regenerando…",
+        "errorGeneric": "No se pudo actualizar la lista. Intenta de nuevo.",
+        "generatedBy": "por {model}",
+        "gatedBadge": "Bronce+",
+        "gatedBlurb": "Mejora a Bronce para obtener una lista previa a la salida generada por 6 para cada trabajo.",
+        "bucket": {
+          "tool": "Herramientas",
+          "material": "Materiales",
+          "confirmation": "Confirmar antes de salir"
+        }
+      }
+    },
+    "jobLog": {
+      "kicker": "Registro del trabajo",
+      "untitledAgenda": "Trabajo sin título",
+      "backToDashboard": "← Volver al panel",
+      "captureHeading": "Capturar",
+      "phase": {
+        "arrival": "Llegada",
+        "in_progress": "En curso",
+        "completion": "Finalización"
+      },
+      "phaseCount": "{count, plural, one {# foto} other {# fotos}}",
+      "phaseEmpty": "toca para capturar",
+      "noteHeading": "Añadir nota",
+      "notePlaceholder": "Lo que 6 deba saber sobre esta visita…",
+      "addNoteCta": "Añadir nota",
+      "submitting": "Guardando…",
+      "timelineHeading": "Línea de tiempo",
+      "timelineEmpty": "Aún nada — captura una foto de llegada para empezar.",
+      "noteLabel": "Nota",
+      "errorGeneric": "No se pudo guardar. Intenta de nuevo.",
+      "tierGate": "Mejora a Bronce para registrar fotos en este trabajo.",
+      "gatedTitle": "El registro fotográfico es una función de pago",
+      "gatedBlurb": "Mejora a Bronce y 6 guarda cada foto del trabajo con marca de tiempo, GPS y línea de tiempo para el cliente.",
+      "gatedManageCta": "Gestionar suscripción →",
+      "cv": {
+        "loading": "Buscando etiqueta de IA…",
+        "identifyCta": "Identificar con 6",
+        "classifying": "6 está mirando…",
+        "predictedLabel": "6 cree:",
+        "confidence": {
+          "low": "confianza baja",
+          "medium": "confianza media",
+          "high": "confianza alta"
+        },
+        "yesCta": "Sí",
+        "noCta": "No",
+        "correctionPlaceholder": "p. ej. diente de león",
+        "saveCorrectionCta": "Guardar",
+        "confirmedPrefix": "Confirmado:",
+        "tierGate": "La identificación con IA es una función Gold.",
+        "errorGeneric": "No se pudo obtener la etiqueta. Intenta de nuevo."
+      }
+    },
+    "subscription": {
+      "title": "Tu plan:",
+      "tier": {
+        "free": "Gratis",
+        "bronze": "Bronce",
+        "silver": "Plata",
+        "gold": "Oro"
+      },
+      "tierBlurb": {
+        "bronze": "Prioridad mismo-día · listas · registro fotográfico",
+        "silver": "Bronce + marketplace de equipo · suplente · recurrentes",
+        "gold": "Plata + etiquetado IA · coaching · destacados"
+      },
+      "status": {
+        "trialing": "Prueba",
+        "active": "Activo",
+        "past_due": "Pago fallido",
+        "canceled": "Cancelado",
+        "incomplete": "Configuración incompleta",
+        "incomplete_expired": "Configuración expirada",
+        "unpaid": "Sin pagar",
+        "paused": "Pausado",
+        "none": "—"
+      },
+      "trialUntil": "Prueba gratuita hasta {date}",
+      "renewsOn": "Se renueva el {date}",
+      "cancelsOn": "Se cancela el {date}",
+      "upgradeBlurb": "Mejora tu plan para acceder al marketplace de equipo, trabajos recurrentes, etiquetado IA y más.",
+      "manageCta": "Administrar suscripción",
+      "cancelCta": "Cancelar",
+      "cancelConfirm": "¿Cancelar al final del período? Mantienes acceso hasta entonces.",
+      "errorGeneric": "Algo salió mal. Inténtalo de nuevo."
     }
   }
 }
