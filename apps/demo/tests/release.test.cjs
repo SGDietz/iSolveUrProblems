@@ -2635,3 +2635,52 @@ test("rename_todo snapshot plumbing supports transient guest list rename", () =>
   assert.match(transcriptRouteSrc, /kind === "todo" && typeof r\.todo === "object"/, "todo snapshot parser must be gated to visible todo surfaces");
   assert.match(transcriptRouteSrc, /return \{[\s\S]*contractorIds,[\s\S]*todo,[\s\S]*deliberation,/, "parsed todo snapshot must be returned to orchestrator");
 });
+
+test("unsubscribe voice phrasing defaults to email", () => {
+  const phrases = [
+    "stop emailing me",
+    "please stop emailing me",
+    "unsubscribe me",
+    "take me off your list",
+    "take me off the mailing list",
+    "no more emails please",
+  ];
+  for (const p of phrases) {
+    const r = classifyIntent(p, {});
+    assert.equal(r.matched, true, `"${p}" should match`);
+    assert.equal(r.classification.kind, "unsubscribe_channel", `"${p}" should classify as unsubscribe_channel`);
+    assert.equal(r.classification.slots.unsubscribe_channel, "email", `"${p}" should default to email channel`);
+  }
+});
+
+test("unsubscribe voice phrasing detects sms/whatsapp channel", () => {
+  const sms = classifyIntent("stop texting me", {});
+  assert.equal(sms.classification.kind, "unsubscribe_channel");
+  assert.equal(sms.classification.slots.unsubscribe_channel, "sms");
+
+  const wa = classifyIntent("stop whatsapping me", {});
+  assert.equal(wa.classification.kind, "unsubscribe_channel");
+  assert.equal(wa.classification.slots.unsubscribe_channel, "whatsapp");
+});
+
+test("unsubscribe beats find_contractor when a category word is present", () => {
+  // Must win over find.bare_category ("leak" alone would fire a plumbing
+  // search) — proves rule ordering, not just the regex in isolation.
+  const r = classifyIntent("stop emailing me about the leak", {});
+  assert.equal(r.classification.kind, "unsubscribe_channel", "unsubscribe must take priority over bare-category find");
+});
+
+test("unsubscribe phrasing never misfires on ordinary conversation", () => {
+  const phrases = [
+    "I don't want to email him",
+    "can you email me the report",
+    "my email is broken",
+    "send me an email about the plumber",
+  ];
+  for (const p of phrases) {
+    const r = classifyIntent(p, {});
+    if (r.matched) {
+      assert.notEqual(r.classification.kind, "unsubscribe_channel", `"${p}" must not misfire as unsubscribe`);
+    }
+  }
+});

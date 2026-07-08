@@ -117,7 +117,8 @@ type Rule = {
     | "view_lists"
     | "schedule_recurring"
     | "report_no_show"
-    | "go_between_mode";
+    | "go_between_mode"
+    | "unsubscribe_channel";
   /** Required slot keys — if any are missing the result is "medium". */
   required: Array<keyof IntentSlots>;
 };
@@ -351,6 +352,22 @@ function extractMakeListItems(text: string): string | undefined {
   return tail;
 }
 
+// Voice/text unsubscribe (G 2026-07-08: "build the unsubscribe, that will
+// be through voice and 6"). Anchored on explicit stop/unsubscribe phrasing
+// so it never fires on ordinary conversation ("I don't want to email him" —
+// no "me" — doesn't match). Channel word is optional; defaults to email.
+const UNSUBSCRIBE_RE =
+  /\b(?:please\s+)?(?:stop|quit|don'?t)\s+(?:emailing|texting|sms(?:ing)?|whatsapp(?:ing)?|messaging)\s+me\b|\bunsubscribe\s+me\b|\btake\s+me\s+off\s+(?:your|the)\s+(?:email|text|sms|whatsapp)?\s*(?:mailing\s+)?list\b|\bno\s+more\s+(?:emails|texts|text\s+messages|sms|whatsapp\s+messages)\s+(?:please|from\s+you)?\b/i;
+
+function extractUnsubscribeChannel(t: string): "email" | "sms" | "whatsapp" {
+  // Prefix match (no trailing \b) — "whatsapping"/"whatsapped" run the
+  // suffix straight into the word with no boundary for \bwhatsapp\b to
+  // find (caught by the sms/whatsapp release test 2026-07-08).
+  if (/\bwhatsapp/i.test(t)) return "whatsapp";
+  if (/\b(?:text|texting|texts|sms)\b/i.test(t)) return "sms";
+  return "email";
+}
+
 const RULES: readonly Rule[] = [
   // ─── VOICE DISMISS ────────────────────────────────────────────────
   // Must beat onboarding/list/find so "take this contractor signup down"
@@ -362,6 +379,16 @@ const RULES: readonly Rule[] = [
     match: (t) => DISMISS_SURFACE_RE.test(t),
     build: () => ({}),
     kind: "dismiss_surface",
+    required: [],
+  },
+  // ─── UNSUBSCRIBE (voice path — mirrors the one-click email link) ──
+  // Must beat find_contractor / bare_category so "stop emailing me about
+  // the leak" reads as an unsubscribe, not a plumbing search.
+  {
+    id: "account.unsubscribe",
+    match: (t) => UNSUBSCRIBE_RE.test(t),
+    build: (t) => ({ unsubscribe_channel: extractUnsubscribeChannel(t) }),
+    kind: "unsubscribe_channel",
     required: [],
   },
   // ─── CONTRACTOR ONBOARDING (SUPPLY SIDE) ──────────────────────────

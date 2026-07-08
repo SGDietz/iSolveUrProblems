@@ -117,6 +117,7 @@ import {
   userKnowsContractor,
 } from "../calls";
 import { getRecentTranscriptForSession } from "../transcripts/store";
+import { setChannelConsent } from "../notifications/unsubscribe";
 import type {
   AppointmentCard,
   CallPayload,
@@ -1405,6 +1406,43 @@ function resolveAppointmentContractor(
 ): string | null {
   if (!snapshot?.contractorIds?.length) return null;
   return snapshot.contractorIds[0] ?? null;
+}
+
+const CHANNEL_LABEL: Record<"email" | "sms" | "whatsapp", string> = {
+  email: "emailing",
+  sms: "texting",
+  whatsapp: "WhatsApp-ing",
+};
+
+/**
+ * Voice unsubscribe ("stop emailing me"). Writes through the same
+ * setChannelConsent() the one-click email link uses (unsubscribe.ts) —
+ * one source of truth so voice and the email button can never disagree
+ * about a user's actual preference.
+ */
+async function handleUnsubscribeChannel(args: {
+  slots: IntentSlots;
+  user_id: string | null;
+}): Promise<{ contextMessage: string }> {
+  if (!args.user_id) {
+    return {
+      contextMessage: wrapFallback(
+        "unsubscribe requires sign-in — preferences are user-scoped; tell the user to sign in first, or use the unsubscribe link in an email they've received",
+      ),
+    };
+  }
+  const channel = args.slots.unsubscribe_channel ?? "email";
+  const result = await setChannelConsent(args.user_id, channel, false);
+  if (!result.ok) {
+    return {
+      contextMessage: wrapFallback(
+        `unsubscribe failed (${result.error}) — tell the user honestly it didn't go through and to try again in a moment`,
+      ),
+    };
+  }
+  return {
+    contextMessage: `[UNSUBSCRIBED — not spoken by user] The user's ${channel} preference is now off. Confirm it out loud in one short sentence (e.g. "Got it — no more ${CHANNEL_LABEL[channel]} from us.") and mention they can turn it back on any time by asking.`,
+  };
 }
 
 async function handleScheduleAppointment(args: {
@@ -3640,6 +3678,17 @@ export async function orchestrate(
         dismissSurface: true,
         contextMessage:
           "[SURFACE DISMISSED — not spoken by user] I cleared the visible panel and any pending find/list state. Respond in first person as 6 with one short acknowledgement. Do not re-offer the cleared contractors unless the user asks for a fresh search with a real city or ZIP.",
+      };
+    }
+    case "unsubscribe_channel": {
+      const r = await handleUnsubscribeChannel({
+        slots: classification.slots,
+        user_id: input.user_id,
+      });
+      return {
+        kind: "action",
+        classification,
+        contextMessage: r.contextMessage,
       };
     }
     case "onboard_contractor": {

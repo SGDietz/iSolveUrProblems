@@ -4,6 +4,7 @@ import { sendEmail } from "./channels/email";
 import { sendSms } from "./channels/sms";
 import { sendWhatsapp } from "./channels/whatsapp";
 import { getTemplate } from "./templates";
+import { getPreferredChannels, isChannelOptedOut } from "./unsubscribe";
 import {
   insertNotification,
   updateNotificationById,
@@ -88,6 +89,24 @@ export async function send<TData>(args: {
     return { ok: false, channel: args.channel, error, row_id: rowId };
   }
 
+  // Respect an opt-out before ever touching the provider. Checked here
+  // (not inside each channel's send fn) so it's enforced once, for every
+  // channel, regardless of which template/caller is sending. Same
+  // preferred_channels the voice "stop emailing me" intent and the
+  // one-click email link both write to (src/lib/notifications/unsubscribe.ts).
+  if (args.userId) {
+    const preferredChannels = await getPreferredChannels(args.userId);
+    if (isChannelOptedOut(preferredChannels, args.channel)) {
+      await updateNotificationById(rowId, { status: "unsubscribed" });
+      return {
+        ok: true,
+        channel: args.channel,
+        provider_id: "skipped-unsubscribed",
+        row_id: rowId ?? "skipped-unsubscribed",
+      };
+    }
+  }
+
   // Render for the chosen channel.
   let providerResult:
     | { ok: true; providerId: string }
@@ -101,6 +120,7 @@ export async function send<TData>(args: {
         providerResult = await sendEmail({
           to: args.recipient,
           rendered: template.renderEmail(args.data, locale),
+          userId: args.userId,
         });
       }
     } else if (args.channel === "sms") {

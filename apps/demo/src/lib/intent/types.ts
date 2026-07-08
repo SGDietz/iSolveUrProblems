@@ -46,7 +46,8 @@ export type IntentKind =
   | "view_lists"
   | "schedule_recurring"
   | "report_no_show"
-  | "go_between_mode";
+  | "go_between_mode"
+  | "unsubscribe_channel";
 
 /** A reference to a specific contractor in conversation context. */
 export type ContractorRef =
@@ -140,6 +141,9 @@ export type IntentSlots = {
     schedule: import("../recurring").RecurringSchedule;
     matched_phrase: string;
   };
+  /** For unsubscribe_channel — which channel the user wants to stop.
+   * Defaults to "email" when the user doesn't name one ("unsubscribe me"). */
+  unsubscribe_channel?: "email" | "sms" | "whatsapp";
 };
 
 /** Confidence buckets — chosen at classify time, used by orchestrator. */
