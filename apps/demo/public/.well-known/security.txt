@@ -1,0 +1,4 @@
+Contact: mailto:BugReport@iSolveUrProblems.ai
+Expires: 2027-07-08T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://www.isolveurproblems.ai/.well-known/security.txt

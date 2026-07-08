@@ -96,7 +96,7 @@
       },
       "phoneLabel": "Phone number (include country code)",
       "consentSms": "I agree to receive an SMS at this number from iSolveUrProblems with my report link. Message and data rates may apply. Reply STOP to opt out.",
-      "consentWhatsapp": "I agree to receive a WhatsApp message at this number with my report link.",
+      "consentWhatsapp": "I agree to receive a WhatsApp message at this number from iSolveUrProblems with my report link. Reply STOP to opt out.",
       "send": "Send report",
       "sending": "Sending…",
       "needsSmsConsent": "Tick the consent box to send by SMS.",
@@ -210,7 +210,7 @@
         "platformFee": "Platform fee",
         "status": "Status",
         "backToContractors": "Back to contractors",
-        "backTo6": "Back to 6"
+        "backTo6": "← Back to 6"
       }
     }
   },
@@ -478,9 +478,9 @@
       "blurb": "Get vetted leads, draft contracts, paid out same-week. No more chasing — 6 handles the busywork so you focus on the job."
     },
     "benefit": {
-      "leads": "Homeowner leads ranked + delivered — pay only when you win the job",
-      "contracts": "Work agreements drafted + e-signed in minutes",
-      "payouts": "Stripe payouts net of platform fee, hits your account fast",
+      "leads": "Homeowner leads ranked and delivered — pay only when you win the job",
+      "contracts": "Work agreements drafted and e-signed in minutes",
+      "payouts": "Stripe payouts net of platform fee, hit your account fast",
       "recurring": "Recurring jobs put on autopilot — mow every Tuesday, gutters every fall",
       "crew": "Find sub-contractors when you're double-booked"
     },
@@ -548,7 +548,7 @@
       "coaching": {
         "title": "A note from 6",
         "kicker": "A note from 6",
-        "signoff": "— 6 only sends these when something real happens. Reply STOP to mute."
+        "signoff": "— 6 only sends these when something real happens."
       },
       "crew": {
         "title": "Crew marketplace",
