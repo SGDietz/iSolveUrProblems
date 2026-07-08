@@ -198,8 +198,12 @@ const sections: Array<{
   },
   {
     title: "17. CONTACT",
-    paragraphs: ["For legal inquiries:"],
-    bullets: ["SG@iSolveUrProblems.ai"],
+    paragraphs: ["Reach us:"],
+    bullets: [
+      "Legal inquiries: legal@iSolveUrProblems.ai",
+      "General: Hello@iSolveUrProblems.ai",
+      "Bug reports: BugReport@iSolveUrProblems.ai",
+    ],
   },
 ];
 
