@@ -6,7 +6,7 @@ const SITE_URL = "https://www.isolveurproblems.ai";
 // Public, indexable, non-parameterized routes only. Account/auth/checkout/
 // contractor-dashboard/dispute/report pages are user-specific or gated —
 // excluded here and disallowed in robots.ts.
-const PUBLIC_PATHS = ["", "/legal", "/privacy", "/for-contractors", "/contractors"];
+const PUBLIC_PATHS = ["", "/legal", "/privacy", "/ai-guarantee", "/for-contractors", "/contractors"];
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const entries: MetadataRoute.Sitemap = [];

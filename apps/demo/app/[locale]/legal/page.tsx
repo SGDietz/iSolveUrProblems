@@ -41,6 +41,9 @@ const sections: LegalSection[] = [
       p("We make no guarantees regarding:"),
       ul(["results", "cost savings", "project outcomes", "contractor performance", "safety", "timelines"]),
       p("Any suggestions or recommendations are non-binding and non-guaranteed."),
+      p(
+        "The \"Ai Guarantee\" referenced elsewhere on the Service refers only to 6 watching and documenting a job from before work starts through completion, and to the contractor's documentation of that work. It is not a guarantee of any outcome, cost, safety, or timeline listed above. See our Ai Guarantee page for what it does and does not promise.",
+      ),
     ],
   },
   {
