@@ -198,11 +198,15 @@ const sections: Array<{
   },
   {
     title: "17. CONTACT",
-    paragraphs: ["Reach us:"],
+    paragraphs: [
+      "iSolveUrProblems.ai is operated by DietzX LLC. Authorized representative: Scott G. Dietz, Creator/Builder/CEO.",
+      "Reach us:",
+    ],
     bullets: [
       "Legal inquiries: legal@iSolveUrProblems.ai",
       "General: Hello@iSolveUrProblems.ai",
       "Bug reports: BugReport@iSolveUrProblems.ai",
+      "Authorized representative: SG@iSolveUrProblems.ai",
     ],
   },
 ];
