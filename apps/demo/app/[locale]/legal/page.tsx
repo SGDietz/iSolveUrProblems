@@ -163,6 +163,7 @@ const sections: LegalSection[] = [
     title: "17. CONTACT",
     blocks: [
       p("iSolveUrProblems.ai is operated by DietzX LLC. Authorized representative: Scott G. Dietz, Creator/Builder/CEO."),
+      p("Mailing address: DietzX LLC, 30 N Gould St Ste N, Sheridan, WY 82801."),
       p("For how we handle your personal information, see our Privacy Policy."),
       p("Reach us:"),
       ul([
