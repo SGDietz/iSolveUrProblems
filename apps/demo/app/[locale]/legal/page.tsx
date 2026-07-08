@@ -199,7 +199,7 @@ const sections: Array<{
   {
     title: "17. CONTACT",
     paragraphs: ["For legal inquiries:"],
-    bullets: ["sgdietz@pm.me"],
+    bullets: ["SG@iSolveUrProblems.ai"],
   },
 ];
 
