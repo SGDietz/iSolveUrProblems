@@ -30,6 +30,21 @@ export default function AiGuaranteePage() {
           </section>
 
           <section>
+            <h2 className="brand-grad-text text-lg font-semibold sm:text-xl">ON TOP OF IT, THE WHOLE WAY</h2>
+            <p className="mt-3 text-sm leading-relaxed text-[#ffe9c2]/90 sm:text-base">6 keeps track of the things that quietly ruin a job:</p>
+            <ul className="mt-3 list-disc space-y-1 pl-6 text-sm leading-relaxed text-[#ffe9c2]/90 sm:text-base">
+              <li>Appointments &mdash; 6 confirms the contractor is showing up when they said they would</li>
+              <li>Quality &mdash; every contractor is checked and rated before we recommend them</li>
+              <li>Disputes &mdash; if something goes wrong, 6 is right there to help sort it out, not a ticket in a queue</li>
+            </ul>
+            <p className="mt-3 text-sm leading-relaxed text-[#ffe9c2]/90 sm:text-base">
+              On some plans, 6 also drafts a tools-and-materials checklist for the contractor before they leave for
+              the job, so nothing gets left behind. That piece is part of a paid tier today &mdash; everything
+              else on this page applies to every job.
+            </p>
+          </section>
+
+          <section>
             <h2 className="brand-grad-text text-lg font-semibold sm:text-xl">WHAT &ldquo;GUARANTEE&rdquo; MEANS HERE</h2>
             <p className="mt-3 text-sm leading-relaxed text-[#ffe9c2]/90 sm:text-base">
               This is not a guarantee that the job goes perfectly, costs a certain amount, or finishes by a certain
