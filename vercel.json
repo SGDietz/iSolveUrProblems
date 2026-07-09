@@ -18,6 +18,10 @@
     {
       "path": "/api/cron/no-show-detector",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/finalize-account-deletions",
+      "schedule": "0 3 * * *"
     }
   ]
 }

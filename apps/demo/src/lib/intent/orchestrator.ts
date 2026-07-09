@@ -118,6 +118,15 @@ import {
 } from "../calls";
 import { getRecentTranscriptForSession } from "../transcripts/store";
 import { setChannelConsent } from "../notifications/unsubscribe";
+import { send as sendNotification } from "../notifications";
+import { signActionToken, signDownloadToken } from "../account/tokens";
+import {
+  cancelAccountDeletion,
+  getAccountDeletion,
+  getAuthUser,
+  purgeDateText,
+  scheduleAccountDeletion,
+} from "../account/deletionSchedule";
 import type {
   AppointmentCard,
   CallPayload,
@@ -232,6 +241,14 @@ export type SurfaceSnapshot = {
   pendingListAdd?: {
     listName?: string | null;
   };
+  /**
+   * Set client-side while 6's "are you sure you want to delete your
+   * account?" window is open (the delete_account request turn). Only
+   * while this rides the snapshot can a whole-utterance affirmative
+   * start the 30-day deletion clock — a stray "yes" any other time can
+   * never arm a deletion.
+   */
+  pendingAccountDeleteConfirm?: boolean;
 };
 
 export type OrchestratorInput = {
@@ -267,7 +284,8 @@ export type OrchestratorOutput =
       pending?:
         | { kind: "find"; category: string }
         | { kind: "list_index"; entries: ListIndexEntry[] }
-        | { kind: "list_add"; listName?: string | null };
+        | { kind: "list_add"; listName?: string | null }
+        | { kind: "account_delete_confirm" };
       debug?: Record<string, unknown>;
     };
 
@@ -1442,6 +1460,198 @@ async function handleUnsubscribeChannel(args: {
   }
   return {
     contextMessage: `[UNSUBSCRIBED — not spoken by user] The user's ${channel} preference is now off. Confirm it out loud in one short sentence (e.g. "Got it — no more ${CHANNEL_LABEL[channel]} from us.") and mention they can turn it back on any time by asking.`,
+  };
+}
+
+// ─── Account data rights: export + 30-day deletion (2026-07-08 spec) ─
+
+/**
+ * Origin for EMAILED links only — deliberately ignores the request's own
+ * origin. A request-derived origin comes from the Host/X-Forwarded-Host
+ * headers, and an emailed link built from a spoofed host would hand the
+ * signed token to an attacker's domain the moment the user clicks. Same
+ * env-only rule channels/email.ts already applies to unsubscribe links.
+ */
+function accountAppOrigin(): string {
+  return (
+    process.env.PUBLIC_APP_ORIGIN?.trim() || "https://www.isolveurproblems.ai"
+  ).replace(/\/$/, "");
+}
+
+function buildCancelDeletionUrl(origin: string, userId: string): string {
+  const token = signActionToken("cancel", userId);
+  return `${origin}/api/account/cancel-deletion?token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * "Download my data" — signs a 24-hour link and emails it to the account
+ * address. The email goes WITHOUT userId on purpose: the user just asked
+ * for it out loud, so it must reach them even if they've unsubscribed
+ * from email (send()'s consent gate only runs when userId is present);
+ * the id rides in `context` for the audit row instead.
+ *
+ * Cooldown is server-side AND durable — the idempotency key is bucketed
+ * to 2-minute windows, so rapid repeats dedupe in notifications_sent no
+ * matter the device or reload (aiASAP's 2026-06-09 email flood came from
+ * a client-side-only useRef cooldown; this survives everything).
+ */
+async function handleExportData(args: {
+  user_id: string | null;
+}): Promise<{ contextMessage: string }> {
+  if (!args.user_id) {
+    return {
+      contextMessage: wrapFallback(
+        "data export requires sign-in — the download link can only go to the account email; tell the user to sign in first",
+      ),
+    };
+  }
+  const user = await getAuthUser(args.user_id);
+  if (!user?.email) {
+    return {
+      contextMessage: wrapFallback(
+        "no email is on file for this account — the export link can only go to the account email; tell the user honestly",
+      ),
+    };
+  }
+  const origin = accountAppOrigin();
+  const token = signDownloadToken(args.user_id, user.email);
+  const downloadUrl = `${origin}/api/account/download?token=${encodeURIComponent(token)}`;
+  const bucket = Math.floor(Date.now() / 120_000);
+  const result = await sendNotification({
+    channel: "email",
+    recipient: user.email,
+    templateId: "export.ready.v1",
+    data: { downloadUrl },
+    idempotencyKey: `export-ready:${args.user_id}:${bucket}`,
+    context: { user_id: args.user_id, kind: "data-export" },
+  });
+  if (!result.ok) {
+    return {
+      contextMessage: wrapFallback(
+        `export email failed (${result.error}) — tell the user honestly it didn't go through and to try again in a moment`,
+      ),
+    };
+  }
+  if (result.provider_id === "already-sent") {
+    return {
+      contextMessage:
+        "[DATA EXPORT — not spoken by user] The download link was already emailed moments ago. Tell the user in one short sentence to check their inbox — it can take a minute to land.",
+    };
+  }
+  return {
+    contextMessage:
+      "[DATA EXPORT — not spoken by user] A secure download link was just emailed to the address on the user's account. It works for 24 hours; the page it opens lets them pick what to include, and nothing shows or downloads until they click. Confirm this out loud in one or two short sentences in first person as 6.",
+  };
+}
+
+/**
+ * The initial "delete my account" turn. Writes NOTHING — it opens 6's
+ * are-you-sure window (the pending flag the client echoes back) and the
+ * 30-day clock only starts if the very next answer confirms.
+ */
+async function handleDeleteAccountRequest(args: {
+  user_id: string | null;
+}): Promise<{
+  contextMessage: string;
+  pending?: { kind: "account_delete_confirm" };
+}> {
+  if (!args.user_id) {
+    return {
+      contextMessage: wrapFallback(
+        "account deletion requires sign-in — accounts are user-scoped; tell the user to sign in first",
+      ),
+    };
+  }
+  const existing = await getAccountDeletion(args.user_id);
+  if (existing) {
+    return {
+      contextMessage: `[ACCOUNT DELETE — not spoken by user] A deletion is ALREADY scheduled: the account and all its data erase for good on ${purgeDateText(existing.purge_at)} unless canceled. Nothing changed just now. In one or two short sentences, remind the user of that date and that saying "cancel the deletion" (or the button in the emails) keeps everything.`,
+    };
+  }
+  return {
+    pending: { kind: "account_delete_confirm" },
+    contextMessage:
+      "[ACCOUNT DELETE — CONFIRMATION NEEDED — not spoken by user] The user asked to delete their account. NOTHING has been deleted or scheduled yet. In first person as 6, ask if they're sure: a yes starts a 30-day countdown, everything is erased for good after those 30 days, and they can cancel any time before then just by asking. Two short sentences max, ending with the question. Do NOT claim anything was deleted.",
+  };
+}
+
+/**
+ * The confirmed turn — the only place the 30-day clock starts.
+ * Finalizing has NO early path anywhere: the daily cron purges after
+ * purge_at passes on its own (tokens.ts documents why).
+ */
+async function handleDeleteAccountConfirm(args: {
+  user_id: string | null;
+}): Promise<{ contextMessage: string }> {
+  if (!args.user_id) {
+    return {
+      contextMessage: wrapFallback(
+        "account deletion requires sign-in — accounts are user-scoped; tell the user to sign in first",
+      ),
+    };
+  }
+  const scheduled = await scheduleAccountDeletion(args.user_id);
+  if (!scheduled.ok) {
+    return {
+      contextMessage: wrapFallback(
+        `couldn't schedule the deletion (${scheduled.error}) — tell the user honestly it didn't go through and nothing was changed`,
+      ),
+    };
+  }
+  const dateText = purgeDateText(scheduled.schedule.purge_at);
+  const user = await getAuthUser(args.user_id);
+  let emailNote =
+    "No email is on file, so no countdown email could be sent — the voice cancel is their way back.";
+  if (user?.email) {
+    const origin = accountAppOrigin();
+    const sent = await sendNotification({
+      channel: "email",
+      recipient: user.email,
+      templateId: "account.deletion.scheduled.v1",
+      data: {
+        cancelUrl: buildCancelDeletionUrl(origin, args.user_id),
+        purgeDate: dateText,
+      },
+      idempotencyKey: `account-deletion:scheduled:${args.user_id}:${scheduled.schedule.scheduled_at}`,
+      context: { user_id: args.user_id, kind: "account-deletion-scheduled" },
+    });
+    emailNote = sent.ok
+      ? 'A confirmation email with a "Keep my account" button was just sent.'
+      : "The confirmation email didn't send, so make sure they know the voice cancel works any time.";
+  }
+  return {
+    contextMessage: `[ACCOUNT DELETE SCHEDULED — not spoken by user] The 30-day countdown is running: the account and all its data erase for good on ${dateText}. Nothing is removed before that date. ${emailNote} Saying "cancel the deletion" any time before then keeps everything. Confirm all of this out loud in two or three short sentences in first person as 6 — speak the date.`,
+  };
+}
+
+/** Voice cancel — same write path the email button uses. */
+async function handleCancelAccountDeletion(args: {
+  user_id: string | null;
+}): Promise<{ contextMessage: string }> {
+  if (!args.user_id) {
+    return {
+      contextMessage: wrapFallback(
+        "canceling a deletion requires sign-in — tell the user to sign in, or use the button in the deletion emails",
+      ),
+    };
+  }
+  const result = await cancelAccountDeletion(args.user_id);
+  if (!result.ok) {
+    return {
+      contextMessage: wrapFallback(
+        `cancel failed (${result.error}) — tell the user honestly and point them at the button in the deletion emails as the backup`,
+      ),
+    };
+  }
+  if (!result.hadSchedule) {
+    return {
+      contextMessage:
+        "[ACCOUNT SAFE — not spoken by user] No deletion was scheduled — the account was never at risk. Tell the user in one short sentence that everything is staying right where it is.",
+    };
+  }
+  return {
+    contextMessage:
+      "[DELETION CANCELED — not spoken by user] The scheduled deletion is canceled; nothing was removed and the account stays. Confirm warmly in one short sentence in first person as 6.",
   };
 }
 
@@ -3617,6 +3827,8 @@ export async function orchestrate(
     pendingFindCategory: input.currentSurface?.pendingFind?.category ?? null,
     pendingAddOfferItems: input.currentSurface?.pendingAddOffer?.items ?? null,
     pendingListAdd: input.currentSurface?.pendingListAdd ?? null,
+    pendingAccountDeleteConfirm:
+      input.currentSurface?.pendingAccountDeleteConfirm ?? null,
   });
   if (!classified.matched) {
     // Catch-all: "send it by WeChat", "you should add X", "this is broken"
@@ -3685,6 +3897,43 @@ export async function orchestrate(
         slots: classification.slots,
         user_id: input.user_id,
       });
+      return {
+        kind: "action",
+        classification,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "export_data": {
+      const r = await handleExportData({ user_id: input.user_id });
+      return {
+        kind: "action",
+        classification,
+        contextMessage: r.contextMessage,
+      };
+    }
+    case "delete_account": {
+      // Request turn opens 6's are-you-sure window; only the confirmed
+      // turn (slot set by the ctx-gated confirm rule) starts the clock.
+      if (classification.slots.account_delete_confirmed) {
+        const r = await handleDeleteAccountConfirm({
+          user_id: input.user_id,
+        });
+        return {
+          kind: "action",
+          classification,
+          contextMessage: r.contextMessage,
+        };
+      }
+      const r = await handleDeleteAccountRequest({ user_id: input.user_id });
+      return {
+        kind: "action",
+        classification,
+        contextMessage: r.contextMessage,
+        pending: r.pending,
+      };
+    }
+    case "cancel_account_deletion": {
+      const r = await handleCancelAccountDeletion({ user_id: input.user_id });
       return {
         kind: "action",
         classification,

@@ -233,6 +233,13 @@ const useTranscriptCapture = (
     at: number;
   } | null>(null);
   const PENDING_ADD_OFFER_TTL_MS = 2 * 60_000;
+  // 6 asked "are you sure you want to delete your account?" (the
+  // delete_account request turn armed this via orch.pending). While
+  // fresh, the snapshot echoes it so the ctx-gated confirm rule can
+  // accept a whole-utterance "yes" — and ONLY then. Short TTL: an
+  // unanswered are-you-sure dies on its own and deletion never arms.
+  const pendingAccountDeleteConfirmRef = useRef<{ at: number } | null>(null);
+  const PENDING_ACCOUNT_DELETE_TTL_MS = 2 * 60_000;
   const avatarButtonCueSeenRef = useRef<Set<ButtonCueTarget>>(new Set());
   // Staggered cue timers — when several button words land in ONE transcript
   // chunk, later ones fire ~880ms apart in spoken order instead of together
@@ -426,6 +433,7 @@ const useTranscriptCapture = (
       pendingListIndex?: { entries: ListIndexEntry[] };
       pendingAddOffer?: { items: string[] };
       pendingListAdd?: { listName: string | null };
+      pendingAccountDeleteConfirm?: boolean;
     } => {
       // Pending-find rides on EVERY snapshot while fresh — including the
       // no-variant one (nothing is on screen while 6 waits for the ZIP).
@@ -457,6 +465,13 @@ const useTranscriptCapture = (
       const pendingListAdd = pendingListAddRef.current
         ? { listName: pendingListAddRef.current.listName }
         : undefined;
+      const pad = pendingAccountDeleteConfirmRef.current;
+      if (pad && Date.now() - pad.at > PENDING_ACCOUNT_DELETE_TTL_MS) {
+        pendingAccountDeleteConfirmRef.current = null;
+      }
+      const pendingAccountDeleteConfirm = pendingAccountDeleteConfirmRef.current
+        ? true
+        : undefined;
       // A dismissed sheet can keep its variant for exit animation, but it is
       // not on screen. Do not let ✕/ESC ghost-steer the next classifier turn.
       const { variant, isOpen } = useAssistantSurface.getState();
@@ -468,6 +483,7 @@ const useTranscriptCapture = (
           pendingListIndex,
           pendingAddOffer,
           pendingListAdd,
+          pendingAccountDeleteConfirm,
         };
       }
       const snap = ((): {
@@ -589,6 +605,7 @@ const useTranscriptCapture = (
         pendingListIndex,
         pendingAddOffer,
         pendingListAdd,
+        pendingAccountDeleteConfirm,
       };
     };
 
@@ -632,6 +649,17 @@ const useTranscriptCapture = (
           )
         ) {
           pendingListAddRef.current = null;
+        }
+        // A "no" to 6's "are you sure you want to delete your account?"
+        // kills the confirm window HERE, before the snapshot builds —
+        // the safest possible answer dies the same turn it's spoken.
+        if (
+          pendingAccountDeleteConfirmRef.current &&
+          /^\s*(?:no|nope|nah|never\s*mind|forget\s+it|cancel|stop|wait|don'?t|do\s+not|keep\s+(?:it|my\s+account))\b/i.test(
+            trimmed,
+          )
+        ) {
+          pendingAccountDeleteConfirmRef.current = null;
         }
         // SUP #22 (G 16:55 ride: "make the text bigger" → "I can't change
         // the text size"): a size ask while the list sheet is open resizes
@@ -690,6 +718,14 @@ const useTranscriptCapture = (
         // said yes (server resolved it into a real add) or anything else, the
         // slot dies now — a "yeah" minutes later must never write a list.
         pendingAddOfferRef.current = null;
+        // Same one-shot rule for the delete-account are-you-sure window:
+        // it rode on THIS turn's snapshot, so it dies now no matter what
+        // the user said. The answer to "are you sure?" must be the very
+        // next utterance — a "yes" two questions later (answering
+        // something else entirely) must never start the 30-day clock.
+        // (The response handler below re-arms it if THIS turn was itself
+        // the delete request.)
+        pendingAccountDeleteConfirmRef.current = null;
         if (!res.ok) return;
         const data = (await res.json()) as {
           id?: string;
@@ -701,7 +737,8 @@ const useTranscriptCapture = (
             pending?:
               | { kind: "find"; category: string }
               | { kind: "list_index"; entries: ListIndexEntry[] }
-              | { kind: "list_add"; listName?: string | null };
+              | { kind: "list_add"; listName?: string | null }
+              | { kind: "account_delete_confirm" };
             reason?: string;
           };
         };
@@ -712,6 +749,7 @@ const useTranscriptCapture = (
             pendingListIndexRef.current = null;
             pendingAddOfferRef.current = null;
             pendingListAddRef.current = null;
+            pendingAccountDeleteConfirmRef.current = null;
             useAssistantSurface.getState().reset();
           } else {
             // Multi-turn continuations: remember "6 asked for city/ZIP for X"
@@ -727,6 +765,16 @@ const useTranscriptCapture = (
               };
             } else {
               pendingListAddRef.current = null;
+            }
+            // Are-you-sure window for account deletion: armed ONLY by
+            // the delete_account request turn; any other handled action
+            // means the user answered (confirm consumed server-side) or
+            // moved on — either way the window dies so a later stray
+            // "yes" can never start the 30-day clock.
+            if (orch.pending?.kind === "account_delete_confirm") {
+              pendingAccountDeleteConfirmRef.current = { at: Date.now() };
+            } else {
+              pendingAccountDeleteConfirmRef.current = null;
             }
             if (orch.pending?.kind === "find") {
               pendingFindRef.current = {
