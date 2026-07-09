@@ -181,6 +181,7 @@ function parseSurfaceSnapshot(
     pendingListIndex?: unknown;
     pendingAddOffer?: unknown;
     pendingListAdd?: unknown;
+    pendingAccountDeleteConfirm?: unknown;
     todo?: unknown;
   };
   const validKinds = new Set([
@@ -355,5 +356,8 @@ function parseSurfaceSnapshot(
     pendingListIndex,
     pendingAddOffer,
     pendingListAdd,
+    // 6's "are you sure you want to delete your account?" window — a
+    // strict boolean so nothing else can ride in on this flag.
+    pendingAccountDeleteConfirm: r.pendingAccountDeleteConfirm === true,
   };
 }

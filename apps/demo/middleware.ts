@@ -62,7 +62,10 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Run on all paths except Next.js internals, static assets, and webhooks.
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$|api/webhooks/).*)",
+    // Run on all paths except Next.js internals, static assets, webhooks,
+    // and the metadata-route conventions (robots.txt, sitemap.xml,
+    // .well-known/*) — those aren't locale-prefixed pages, and letting
+    // next-intl's middleware touch them 404s the route (2026-07-08 fix).
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|\\.well-known|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$|api/webhooks/).*)",
   ],
 };

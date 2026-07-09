@@ -22,7 +22,7 @@ import {
   useVoiceChat,
   useLiveAvatarContext,
 } from "../liveavatar";
-import { Link } from "../i18n/routing";
+import { AvatarFooterLinks } from "./AvatarFooterLinks";
 import { SessionState, AgentEventsEnum } from "@heygen/liveavatar-web-sdk";
 import { useAvatarActions } from "../liveavatar/useAvatarActions";
 import { setVideoBusy, isVideoBusy } from "../liveavatar/videoRecordingState";
@@ -7181,13 +7181,7 @@ const LiveAvatarSessionComponent: React.FC<{
                     pinned to the bottom bar. */}
               </div>
               <div className="h-14 flex items-center justify-center">
-                <Link
-                  href="/terms"
-                  target="_blank"
-                  className="brand-grad-text block text-center text-[10px] sm:text-[11px] hover:opacity-90 transition-opacity whitespace-nowrap"
-                >
-                  {t("footer")}
-                </Link>
+                <AvatarFooterLinks />
               </div>
             </div>
           )}
@@ -7232,13 +7226,7 @@ const LiveAvatarSessionComponent: React.FC<{
           {/* Full brand footer line (NOT just "Terms") — matches the home +
               snapshot footers (G item 8 2026-06-30). */}
           <div className="fixed bottom-1 left-1/2 -translate-x-1/2 z-20 w-[95%] max-w-7xl px-4">
-            <Link
-              href="/terms"
-              target="_blank"
-              className="brand-grad-text block text-center text-[10px] sm:text-[11px] hover:opacity-90 transition-opacity py-1 whitespace-nowrap"
-            >
-              {t("footer")}
-            </Link>
+            <AvatarFooterLinks className="py-1" />
           </div>
         </>
       )}
@@ -7248,13 +7236,7 @@ const LiveAvatarSessionComponent: React.FC<{
           modes previously showed NO footer; G saw an incomplete bottom line. */}
       {isCameraActive && visionMode === "snapshot" && (
         <div className="fixed bottom-1 left-1/2 -translate-x-1/2 z-30 w-[95%] max-w-7xl px-4">
-          <Link
-            href="/terms"
-            target="_blank"
-            className="brand-grad-text block text-center text-[10px] sm:text-[11px] hover:opacity-90 transition-opacity py-1 whitespace-nowrap"
-          >
-            {t("footer")}
-          </Link>
+          <AvatarFooterLinks className="py-1" />
         </div>
       )}
     </div>

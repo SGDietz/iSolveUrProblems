@@ -27,6 +27,7 @@
     "src/lib/contractors/sources/types.ts",
     "src/lib/supabaseAdmin.ts",
     "src/lib/appointments/extractDateTime.ts",
-    "src/lib/uiSize.ts"
+    "src/lib/uiSize.ts",
+    "src/lib/account/**/*.ts"
   ]
 }

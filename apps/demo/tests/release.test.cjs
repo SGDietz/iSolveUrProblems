@@ -2635,3 +2635,489 @@ test("rename_todo snapshot plumbing supports transient guest list rename", () =>
   assert.match(transcriptRouteSrc, /kind === "todo" && typeof r\.todo === "object"/, "todo snapshot parser must be gated to visible todo surfaces");
   assert.match(transcriptRouteSrc, /return \{[\s\S]*contractorIds,[\s\S]*todo,[\s\S]*deliberation,/, "parsed todo snapshot must be returned to orchestrator");
 });
+
+test("unsubscribe voice phrasing defaults to email", () => {
+  const phrases = [
+    "stop emailing me",
+    "please stop emailing me",
+    "unsubscribe me",
+    "take me off your list",
+    "take me off the mailing list",
+    "no more emails please",
+  ];
+  for (const p of phrases) {
+    const r = classifyIntent(p, {});
+    assert.equal(r.matched, true, `"${p}" should match`);
+    assert.equal(r.classification.kind, "unsubscribe_channel", `"${p}" should classify as unsubscribe_channel`);
+    assert.equal(r.classification.slots.unsubscribe_channel, "email", `"${p}" should default to email channel`);
+  }
+});
+
+test("unsubscribe voice phrasing detects sms/whatsapp channel", () => {
+  const sms = classifyIntent("stop texting me", {});
+  assert.equal(sms.classification.kind, "unsubscribe_channel");
+  assert.equal(sms.classification.slots.unsubscribe_channel, "sms");
+
+  const wa = classifyIntent("stop whatsapping me", {});
+  assert.equal(wa.classification.kind, "unsubscribe_channel");
+  assert.equal(wa.classification.slots.unsubscribe_channel, "whatsapp");
+});
+
+test("unsubscribe beats find_contractor when a category word is present", () => {
+  // Must win over find.bare_category ("leak" alone would fire a plumbing
+  // search) — proves rule ordering, not just the regex in isolation.
+  const r = classifyIntent("stop emailing me about the leak", {});
+  assert.equal(r.classification.kind, "unsubscribe_channel", "unsubscribe must take priority over bare-category find");
+});
+
+test("unsubscribe phrasing never misfires on ordinary conversation", () => {
+  const phrases = [
+    "I don't want to email him",
+    "can you email me the report",
+    "my email is broken",
+    "send me an email about the plumber",
+  ];
+  for (const p of phrases) {
+    const r = classifyIntent(p, {});
+    if (r.matched) {
+      assert.notEqual(r.classification.kind, "unsubscribe_channel", `"${p}" must not misfire as unsubscribe`);
+    }
+  }
+});
+
+// ─── ACCOUNT DATA RIGHTS: export + 30-day deletion (2026-07-08 spec) ──
+// The deletion voice trigger is a rebuild of aiASAP's, with its two REAL
+// production false-positive bugs asserted dead here BEFORE first ship:
+// bug 1 = third-person/coaching talk fired a deletion; bug 2 = on-screen
+// UI text containing "remove" armed one.
+
+test("export_data fires on the real ask phrasings", () => {
+  const phrases = [
+    "download my data",
+    "export my data",
+    "send me my data",
+    "email me my data",
+    "get a copy of my data",
+    "I want a copy of my data",
+    "can you send me all of my information",
+  ];
+  for (const p of phrases) {
+    const r = classifyIntent(p, {});
+    assert.equal(r.matched, true, `"${p}" should match`);
+    assert.equal(r.classification.kind, "export_data", `"${p}" should classify as export_data`);
+  }
+});
+
+test("export_data never misfires on ordinary data talk", () => {
+  const phrases = [
+    "send my data plan details to the office",
+    "my data plan is terrible",
+    "download the contractor list",
+    "they want to export their data",
+    "the sensor sends me data all day",
+  ];
+  for (const p of phrases) {
+    const r = classifyIntent(p, {});
+    if (r.matched) {
+      assert.notEqual(r.classification.kind, "export_data", `"${p}" must not misfire as export_data`);
+    }
+  }
+});
+
+test("export_data beats bare-category find when a trade word rides along", () => {
+  const r = classifyIntent("download my data, the plumbing thing is all done", {});
+  assert.equal(r.classification.kind, "export_data", "export must take priority over bare-category find");
+});
+
+test("delete_account request fires on first-person account commands", () => {
+  const phrases = [
+    "delete my account",
+    "close my account",
+    "please delete my account",
+    "cancel my account",
+    "I want to delete my account",
+    "erase my account",
+    "shut down my account",
+    "get rid of my account",
+  ];
+  for (const p of phrases) {
+    const r = classifyIntent(p, {});
+    assert.equal(r.matched, true, `"${p}" should match`);
+    assert.equal(r.classification.kind, "delete_account", `"${p}" should classify as delete_account`);
+    assert.notEqual(
+      r.classification.slots.account_delete_confirmed,
+      true,
+      `"${p}" is the REQUEST turn — it must never carry the confirmed slot`,
+    );
+  }
+});
+
+test("aiASAP bug 1: third-person / coaching talk NEVER fires a deletion", () => {
+  const phrases = [
+    "they want to close their account",
+    "she asked me to delete her account",
+    "you should say delete my account to close it",
+    "if you type delete my account it starts the process",
+    "he said close my account and it worked",
+    "just tell it to delete my account and you're done",
+  ];
+  for (const p of phrases) {
+    const r = classifyIntent(p, {});
+    if (r.matched) {
+      assert.notEqual(r.classification.kind, "delete_account", `"${p}" must not fire delete_account (third-person/coaching)`);
+    }
+  }
+});
+
+test("aiASAP bug 2: on-screen UI cleanup text NEVER arms a deletion", () => {
+  const phrases = [
+    "remove signed in as sgd@pm.me",
+    "remove my account from the screen",
+    "take the account panel down",
+    "close my account settings",
+    "remove that from the screen",
+  ];
+  for (const p of phrases) {
+    const r = classifyIntent(p, {});
+    if (r.matched) {
+      assert.notEqual(r.classification.kind, "delete_account", `"${p}" must not fire delete_account (UI text)`);
+    }
+  }
+});
+
+test("how-to questions about deletion explain, never start, the flow", () => {
+  const phrases = [
+    "how do I delete my account",
+    "how can I close my account",
+    "what happens if I delete my account",
+  ];
+  for (const p of phrases) {
+    const r = classifyIntent(p, {});
+    if (r.matched) {
+      assert.notEqual(r.classification.kind, "delete_account", `"${p}" is a question, not a command`);
+    }
+  }
+});
+
+test("negated / protective phrasing routes to cancel, never delete", () => {
+  const phrases = [
+    "don't delete my account",
+    "do not delete my account",
+    "never close my account",
+    "keep my account",
+    "cancel the deletion",
+    "stop the deletion",
+    "cancel my account deletion",
+    "call off the deletion",
+    "I changed my mind about deleting my account",
+  ];
+  for (const p of phrases) {
+    const r = classifyIntent(p, {});
+    assert.equal(r.matched, true, `"${p}" should match`);
+    assert.equal(r.classification.kind, "cancel_account_deletion", `"${p}" should classify as cancel_account_deletion`);
+  }
+  // …but changed-my-mind about anything ELSE stays a normal sentence.
+  const garage = classifyIntent("I changed my mind about closing the garage door", {});
+  if (garage.matched) {
+    assert.notEqual(garage.classification.kind, "cancel_account_deletion", "changed-my-mind needs the account object");
+  }
+});
+
+test("mixed and adjacent account phrasings route to the graver intent", () => {
+  // Deletion + unsubscribe in one breath = deletion first (review 2026-07-09).
+  const mixed = classifyIntent("delete my account and stop emailing me", {});
+  assert.equal(mixed.classification.kind, "delete_account", "mixed ask is a deletion first");
+  // Pure list-membership phrasing is an unsubscribe, never a deletion.
+  const mailing = classifyIntent("remove my account from your mailing list", {});
+  assert.equal(mailing.classification.kind, "unsubscribe_channel", "mailing-list removal is an unsubscribe");
+  // Real command with an incidental leading "stop" still deletes.
+  const stopAnd = classifyIntent("stop and delete my account", {});
+  assert.equal(stopAnd.classification.kind, "delete_account", "incidental 'stop' must not block a real command");
+  // Contracted export ask fires; contact-sharing does not.
+  const contracted = classifyIntent("I'd like a copy of my data", {});
+  assert.equal(contracted.classification.kind, "export_data", "contracted export ask should fire");
+  const share = classifyIntent("send my information to John", {});
+  if (share.matched) {
+    assert.notEqual(share.classification.kind, "export_data", "contact-sharing is not an export");
+  }
+  // Hypotheticals stay questions.
+  const whatIf = classifyIntent("what if I close my account", {});
+  if (whatIf.matched) {
+    assert.notEqual(whatIf.classification.kind, "delete_account", "what-if is a question");
+  }
+});
+
+test("keep-my-account LIST phrasing stays with lists, not cancel", () => {
+  const r = classifyIntent("can you keep my account list for me", {});
+  if (r.matched) {
+    assert.notEqual(r.classification.kind, "cancel_account_deletion", "a list named 'account' must not read as a deletion cancel");
+  }
+});
+
+test("delete_account beats bare-category find when a trade word rides along", () => {
+  const r = classifyIntent("delete my account, the plumbing thing didn't work out", {});
+  assert.equal(r.classification.kind, "delete_account", "delete must take priority over bare-category find");
+});
+
+test("delete confirm is DOUBLE-GATED: needs the armed window AND a whole-utterance yes", () => {
+  // A bare "yes" with NO armed window can never be a deletion.
+  const cold = classifyIntent("yes", {});
+  if (cold.matched) {
+    assert.notEqual(cold.classification.kind, "delete_account", "a stray yes must never arm a deletion");
+  }
+  // With the window armed, a clean affirmative confirms — including the
+  // short real-world answers (a missed affirmative means 6 hears yes and
+  // the brain may narrate a deletion that was never written).
+  const armed = { pendingAccountDeleteConfirm: true };
+  for (const p of ["yes", "yes please", "yeah do it", "I'm sure", "go ahead", "yes, delete my account", "sure", "okay", "absolutely", "yes yes"]) {
+    const r = classifyIntent(p, armed);
+    assert.equal(r.matched, true, `"${p}" should match while armed`);
+    assert.equal(r.classification.kind, "delete_account", `"${p}" should confirm while armed`);
+    assert.equal(r.classification.slots.account_delete_confirmed, true, `"${p}" must carry the confirmed slot`);
+  }
+  // Hedged answers never confirm even while armed.
+  for (const p of ["yes but wait", "yes I think so maybe", "well yes and no"]) {
+    const r = classifyIntent(p, armed);
+    if (r.matched) {
+      assert.notEqual(
+        r.classification.slots.account_delete_confirmed,
+        true,
+        `"${p}" is hedged — it must not confirm`,
+      );
+    }
+  }
+});
+
+test("account tokens: sign/verify roundtrip, TTL, tamper, action binding", () => {
+  process.env.SUPABASE_URL = process.env.SUPABASE_URL || "https://dphxcqjkzhvsdejtxdcj.supabase.co";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "release-test-secret";
+  const tokens = require("../.test-dist/lib/account/tokens.js");
+  const uid = "11111111-2222-3333-4444-555555555555";
+
+  const dl = tokens.signDownloadToken(uid, "user@example.com");
+  const claims = tokens.verifyDownloadToken(dl);
+  assert.ok(claims, "fresh download token must verify");
+  assert.equal(claims.uid, uid);
+  assert.equal(claims.email, "user@example.com");
+
+  const expired = tokens.signDownloadToken(uid, "user@example.com", -1000);
+  assert.equal(tokens.verifyDownloadToken(expired), null, "expired token must fail");
+
+  const tampered = dl.slice(0, -2) + (dl.endsWith("aa") ? "bb" : "aa");
+  assert.equal(tokens.verifyDownloadToken(tampered), null, "tampered token must fail");
+
+  const cancel = tokens.signActionToken("cancel", uid);
+  const actionClaims = tokens.verifyActionToken(cancel, "cancel");
+  assert.ok(actionClaims, "cancel action token must verify");
+  assert.equal(actionClaims.uid, uid);
+  // Cross-domain replay: a download token is never a valid action token
+  // and vice versa (different derived keys).
+  assert.equal(tokens.verifyActionToken(dl, "cancel"), null, "download token must not verify as an action token");
+  assert.equal(tokens.verifyDownloadToken(cancel), null, "action token must not verify as a download token");
+});
+
+test("deletion schedule: the 30-day window decides purge/remind/wait correctly", () => {
+  const sched = require("../.test-dist/lib/account/deletionSchedule.js");
+  const DAY = 24 * 60 * 60 * 1000;
+  const now = Date.parse("2026-07-08T12:00:00.000Z");
+  const mk = (daysLeft, flags = {}) => ({
+    scheduled_at: new Date(now - (30 - daysLeft) * DAY).toISOString(),
+    purge_at: new Date(now + daysLeft * DAY).toISOString(),
+    status: "pending",
+    ...flags,
+  });
+  assert.equal(sched.decideDeletionAction(mk(30), now), "wait", "day 0: wait");
+  assert.equal(sched.decideDeletionAction(mk(8), now), "wait", "8 days left: wait");
+  assert.equal(sched.decideDeletionAction(mk(6.5), now), "remind_week", "6.5 days left: week reminder");
+  assert.equal(sched.decideDeletionAction(mk(6.5, { reminder_week_sent: true }), now), "wait", "week reminder already sent: wait");
+  assert.equal(sched.decideDeletionAction(mk(0.5), now), "remind_day", "half a day left: day reminder");
+  assert.equal(sched.decideDeletionAction(mk(0.5, { reminder_day_sent: true }), now), "wait", "day reminder already sent: wait");
+  assert.equal(sched.decideDeletionAction(mk(-0.1), now), "purge", "clock done: purge");
+  assert.equal(
+    sched.computePurgeAt("2026-07-08T12:00:00.000Z", 30),
+    "2026-08-07T12:00:00.000Z",
+    "purge_at = scheduled_at + 30 days exactly",
+  );
+  // FAIL SAFE: corrupt dates must never reach the destructive arm.
+  const corrupt = { scheduled_at: "2026-07-08T12:00:00.000Z", purge_at: "soon", status: "pending" };
+  assert.equal(sched.decideDeletionAction(corrupt, now), "wait", "unparseable purge_at must wait, never purge");
+  // …and a malformed schedule never even parses out of metadata.
+  assert.equal(
+    sched.readScheduleFromMetadata({ account_deletion: corrupt }),
+    null,
+    "malformed schedules read as no-schedule",
+  );
+  assert.equal(
+    sched.readScheduleFromMetadata({
+      account_deletion: {
+        scheduled_at: "2026-07-08T12:00:00.000Z",
+        purge_at: "2026-06-01T12:00:00.000Z", // before scheduled_at — forged/corrupt
+        status: "pending",
+      },
+    }),
+    null,
+    "purge_at before scheduled_at reads as no-schedule",
+  );
+});
+
+test("deletion hardening: app_metadata storage, fail-closed purge, race re-check, env-only origins", () => {
+  const read = (...p) => fs.readFileSync(path.join(__dirname, "..", ...p), "utf8");
+
+  // The schedule must live in app_metadata (admin-only writable) — a
+  // user's own session token can rewrite user_metadata via GoTrue's
+  // self-service endpoint, which would be a forgeable early-delete path.
+  const schedSrc = read("src", "lib", "account", "deletionSchedule.ts");
+  assert.match(schedSrc, /app_metadata: \{ account_deletion: value \}/, "schedule writes target app_metadata");
+  assert.doesNotMatch(schedSrc, /body: JSON\.stringify\(\{ user_metadata/, "schedule must never write user_metadata");
+  // GoTrue metadata updates MERGE — cancel must null the key explicitly.
+  assert.match(schedSrc, /writeAccountDeletionKey\(userId, null\)/, "cancel must explicitly null the key (merge semantics)");
+
+  // Purge fails CLOSED before the irreversible auth-user delete.
+  const purgeSrc = read("src", "lib", "account", "purge.ts");
+  assert.match(purgeSrc, /POINT OF NO RETURN/, "purge must gate the auth delete on sweep success");
+  assert.match(purgeSrc, /sweepFailures\.length > 0/, "failed sweeps must abort before the auth delete");
+  assert.match(purgeSrc, /guardedAdminConfig/, "purge must use the project-guarded admin config");
+  assert.match(purgeSrc, /offset=\$\{page \* PATH_PAGE_SIZE\}/, "storage path collection must paginate");
+
+  // The cron re-reads the schedule right before purging (cancel race).
+  const cronSrc = read("app", "api", "cron", "finalize-account-deletions", "route.ts");
+  assert.match(cronSrc, /getAccountDeletion\(p\.userId\)/, "cron must re-read the schedule before purging");
+  assert.match(cronSrc, /schedule canceled or changed mid-run/, "cron must skip a mid-run cancel");
+
+  // Emailed links build from env config only — never the request origin
+  // (Host-header manipulation would exfiltrate the signed token).
+  const orchestratorSrc = read("src", "lib", "intent", "orchestrator.ts");
+  assert.match(orchestratorSrc, /function accountAppOrigin\(\): string/, "emailed-link origin takes no request input");
+
+  // Cancel is POST-only state change; GET renders a form (scanner-immune).
+  const cancelSrc = read("app", "api", "account", "cancel-deletion", "route.ts");
+  assert.match(cancelSrc, /export async function POST/, "cancel must expose POST");
+  assert.match(cancelSrc, /method="POST"/, "GET must render the one-button form");
+  const getBody = cancelSrc.slice(cancelSrc.indexOf("export async function GET"), cancelSrc.indexOf("export async function POST"));
+  assert.doesNotMatch(getBody, /cancelAccountDeletion/, "GET must be render-only — scanners GET every emailed link");
+
+  // The confirm window is one-shot: consumed the moment the next user
+  // utterance rides it, no matter what that utterance was.
+  const ctxSrc = read("src", "liveavatar", "context.tsx");
+  assert.match(
+    ctxSrc,
+    /pendingAddOfferRef\.current = null;[\s\S]{0,700}pendingAccountDeleteConfirmRef\.current = null;/,
+    "confirm window must die with the turn that carried it",
+  );
+
+  // Export completeness: the email-keyed table is really gathered and
+  // its token hash never leaves the server.
+  const exportSrc = read("src", "lib", "account", "exportData.ts");
+  assert.match(exportSrc, /payload\.data\.account_email_links = await fetchTableRows/, "account_email_links must be gathered by email");
+  // The SELECT column list is the enforcement point — token_hash must
+  // never be among the selected columns.
+  assert.doesNotMatch(exportSrc, /account_email_links: "[^"]*token_hash[^"]*"/, "token_hash must not be selected for export");
+  assert.match(exportSrc, /crew_requests: "requester_user_id"/, "crew_requests needs its real filter column");
+  assert.match(exportSrc, /contractor_claim_attempts: "attempted_by_user_id"/, "claim attempts need their real filter column");
+});
+
+test("one-list doctrine: export gathers exactly what purge covers", () => {
+  const inv = require("../.test-dist/lib/account/dataInventory.js");
+  assert.deepEqual(
+    [...inv.EXPORT_TABLES].sort(),
+    [...inv.CASCADE_TABLES, ...inv.EXPLICIT_PURGE_TABLES].sort(),
+    "EXPORT_TABLES must equal CASCADE + EXPLICIT purge coverage",
+  );
+  assert.ok(inv.EXPORT_TABLES.includes("transcripts"), "transcripts are promised in Privacy §5 — must export");
+  assert.ok(inv.EXPORT_TABLES.includes("conversation_messages"), "the legacy session feed must export too");
+  assert.ok(inv.EXPLICIT_PURGE_TABLES.includes("contact_entities"), "SET-NULL PII tables need the explicit purge");
+  assert.ok(inv.EXPLICIT_PURGE_TABLES.includes("notifications_sent"), "notifications_sent carries recipient PII");
+});
+
+test("export renders: chooser shows NO data; injected context never exports", () => {
+  const exp = require("../.test-dist/lib/account/exportData.js");
+  const chooser = exp.renderChooserHtml("user@example.com");
+  assert.match(chooser, /id="profile" checked/, "profile box defaults ON");
+  assert.match(chooser, /id="history"(?! checked)/, "history box defaults OFF (opt-in)");
+  assert.doesNotMatch(chooser, /WHAT 6 REMEMBERS/i, "chooser must never render export content");
+
+  const payload = {
+    export_format: "iSolveUrProblems-user-data-v1",
+    exported_at: "2026-07-08T12:00:00.000Z",
+    account: { user_id: "u1", email: "user@example.com" },
+    data: {
+      users: [{ full_name: "Test User", email: "user@example.com", phone: null }],
+      user_memory_facts: [{ content: "prefers morning appointments", created_at: "2026-07-01" }],
+      transcripts: [
+        { speaker: "user", text: "hello there", created_at: "2026-07-01T10:00:00Z" },
+        { speaker: "user", text: "[FIND — not spoken by user] machine line", created_at: "2026-07-01T10:01:00Z" },
+      ],
+    },
+  };
+  const profile = exp.renderProfileText(payload);
+  assert.match(profile, /prefers morning appointments/, "memory facts render in the profile file");
+  const history = exp.renderHistoryText(payload);
+  assert.match(history, /hello there/, "real turns render in history");
+  assert.doesNotMatch(history, /machine line/, "machine-injected context lines never export");
+  const nothing = exp.buildExportFile(payload, { profile: false, history: false });
+  assert.match(nothing, /Nothing was selected/, "empty selection downloads an honest empty file");
+});
+
+test("no early delete EXISTS: purge is cron-only, no delete-now anywhere", () => {
+  const read = (...p) => fs.readFileSync(path.join(__dirname, "..", ...p), "utf8");
+
+  // The route aiASAP got wrong must not exist here in any form.
+  assert.equal(
+    fs.existsSync(path.join(__dirname, "..", "app", "api", "account", "delete-now")),
+    false,
+    "a delete-now route must never exist",
+  );
+  // The type union is the load-bearing invariant: "cancel" is the ONLY
+  // action an email link can carry (the file's comments may NAME the
+  // banned pattern while explaining why it's banned — that's fine).
+  const tokensSrc = read("src", "lib", "account", "tokens.ts");
+  assert.match(tokensSrc, /export type AccountAction = "cancel";/, "cancel is the ONLY email-link action");
+
+  // purgeUserAccount is callable from exactly one place: the daily cron.
+  const cronSrc = read("app", "api", "cron", "finalize-account-deletions", "route.ts");
+  assert.match(cronSrc, /purgeUserAccount/, "the cron is the purge caller");
+  assert.match(cronSrc, /verifyAdminBearer/, "cron must gate on CRON_SECRET bearer");
+  assert.match(cronSrc, /CRON_SECRET not configured/, "cron must 503 without its secret");
+  assert.match(cronSrc, /hasOpenDispute/, "purge must defer on a live dispute (Privacy §12)");
+  const orchestratorSrc = read("src", "lib", "intent", "orchestrator.ts");
+  assert.doesNotMatch(orchestratorSrc, /purgeUserAccount/, "no voice path may reach the purge");
+  const downloadSrc = read("app", "api", "account", "download", "route.ts");
+  const cancelSrc = read("app", "api", "account", "cancel-deletion", "route.ts");
+  assert.doesNotMatch(downloadSrc, /purgeUserAccount|scheduleAccountDeletion/, "the download link can never delete");
+  assert.doesNotMatch(cancelSrc, /purgeUserAccount/, "the cancel link can never delete");
+  assert.match(cancelSrc, /verifyActionToken\(token, "cancel"\)/, "cancel route verifies the cancel-bound token");
+
+  // The 5th cron is registered at the repo root.
+  const vercelJson = fs.readFileSync(path.join(__dirname, "..", "..", "..", "vercel.json"), "utf8");
+  assert.match(vercelJson, /\/api\/cron\/finalize-account-deletions/, "finalizer cron must be registered in vercel.json");
+
+  // All five lifecycle templates are registered.
+  const registrySrc = read("src", "lib", "notifications", "templates", "index.ts");
+  for (const id of [
+    "export.ready.v1",
+    "account.deletion.scheduled.v1",
+    "account.deletion.week.v1",
+    "account.deletion.day.v1",
+    "account.deletion.done.v1",
+  ]) {
+    assert.ok(registrySrc.includes(`"${id}"`), `${id} must be registered`);
+  }
+});
+
+test("account-delete confirm window plumbing exists end to end", () => {
+  const read = (...p) => fs.readFileSync(path.join(__dirname, "..", ...p), "utf8");
+  const ctxSrc = read("src", "liveavatar", "context.tsx");
+  assert.match(ctxSrc, /pendingAccountDeleteConfirmRef/, "client must hold the confirm window ref");
+  assert.match(ctxSrc, /orch\.pending\?\.kind === "account_delete_confirm"/, "client must arm the window from orch.pending");
+  assert.match(ctxSrc, /PENDING_ACCOUNT_DELETE_TTL_MS/, "the window must expire on its own");
+  assert.match(
+    ctxSrc,
+    /pendingAccountDeleteConfirmRef\.current &&\s*\n\s*\/\^\\s\*\(\?:no\|nope/,
+    "a spoken 'no' must kill the window client-side the same turn",
+  );
+  const appendSrc = read("app", "api", "transcripts", "append", "route.ts");
+  assert.match(appendSrc, /pendingAccountDeleteConfirm: r\.pendingAccountDeleteConfirm === true/, "append route must parse the flag strictly");
+  const orchestratorSrc = read("src", "lib", "intent", "orchestrator.ts");
+  assert.match(orchestratorSrc, /pendingAccountDeleteConfirm:\s*\n?\s*input\.currentSurface\?\.pendingAccountDeleteConfirm \?\? null/, "orchestrator must thread the flag into classify ctx");
+  assert.match(orchestratorSrc, /kind: "account_delete_confirm"/, "orchestrator must emit the pending window");
+});

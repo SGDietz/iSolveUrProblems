@@ -14,6 +14,13 @@ import crewFilledTemplate from "./crew-filled";
 import contractorUrgentDispatchTemplate from "./contractor-urgent-dispatch";
 import adminDisputeEscalationTemplate from "./admin-dispute-escalation";
 import homeownerContractorIntroTemplate from "./homeowner-contractor-intro";
+import exportReadyTemplate from "./export-ready";
+import {
+  accountDeletionScheduledTemplate,
+  accountDeletionWeekTemplate,
+  accountDeletionDayTemplate,
+  accountDeletionDoneTemplate,
+} from "./account-deletion";
 
 /**
  * Local-in-code template registry (Q1.7a).
@@ -49,6 +56,15 @@ const REGISTRY: Record<string, NotificationTemplate<never>> = {
     adminDisputeEscalationTemplate as NotificationTemplate<never>,
   "homeowner.contractor_intro.v1":
     homeownerContractorIntroTemplate as NotificationTemplate<never>,
+  "export.ready.v1": exportReadyTemplate as NotificationTemplate<never>,
+  "account.deletion.scheduled.v1":
+    accountDeletionScheduledTemplate as NotificationTemplate<never>,
+  "account.deletion.week.v1":
+    accountDeletionWeekTemplate as NotificationTemplate<never>,
+  "account.deletion.day.v1":
+    accountDeletionDayTemplate as NotificationTemplate<never>,
+  "account.deletion.done.v1":
+    accountDeletionDoneTemplate as NotificationTemplate<never>,
 };
 
 export function getTemplate(id: string): NotificationTemplate<never> | null {

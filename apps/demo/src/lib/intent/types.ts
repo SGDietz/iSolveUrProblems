@@ -46,7 +46,11 @@ export type IntentKind =
   | "view_lists"
   | "schedule_recurring"
   | "report_no_show"
-  | "go_between_mode";
+  | "go_between_mode"
+  | "unsubscribe_channel"
+  | "export_data"
+  | "delete_account"
+  | "cancel_account_deletion";
 
 /** A reference to a specific contractor in conversation context. */
 export type ContractorRef =
@@ -140,6 +144,13 @@ export type IntentSlots = {
     schedule: import("../recurring").RecurringSchedule;
     matched_phrase: string;
   };
+  /** For unsubscribe_channel — which channel the user wants to stop.
+   * Defaults to "email" when the user doesn't name one ("unsubscribe me"). */
+  unsubscribe_channel?: "email" | "sms" | "whatsapp";
+  /** For delete_account — true only on the CONFIRM turn ("yes, I'm sure"
+   * while 6's are-you-sure window is armed). The request turn never
+   * writes anything; only a confirmed turn schedules the 30-day clock. */
+  account_delete_confirmed?: boolean;
 };
 
 /** Confidence buckets — chosen at classify time, used by orchestrator. */
@@ -192,4 +203,11 @@ export type ClassifyContext = {
    * relaxed pending-answer splitter. Herm TASK_094 blocker #2).
    */
   pendingListAdd?: { listName?: string | null } | null;
+  /**
+   * Set when 6 just asked "are you sure?" about deleting the account
+   * (the delete_account request turn). Only while this is armed can a
+   * whole-utterance affirmative confirm the deletion — a stray "yes" in
+   * normal conversation can never start the 30-day clock.
+   */
+  pendingAccountDeleteConfirm?: boolean | null;
 };

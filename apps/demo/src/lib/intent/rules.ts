@@ -117,7 +117,11 @@ type Rule = {
     | "view_lists"
     | "schedule_recurring"
     | "report_no_show"
-    | "go_between_mode";
+    | "go_between_mode"
+    | "unsubscribe_channel"
+    | "export_data"
+    | "delete_account"
+    | "cancel_account_deletion";
   /** Required slot keys — if any are missing the result is "medium". */
   required: Array<keyof IntentSlots>;
 };
@@ -351,6 +355,99 @@ function extractMakeListItems(text: string): string | undefined {
   return tail;
 }
 
+// Voice/text unsubscribe (G 2026-07-08: "build the unsubscribe, that will
+// be through voice and 6"). Anchored on explicit stop/unsubscribe phrasing
+// so it never fires on ordinary conversation ("I don't want to email him" —
+// no "me" — doesn't match). Channel word is optional; defaults to email.
+const UNSUBSCRIBE_RE =
+  /\b(?:please\s+)?(?:stop|quit|don'?t)\s+(?:emailing|texting|sms(?:ing)?|whatsapp(?:ing)?|messaging)\s+me\b|\bunsubscribe\s+me\b|\b(?:take|remove)\s+(?:me|my\s+account|my\s+email)\s+(?:off|from|out\s+of)\s+(?:your|the)\s+(?:email\s+|e-?mail\s+|text\s+|sms\s+|whatsapp\s+)?(?:mailing\s+)?list\b|\bno\s+more\s+(?:emails|texts|text\s+messages|sms|whatsapp\s+messages)\s+(?:please|from\s+you)?\b/i;
+
+function extractUnsubscribeChannel(t: string): "email" | "sms" | "whatsapp" {
+  // Prefix match (no trailing \b) — "whatsapping"/"whatsapped" run the
+  // suffix straight into the word with no boundary for \bwhatsapp\b to
+  // find (caught by the sms/whatsapp release test 2026-07-08).
+  if (/\bwhatsapp/i.test(t)) return "whatsapp";
+  if (/\b(?:text|texting|texts|sms)\b/i.test(t)) return "sms";
+  return "email";
+}
+
+// ─── ACCOUNT DATA RIGHTS — export + 30-day deletion (spec locked
+// 2026-07-08). The voice trigger is rebuilt from aiASAP's two REAL
+// production false-positive bugs, fixed by design instead of patched
+// after an incident:
+//   bug 1 — third-person/coaching talk fired a real deletion ("they
+//           want to close their account", "you should say delete my
+//           account to close it") → the verb must take MY account as
+//           its object, and quoted/coached phrasing bails on a
+//           speech-verb guard.
+//   bug 2 — unrelated on-screen UI text containing "remove" armed a
+//           deletion ("remove signed in as sgd@pm.me") → no bare
+//           keyword matching; screen/panel talk bails outright.
+
+// "download/export/send me/email me my data", "get a copy of my data".
+// "(?!\s+(?:plan|to\b))" keeps "send my data plan details" and
+// contact-sharing asks ("send my information to John") normal sentences.
+const EXPORT_DATA_RE =
+  /\b(?:download|export|send|email|get|give)\s+(?:me\s+)?(?:a\s+copy\s+of\s+)?(?:all\s+(?:of\s+)?)?my\s+(?:isolve\s+)?(?:data|information)\b(?!\s+(?:plan|to\b))|\b(?:i\s+(?:want|need|would\s+like)|i'?d\s+like)\s+a\s+copy\s+of\s+my\s+(?:data|information)\b/i;
+
+// The core command: a delete-verb whose OBJECT is "my account".
+// First-person anchored — "their/his/her/your account" never matches.
+const DELETE_ACCOUNT_CORE_RE =
+  /\b(?:delete|close(?:\s+down)?|cancel|remove|erase|deactivate|terminate|shut\s+down|get\s+rid\s+of)\s+my\s+(?:whole\s+|entire\s+)?(?:isolve\s+)?account\b(?!\s*(?:panel|page|screen|settings|button))/i;
+
+// Protective direction — "don't delete my account" must never arm a
+// deletion (the cancel rule below claims these forms instead). Bare
+// "stop" deliberately NOT here: "stop and delete my account" is a real
+// command; "stop the deletion" belongs to the cancel rule.
+const DELETE_NEGATION_RE =
+  /\b(?:don'?t|do\s+not|never|won'?t|wouldn'?t|not\s+going\s+to)\s+(?:\w+\s+){0,2}?(?:delete|close|cancel|remove|erase|deactivate|terminate)\b/i;
+
+// aiASAP bug 1, quoted/coached shape: a speech verb within a clause of
+// the command means the user is talking ABOUT it, not giving it.
+const DELETE_COACHING_RE =
+  /\b(?:say|says|saying|said|tell|telling|told|type|typing|typed|write|writing|wrote|ask|asking|asked)\b[^.?!]{0,40}\b(?:delete|close|cancel|remove|erase|deactivate|terminate)\s+my\s+(?:isolve\s+)?account\b/i;
+
+// "how do I delete my account?" / "what happens if I close my account?"
+// / "what if I were to close it?" are questions — the brain explains the
+// flow (the CW documents it); they must not START it.
+const DELETE_HOWTO_RE =
+  /\b(?:how\s+(?:do|can|could|would|to)|what\s+(?:happens|would\s+happen)\s+(?:if|when)|what\s+if|if\s+i\s+(?:were|was)\s+to)\b/i;
+
+// aiASAP bug 2: screen/panel talk is a UI ask, never a deletion.
+const DELETE_SCREEN_RE = /\b(?:from|off)\s+(?:the\s+)?screen\b|\b(?:panel|surface)\b/i;
+
+// "remove my account from your mailing list" is an UNSUBSCRIBE, not a
+// deletion — the list-talk guard bails here and the (extended)
+// unsubscribe regex below claims it.
+const DELETE_LIST_TALK_RE =
+  /\b(?:mailing|email|e-?mail|text|sms|whatsapp|contact|subscriber)\s+list\b/i;
+
+function isDeleteAccountCommand(t: string): boolean {
+  if (!DELETE_ACCOUNT_CORE_RE.test(t)) return false;
+  if (DELETE_NEGATION_RE.test(t)) return false;
+  if (DELETE_COACHING_RE.test(t)) return false;
+  if (DELETE_HOWTO_RE.test(t)) return false;
+  if (DELETE_SCREEN_RE.test(t)) return false;
+  if (DELETE_LIST_TALK_RE.test(t)) return false;
+  return true;
+}
+
+// "cancel the deletion", "keep my account", "don't delete my account",
+// "I changed my mind about closing my account" — always the safe
+// direction. changed-my-mind requires the account/it object so "changed
+// my mind about closing the garage door" stays a normal sentence.
+const CANCEL_DELETION_RE =
+  /\b(?:cancel|stop|call\s+off|undo)\s+(?:the\s+|my\s+|that\s+)?(?:account\s+)?deletion\b|\bkeep\s+my\s+account\b(?!\s+list)|\b(?:don'?t|do\s+not|never|please\s+don'?t)\s+(?:delete|close|erase|remove)\s+my\s+account\b|\bi\s+changed?\s+my\s+mind\s+about\s+(?:deleting|closing)\s+(?:my\s+|the\s+)?(?:isolve\s+)?(?:account|it)\b/i;
+
+// Whole-utterance affirmative for 6's are-you-sure window. Anchored
+// ^…$ so "yes, but wait" or a "yes" buried mid-sentence never confirms.
+// The set covers the real spoken answers ("sure", "okay", "yes yes",
+// "yeah do it") — a missed affirmative here is its own bug class: 6
+// hears yes, no rule fires, and the brain may narrate a deletion that
+// was never written.
+const DELETE_CONFIRM_YES_RE =
+  /^\s*(?:(?:yes|yeah|yep|yup|sure|okay|ok|absolutely|definitely|positive|correct|affirmative|confirm(?:ed)?|i'?m\s+sure|i\s+am\s+sure|do\s+it|go\s+ahead)[,.!\s]*)+(?:please|i'?m\s+sure|i\s+am\s+sure|do\s+it|go\s+ahead|delete\s+(?:it|my\s+account)|close\s+(?:it|my\s+account))?\s*[.!?]*\s*$/i;
+
 const RULES: readonly Rule[] = [
   // ─── VOICE DISMISS ────────────────────────────────────────────────
   // Must beat onboarding/list/find so "take this contractor signup down"
@@ -362,6 +459,62 @@ const RULES: readonly Rule[] = [
     match: (t) => DISMISS_SURFACE_RE.test(t),
     build: () => ({}),
     kind: "dismiss_surface",
+    required: [],
+  },
+  // ─── ACCOUNT DATA RIGHTS (2026-07-08 spec) ────────────────────────
+  // All four sit up here, ABOVE unsubscribe: account-level commands must
+  // beat find.bare_category ("delete my account, the plumbing thing
+  // didn't work out" contains a trade word) and every list/todo rule —
+  // and a mixed "delete my account and stop emailing me" is a deletion
+  // ask first (the list-talk guard hands pure unsubscribe phrasings like
+  // "remove my account from your mailing list" down to unsubscribe).
+  // Order within the block matters — the protective cancel claims its
+  // phrases FIRST so "don't delete my account" can never arm a deletion.
+  {
+    id: "account.delete_cancel",
+    match: (t) => CANCEL_DELETION_RE.test(t),
+    build: () => ({}),
+    kind: "cancel_account_deletion",
+    required: [],
+  },
+  // The are-you-sure answer. DOUBLE-GATED: only fires while the client
+  // echoes the one-shot confirm window 6 just opened (ctx flag), and
+  // only on a whole-utterance affirmative (or the user repeating the
+  // full delete command). A stray "yes" in normal conversation can
+  // never reach this — the ctx flag isn't armed.
+  {
+    id: "account.delete_confirm",
+    match: (t, ctx) =>
+      Boolean(ctx.pendingAccountDeleteConfirm) &&
+      (DELETE_CONFIRM_YES_RE.test(t) || isDeleteAccountCommand(t)),
+    build: () => ({ account_delete_confirmed: true }),
+    kind: "delete_account",
+    required: [],
+  },
+  // The initial ask. Writes NOTHING — the handler only opens 6's
+  // are-you-sure window; the 30-day clock starts on the confirm turn.
+  {
+    id: "account.delete_request",
+    match: (t) => isDeleteAccountCommand(t),
+    build: () => ({}),
+    kind: "delete_account",
+    required: [],
+  },
+  {
+    id: "account.export_data",
+    match: (t) => EXPORT_DATA_RE.test(t),
+    build: () => ({}),
+    kind: "export_data",
+    required: [],
+  },
+  // ─── UNSUBSCRIBE (voice path — mirrors the one-click email link) ──
+  // Must beat find_contractor / bare_category so "stop emailing me about
+  // the leak" reads as an unsubscribe, not a plumbing search.
+  {
+    id: "account.unsubscribe",
+    match: (t) => UNSUBSCRIBE_RE.test(t),
+    build: (t) => ({ unsubscribe_channel: extractUnsubscribeChannel(t) }),
+    kind: "unsubscribe_channel",
     required: [],
   },
   // ─── CONTRACTOR ONBOARDING (SUPPLY SIDE) ──────────────────────────
